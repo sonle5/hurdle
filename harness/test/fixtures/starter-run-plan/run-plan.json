@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "target": {
+    "id": "starter-target",
+    "displayName": "Starter Target"
+  },
+  "credentialRequirements": {},
+  "conditions": {
+    "default": {
+      "displayName": "Default"
+    }
+  },
+  "tasks": {
+    "copy-message": {
+      "prompt": "Read `fixtures/message.txt` and write its exact contents to `answer.txt`.",
+      "fixtures": [
+        {
+          "source": "fixtures/message.txt",
+          "workspacePath": "fixtures/message.txt"
+        }
+      ],
+      "outputArtifacts": [
+        {
+          "path": "answer.txt",
+          "kind": "text",
+          "maxBytes": 4096,
+          "required": true
+        }
+      ],
+      "credentialRequirements": [],
+      "evaluation": {
+        "deterministicEvaluator": "evaluators/exact-copy.mjs"
+      }
+    }
+  }
+}

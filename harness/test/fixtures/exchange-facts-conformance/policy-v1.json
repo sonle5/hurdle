@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "generic-json-exchange",
+      "match": {
+        "method": "POST",
+        "paths": [
+          "/v1/exchanges"
+        ],
+        "statusCodes": [
+          200
+        ]
+      },
+      "requestJson": [
+        {
+          "id": "item-identifiers",
+          "pointer": "/messages/*/item_id",
+          "maxMatches": 8,
+          "projection": {
+            "kind": "sha256-string",
+            "maxInputBytes": 256
+          }
+        }
+      ],
+      "responseJson": [
+        {
+          "id": "item-count",
+          "pointer": "/choices/0/items",
+          "projection": {
+            "kind": "count",
+            "maxItems": 8
+          }
+        },
+        {
+          "id": "items-present",
+          "pointer": "/choices/0/items",
+          "projection": {
+            "kind": "present"
+          }
+        }
+      ]
+    }
+  ],
+  "expectedPolicyFingerprint": "sha256:470a14c2cc8f4e81f67265c938241a513746a6b32c871bc5b7accc884206fbea",
+  "projectionCases": [
+    {
+      "id": "present-count-and-exact-string-digest",
+      "requestJson": {
+        "messages": [
+          {
+            "item_id": "item-123"
+          }
+        ]
+      },
+      "responseJson": {
+        "choices": [
+          {
+            "items": [
+              {},
+              {}
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "request": {
+          "item-identifiers": {
+            "state": "present",
+            "matches": [
+              {
+                "pointer": "/messages/0/item_id",
+                "value": "sha256:a9a4cb8aa43b9b3f82ae65da5876149fb0d7d46664158ef6fd409157b3b0e08e"
+              }
+            ]
+          }
+        },
+        "response": {
+          "item-count": {
+            "state": "present",
+            "matches": [
+              {
+                "pointer": "/choices/0/items",
+                "value": 2
+              }
+            ]
+          },
+          "items-present": {
+            "state": "present",
+            "matches": [
+              {
+                "pointer": "/choices/0/items",
+                "value": true
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

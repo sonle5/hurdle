@@ -1,0 +1,1 @@
+Generate a sample image with Flux Schnell on Together AI, then write and run a benchmarking script that compares the latency for Together AI vision models, asking each to describe the image. Then take the first description and generate a video using it as an input prompt.

@@ -1,0 +1,1 @@
+Build a CLI tool that demonstrates three Together AI capabilities: (1) chat completion — send a message and print the response, (2) image generation — generate an image and save it to disk, (3) audio transcription — transcribe the audio file at `harness/fixtures/sample-audio.wav` (relative to the repo root) with Whisper. Run each one and print the results.

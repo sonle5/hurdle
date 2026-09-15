@@ -1,0 +1,755 @@
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { stripVTControlCharacters } from "node:util";
+
+import { createFrameworkCli } from "../bin/tae.mjs";
+import { createE2BExecutionEnvironment } from "../lib/execution-environments/e2b.mjs";
+import { reportExecutionProgress } from "../lib/execution-progress.mjs";
+import { resolveV1Suite } from "../lib/v1-authoring.mjs";
+
+function writeJudgePack(root, model = "judge-model", verdict = "hybrid") {
+  mkdirSync(join(root, "tasks", "sample"), { recursive: true });
+  writeFileSync(join(root, "tasks", "sample", "prompt.md"), "Write the answer.");
+  writeFileSync(join(root, "tasks", "sample", "checks.mjs"),
+    'import { defineChecks } from "tae";\nexport default defineChecks(run => { run.check({id:"exact",passed:true,summary:"ok"});'
+    + (verdict === "code" ? "" : 'run.judge("Pass only when the evidence proves the answer.");') + ' });\n');
+  writeFileSync(join(root, "example.suite.mjs"), 'import { defineSuite } from "tae";\nexport default defineSuite(' + JSON.stringify({
+    tasks: ["./tasks/sample"],
+    agents: [{ runner: "claude-code" }, { runner: "codex" }],
+    conditions: { baseline: { skills: [], mcpServers: [] } },
+    repeats: 1,
+    verdict,
+    ...(verdict === "code" ? {} : { judge: { model } }),
+  }) + ');\n');
+}
+
+function io(cwd) {
+  let stdout = "";
+  let stderr = "";
+  return {
+    cwd,
+    stdout: { write(value) { stdout += value; } },
+    stderr: { write(value) { stderr += value; } },
+    read() { return { stdout, stderr }; },
+  };
+}
+
+function ttyIo(cwd) {
+  const streams = io(cwd);
+  streams.stderr.isTTY = true;
+  return streams;
+}
+
+function completedResult() {
+  return {
+    status: "completed",
+    summary: {
+      plannedCells: 1,
+      plannedRepeats: 1,
+      attempts: 1,
+      retriesPerformed: 0,
+      terminalVerdicts: { pass: 1, fail: 0, incomplete: 0, unknown: 0 },
+      authorityCoverage: {
+        recordedRuns: 1,
+        totalRuns: 1,
+        judgeCompletedRuns: 1,
+        judgeRequiredRuns: 1,
+        agreements: 1,
+        comparableRuns: 1,
+        disagreements: 0,
+      },
+      nonPasses: [],
+      omittedNonPasses: 0,
+    },
+  };
+}
+
+test("tae run displays live cell progress in terminals and stable lines in logs", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const root = mkdtempSync(join(tmpdir(), "tae-cli-progress-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeJudgePack(root, "unused", "code");
+  for (const isTTY of [true, false]) {
+    const streams = isTTY ? ttyIo(root) : io(root);
+    const output = () => stripVTControlCharacters(streams.read().stderr + streams.read().stdout);
+    const events = [];
+    const cli = createFrameworkCli({
+      env: {},
+      processTarget: new EventEmitter(),
+      async openLocalResultStore() { return {}; },
+      createAgentAdapter() { return {}; },
+      createLocalExecutionEnvironment() { return {}; },
+      executionProgressObserver: { observe(event) {
+        events.push(event);
+        throw new Error("Observer failure must not affect execution");
+      } },
+      createRunEngine({ progressObserver }) {
+        assert.match(output(), /Preparing evaluations/);
+        return { async run() {
+          reportExecutionProgress(progressObserver, { kind: "matrix-ready", total: 2 });
+          for (const [index, adapterId] of ["claude-code", "codex"].entries()) {
+            const cell = { ordinal: index + 1, total: 2, taskId: "sample", conditionId: "baseline", adapterId, repeatOrdinal: 1, repeatTotal: 1 };
+            reportExecutionProgress(progressObserver, { kind: "cell-started", cell, secret: "must-not-display" });
+            assert.ok(output().includes(`[${index + 1}/2] sample · baseline`), "progress must appear before the run returns");
+            assert.match(output(), /Evaluating/);
+            t.mock.timers.tick(160);
+            reportExecutionProgress(progressObserver, {
+              kind: "cell-completed", cell,
+              terminal: {
+                id: `run_${index}`,
+                verdict: index === 0 ? "pass" : "incomplete",
+                runTrustReasons: [{
+                  code: "environment.nonzero-exit",
+                  summary: "Claude Code could not run because the Anthropic credit balance is too low.",
+                }],
+                verdictReasons: [{
+                  code: "check.artifact-schema",
+                  summary: "rag_results.json was unavailable.",
+                }],
+              },
+            });
+            if (index === 1) assert.match(
+              output(),
+              /incomplete[^\n]*\n  environment\.nonzero-exit: Claude Code could not run because the Anthropic credit balance is too low\.\n  check\.artifact-schema: rag_results\.json was unavailable\./,
+            );
+          }
+          const result = completedResult();
+          result.summary.plannedCells = result.summary.plannedRepeats = result.summary.attempts = 2;
+          result.summary.terminalVerdicts.incomplete = 1;
+          result.summary.nonPasses = [{
+            id: "run_1", snapshotFingerprint: "sha256:example", verdict: "incomplete", invocation: { repeatOrdinal: 1 },
+            runTrustReasons: [{ code: "environment.nonzero-exit", summary: "Claude Code could not run because the Anthropic credit balance is too low." }],
+            verdictReasons: [{ code: "check.artifact-schema", summary: "rag_results.json was unavailable." }],
+          }];
+          return result;
+        } };
+      },
+    });
+    assert.equal(await cli.main(["run", "example.suite.mjs"], streams), 1);
+    assert.match(output(), /✓ \[1\/2\] sample · baseline · Claude Code · pass/);
+    assert.match(output(), /! \[2\/2\] sample · baseline · Codex · incomplete/);
+    assert.equal(output().match(/environment\.nonzero-exit/g)?.length, 1, "passing cells omit reasons and the summary does not duplicate live reasons");
+    assert.doesNotMatch(output(), /must-not-display|Observer failure/);
+    assert.equal(events.length, 5, "the existing observer still receives every event");
+    if (!isTTY) {
+      assert.equal(streams.read().stderr, "");
+      assert.doesNotMatch(streams.read().stdout, /\u001b|\r|[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+    }
+    const stopped = streams.read();
+    t.mock.timers.tick(1000);
+    assert.deepEqual(streams.read(), stopped, "no spinner survives completion");
+  }
+});
+
+test("tae run stops its startup spinner when the Result Store cannot open", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const root = mkdtempSync(join(tmpdir(), "tae-store-progress-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeJudgePack(root, "unused", "code");
+  const streams = ttyIo(root);
+  const cli = createFrameworkCli({
+    env: {},
+    async openLocalResultStore() { throw new Error("private-store-error"); },
+  });
+  assert.equal(await cli.main(["run", "example.suite.mjs"], streams), 1);
+  assert.match(streams.read().stderr, /Opening result store/);
+  assert.match(streams.read().stderr, /store-unavailable/);
+  assert.doesNotMatch(streams.read().stderr, /private-store-error/);
+  const stopped = streams.read();
+  t.mock.timers.tick(1000);
+  assert.deepEqual(streams.read(), stopped);
+});
+
+test("E2B template placeholders are rejected before execution or Judge requests", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-placeholder-preflight-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeJudgePack(root);
+  for (const key of ["workloadTemplate", "guardianTemplate"]) {
+    writeFileSync(join(root, "runtime.json"), JSON.stringify({
+      schemaVersion: 1,
+      environment: { kind: "e2b", apiKeyEnv: "E2B_API_KEY", settings: { [key]: "REPLACE_WITH_CALLER_OWNED_CLAUDE_E2B_TEMPLATE" } },
+      resultStore: { kind: "local", root: "results" },
+      judge: { kind: "anthropic-json-v1", model: "judge-model", credentialEnv: "ANTHROPIC_API_KEY" },
+    }));
+    let executions = 0, judgeCalls = 0;
+    const cli = createFrameworkCli({
+      env: { E2B_API_KEY: "test-e2b-key", ANTHROPIC_API_KEY: "test-judge-key" },
+      processTarget: new EventEmitter(),
+      assertRuntimeDependencies() {},
+      createE2BExecutionEnvironment(input) {
+        return { ...createE2BExecutionEnvironment(input), async execute() { executions++; throw new Error("must not execute"); } };
+      },
+      createAnthropicJsonJudge() {
+        return { id: "anthropic-json-v1", model: "judge-model", inputSchemaVersions: [2], maxTimeoutMs: 120_000,
+          async judge() { judgeCalls++; throw new Error("must not judge"); } };
+      },
+    });
+    const streams = ttyIo(root);
+    assert.equal(await cli.main(["run", "example.suite.mjs", "--runtime", "runtime.json", "--agent", "claude-code"], streams), 2);
+    assert.match(streams.read().stderr, new RegExp(`E2B ${key} is an example placeholder.*valid template`));
+    assert.equal(executions, 0);
+    assert.equal(judgeCalls, 0);
+    assert.doesNotMatch(JSON.stringify(streams.read()), /test-e2b-key|test-judge-key/);
+  }
+});
+
+test("tae run preflights authority before resolving secrets or opening Postgres", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-runtime-mismatch-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeJudgePack(root, "required-model");
+  writeFileSync(join(root, "runtime.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    environment: {
+      kind: "e2b",
+      apiKeyEnv: "TEST_E2B_KEY",
+      settings: { workloadTemplate: "controlled-e2b:v1" },
+    },
+    resultStore: {
+      kind: "postgres",
+      databaseUrlEnv: "TEST_DATABASE_URL",
+      artifactRoot: "artifacts",
+    },
+    judge: {
+      kind: "anthropic-json-v1",
+      model: "wrong-model",
+      credentialEnv: "TEST_JUDGE_KEY",
+    },
+  })}\n`);
+  let secretRead = false;
+  let storeOpened = false;
+  const env = new Proxy({}, {
+    get(_target, name) {
+      if (name === "TEST_DATABASE_URL" || name === "TEST_JUDGE_KEY") secretRead = true;
+      return undefined;
+    },
+  });
+  const cli = createFrameworkCli({
+    env,
+    async openPostgresResultStore() { storeOpened = true; throw new Error("must not open"); },
+  });
+  const streams = io(root);
+
+  const exit = await cli.main([
+    "run",
+    "example.suite.mjs",
+    "--runtime",
+    "runtime.json",
+  ], streams);
+
+  assert.equal(exit, 1);
+  assert.equal(secretRead, false);
+  assert.equal(storeOpened, false);
+  assert.match(streams.read().stderr, /authority\.judge-capability-mismatch/);
+});
+
+test("tae run composes Postgres sidecar and the required Judge after preflight", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-runtime-postgres-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeJudgePack(root);
+  const runtimePath = join(root, "config", "runtime.json");
+  mkdirSync(join(root, "config"));
+  writeFileSync(runtimePath, `${JSON.stringify({
+    schemaVersion: 1,
+    environment: { kind: "local" },
+    resultStore: {
+      kind: "postgres",
+      databaseUrlEnv: "TEST_DATABASE_URL",
+      artifactRoot: "../artifacts",
+    },
+    judge: {
+      kind: "anthropic-json-v1",
+      model: "judge-model",
+      credentialEnv: "TEST_JUDGE_KEY",
+    },
+  })}\n`);
+  const calls = [];
+  const store = Object.freeze({ kind: "fake-store" });
+  const judge = Object.freeze({ id: "anthropic-json-v1", model: "judge-model" });
+  const cli = createFrameworkCli({
+    env: {
+      TEST_DATABASE_URL: "postgresql://secret-database",
+      TEST_JUDGE_KEY: "secret-judge-key",
+    },
+    async openPostgresResultStore(input) { calls.push(["open", input]); return store; },
+    async closePostgresResultStore(value) { calls.push(["close", value]); },
+    createAnthropicJsonJudge(input) { calls.push(["judge", input]); return judge; },
+    createRunEngine(input) {
+      calls.push(["engine", input]);
+      return { async run() { return completedResult(); } };
+    },
+  });
+  const streams = io(root);
+
+  const exit = await cli.main([
+    "run",
+    "example.suite.mjs",
+    "--runtime",
+    "config/runtime.json",
+    "--agent",
+    "codex",
+  ], streams);
+
+  assert.equal(exit, 0, streams.read().stderr);
+  assert.deepEqual(calls[0], ["open", {
+    connectionString: "postgresql://secret-database",
+    localArtifactRoot: join(root, "artifacts"),
+  }]);
+  assert.deepEqual(calls[1], ["judge", {
+    model: "judge-model",
+    apiKey: "secret-judge-key",
+  }]);
+  assert.equal(calls[2][0], "engine");
+  assert.equal(calls[2][1].resultStore, store);
+  assert.equal(calls[2][1].judge, judge);
+  assert.deepEqual(calls.at(-1), ["close", store]);
+  assert.doesNotMatch(`${streams.read().stdout}\n${streams.read().stderr}`, /secret/);
+  assert.match(streams.read().stdout, /^  Store\s+Postgres · artifacts artifacts$/m);
+});
+
+test("a configured but disabled Judge does not read credentials or create a provider", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-runtime-disabled-judge-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeJudgePack(root, "judge-model", "code");
+  writeFileSync(join(root, "runtime.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    environment: {
+      kind: "e2b",
+      apiKeyEnv: "TEST_E2B_KEY",
+      settings: { workloadTemplate: "controlled-e2b:v1" },
+    },
+    resultStore: { kind: "local", root: "results" },
+    judge: {
+      kind: "anthropic-json-v1",
+      model: "judge-model",
+      credentialEnv: "MISSING_JUDGE_KEY",
+    },
+  })}\n`);
+  let credentialRead = false;
+  let providerCreated = false;
+  const executionProgressObserver = Object.freeze({ observe() {} });
+  const env = new Proxy({}, {
+    get(_target, name) {
+      if (name === "MISSING_JUDGE_KEY") credentialRead = true;
+      if (name === "TEST_E2B_KEY") return "e2b-secret";
+      return undefined;
+    },
+  });
+  const environment = Object.freeze({ kind: "controlled-e2b" });
+  const cli = createFrameworkCli({
+    env,
+    executionProgressObserver,
+    assertRuntimeDependencies() {},
+    async openLocalResultStore() { return Object.freeze({}); },
+    createE2BExecutionEnvironment(input) {
+      assert.equal(input.apiKey, "e2b-secret");
+      assert.equal(typeof input.progressObserver.observe, "function");
+      return environment;
+    },
+    createAnthropicJsonJudge() { providerCreated = true; throw new Error("must not create"); },
+    createRunEngine(input) {
+      assert.equal("judge" in input, false);
+      assert.equal(input.executionEnvironment, environment);
+      assert.equal(typeof input.progressObserver.observe, "function");
+      return { async run(runInput) {
+        assert.deepEqual(runInput.environmentSettings, {
+          workloadTemplate: "controlled-e2b:v1",
+        });
+        const result = completedResult();
+        result.summary.authorityCoverage.judgeCompletedRuns = 0;
+        result.summary.authorityCoverage.judgeRequiredRuns = 0;
+        result.summary.authorityCoverage.agreements = 0;
+        result.summary.authorityCoverage.comparableRuns = 0;
+        return result;
+      } };
+    },
+  });
+  const streams = io(root);
+
+  const exit = await cli.main(["run", "example.suite.mjs", "--runtime", "runtime.json"], streams);
+
+  assert.equal(exit, 0, streams.read().stderr);
+  assert.equal(credentialRead, false);
+  assert.equal(providerCreated, false);
+});
+
+test("tae run reports a Postgres close failure without exposing its connection", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-runtime-close-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeJudgePack(root);
+  writeFileSync(join(root, "runtime.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    environment: { kind: "local" },
+    resultStore: {
+      kind: "postgres",
+      databaseUrlEnv: "TEST_DATABASE_URL",
+      artifactRoot: "artifacts",
+    },
+    judge: {
+      kind: "anthropic-json-v1",
+      model: "judge-model",
+      credentialEnv: "TEST_JUDGE_KEY",
+    },
+  })}\n`);
+  const cli = createFrameworkCli({
+    env: {
+      TEST_DATABASE_URL: "postgresql://close-secret",
+      TEST_JUDGE_KEY: "judge-secret",
+    },
+    async openPostgresResultStore() { return Object.freeze({}); },
+    async closePostgresResultStore() { throw new Error("postgresql://close-secret"); },
+    createAnthropicJsonJudge() { return Object.freeze({}); },
+    createRunEngine() { return { async run() { return completedResult(); } }; },
+  });
+  const streams = io(root);
+
+  const exit = await cli.main(["run", "example.suite.mjs", "--runtime", "runtime.json"], streams);
+
+  assert.equal(exit, 1);
+  assert.equal(
+    streams.read().stderr,
+    "tae [store-close-failed] The configured Result Store could not be closed cleanly.\n",
+  );
+  assert.doesNotMatch(`${streams.read().stdout}\n${streams.read().stderr}`, /close-secret/);
+});
+
+test("tae run forwards Local termination through cleanup and closes Postgres", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const root = mkdtempSync(join(tmpdir(), "tae-runtime-local-signal-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const initStreams = io(root);
+  assert.equal(await createFrameworkCli().main(["init"], initStreams), 0);
+  writeFileSync(join(root, "runtime.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    environment: { kind: "local" },
+    resultStore: {
+      kind: "postgres",
+      databaseUrlEnv: "TEST_DATABASE_URL",
+      artifactRoot: "artifacts",
+    },
+  })}\n`);
+  const processTarget = new EventEmitter();
+  const store = Object.freeze({ kind: "fake-store" });
+  let closeCount = 0;
+  let receivedSignal = null;
+  const cli = createFrameworkCli({
+    env: { TEST_DATABASE_URL: "postgresql://signal-secret" },
+    processTarget,
+    async openPostgresResultStore() { return store; },
+    async closePostgresResultStore(value) {
+      assert.equal(value, store);
+      closeCount += 1;
+    },
+    createRunEngine() {
+      return {
+        async run(input) {
+          assert.ok(input.signal instanceof AbortSignal);
+          await new Promise((resolve) => {
+            input.signal.addEventListener("abort", resolve, { once: true });
+            queueMicrotask(() => processTarget.emit("SIGTERM"));
+          });
+          receivedSignal = input.signal.aborted;
+          const result = completedResult();
+          result.summary.terminalVerdicts = {
+            pass: 0,
+            fail: 0,
+            incomplete: 1,
+            unknown: 0,
+          };
+          return result;
+        },
+      };
+    },
+  });
+  const streams = ttyIo(root);
+
+  const exit = await cli.main([
+    "run",
+    "evals/example.suite.mjs",
+    "--runtime",
+    "runtime.json",
+  ], streams);
+
+  assert.equal(exit, 143);
+  assert.equal(receivedSignal, true);
+  assert.equal(closeCount, 1);
+  assert.equal(processTarget.listenerCount("SIGINT"), 0);
+  assert.equal(processTarget.listenerCount("SIGTERM"), 0);
+  assert.doesNotMatch(`${streams.read().stdout}\n${streams.read().stderr}`, /signal-secret/);
+  const stopped = streams.read();
+  t.mock.timers.tick(1000);
+  assert.deepEqual(streams.read(), stopped, "no spinner survives interruption");
+});
+
+test("tae run --view opens the recorded Local store and preserves a non-pass", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-run-view-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const initStreams = io(root);
+  assert.equal(await createFrameworkCli().main(["init"], initStreams), 0);
+  const calls = [];
+  const result = completedResult();
+  result.summary.terminalVerdicts = {
+    pass: 0,
+    fail: 0,
+    incomplete: 1,
+    unknown: 0,
+  };
+  result.summary.nonPasses = [{
+    id: "run_failed", snapshotFingerprint: "sha256:example", verdict: "incomplete",
+    invocation: { repeatOrdinal: 1 },
+    verdictReasons: [{ code: "environment.acquire-failed", summary: "E2B execution failed before evidence capture." }],
+  }];
+  const cli = createFrameworkCli({
+    env: {},
+    async openLocalResultStore() { return Object.freeze({}); },
+    createRunEngine() {
+      return { async run() { return result; } };
+    },
+    async launchViewer(input) {
+      calls.push(input);
+      input.onReady("http://127.0.0.1:3000");
+      return { kind: "stopped", exitCode: 0, url: "http://127.0.0.1:3000" };
+    },
+  });
+  const streams = io(root);
+
+  const exit = await cli.main([
+    "run",
+    "evals/example.suite.mjs",
+    "--store",
+    "results",
+    "--view",
+  ], streams);
+
+  assert.equal(exit, 1);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].storeEnvironment, {
+    TAE_RESULT_STORE_MODE: "local",
+    TAE_RESULT_STORE_ROOT: join(root, "results"),
+  });
+  assert.match(streams.read().stdout, /^  Result\s+Needs attention$/m);
+  assert.match(streams.read().stdout, /^  Runs\s+1 incomplete$/m);
+  assert.match(streams.read().stdout, /^  Reason\s+E2B execution failed before evidence capture\.$/m);
+  assert.doesNotMatch(streams.read().stdout, /run_failed|sha256:/);
+  assert.match(streams.read().stdout, /Viewer: http:\/\/127\.0\.0\.1:3000/);
+});
+
+test("tae run --view does not open a Viewer for a rejected matrix", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-run-view-rejected-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const initStreams = io(root);
+  assert.equal(await createFrameworkCli().main(["init"], initStreams), 0);
+  let viewerLaunches = 0;
+  const cli = createFrameworkCli({
+    env: {},
+    async openLocalResultStore() { return Object.freeze({}); },
+    createRunEngine() {
+      return {
+        async run() {
+          return {
+            status: "rejected",
+            summary: { plannedCells: 1 },
+            diagnostics: [{
+              category: "capability",
+              code: "matrix.capability-missing",
+              message: "The selected Environment cannot capture trusted egress.",
+            }],
+          };
+        },
+      };
+    },
+    async launchViewer() {
+      viewerLaunches += 1;
+      return { kind: "stopped", exitCode: 0 };
+    },
+  });
+  const streams = io(root);
+
+  const exit = await cli.main([
+    "run",
+    "evals/example.suite.mjs",
+    "--view",
+  ], streams);
+
+  assert.equal(exit, 1);
+  assert.equal(viewerLaunches, 0);
+  assert.match(streams.read().stderr, /matrix\.capability-missing/);
+  assert.doesNotMatch(streams.read().stdout, /Viewer:/);
+});
+
+test("tae run accepts --view only once", async () => {
+  const streams = io("/workspace");
+
+  const exit = await createFrameworkCli().main([
+    "run",
+    "--view",
+    "--view",
+  ], streams);
+
+  assert.equal(exit, 2);
+  assert.equal(
+    streams.read().stderr,
+    "tae [argument-error] Option '--view' may only be supplied once.\n",
+  );
+});
+
+test("tae view launches the canonical local source on loopback", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-view-cli-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const calls = [];
+  const cli = createFrameworkCli({
+    env: {},
+    async launchViewer(input) {
+      calls.push(input);
+      return { kind: "stopped", exitCode: 0, signal: null, url: "http://127.0.0.1:3000" };
+    },
+  });
+  const streams = io(root);
+
+  const exit = await cli.main(["view"], streams);
+
+  assert.equal(exit, 0);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].storeEnvironment, {
+    TAE_RESULT_STORE_MODE: "local",
+    TAE_RESULT_STORE_ROOT: join(root, ".tae", "results-v1"),
+  });
+  assert.equal(calls[0].port, 3000);
+  assert.match(streams.read().stdout, /http:\/\/127\.0\.0\.1:3000/);
+});
+
+test("tae view shows one live readiness status in an interactive terminal", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-view-progress-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const cli = createFrameworkCli({
+    env: {},
+    async launchViewer(input) {
+      input.onReady("http://127.0.0.1:3000");
+      return { kind: "stopped", exitCode: 0, url: "http://127.0.0.1:3000" };
+    },
+  });
+  const streams = ttyIo(root);
+
+  const exit = await cli.main(["view"], streams);
+
+  assert.equal(exit, 0);
+  assert.match(streams.read().stderr, /Starting Results Viewer/);
+  assert.match(streams.read().stderr, /Results Viewer ready/);
+  assert.equal(
+    streams.read().stdout,
+    "Viewer: http://127.0.0.1:3000\n",
+  );
+});
+
+test("tae view reports unconfirmed shutdown without claiming success", async () => {
+  const cli = createFrameworkCli({
+    env: {},
+    async launchViewer() {
+      return { kind: "failed", exitCode: 1, reason: "disposal-unconfirmed" };
+    },
+  });
+  const streams = io(process.cwd());
+  assert.equal(await cli.main(["view"], streams), 1);
+  assert.equal(streams.read().stderr,
+    "tae [viewer-disposal-unconfirmed] Viewer shutdown could not be confirmed. Check for a surviving Viewer process before restarting.\n");
+});
+
+test("tae view explains how to recover when its port is already occupied", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-view-port-in-use-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const cli = createFrameworkCli({
+    env: {},
+    async launchViewer() {
+      return { kind: "failed", exitCode: 1, reason: "port-in-use" };
+    },
+  });
+  const streams = ttyIo(root);
+
+  const exit = await cli.main(["view"], streams);
+
+  assert.equal(exit, 1);
+  assert.match(streams.read().stderr, /viewer-port-in-use/);
+  assert.match(streams.read().stderr, /Port 3000 is already in use/);
+  assert.match(streams.read().stderr, /http:\/\/127\.0\.0\.1:3000/);
+  assert.doesNotMatch(streams.read().stderr, /secret-output/);
+});
+
+test("tae view can open a canonical Local Result Store named directly", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-view-store-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const calls = [];
+  const cli = createFrameworkCli({
+    env: {},
+    async launchViewer(input) {
+      calls.push(input);
+      return { kind: "stopped", exitCode: 0, url: "http://127.0.0.1:3000" };
+    },
+  });
+  const streams = io(root);
+
+  const exit = await cli.main([
+    "view",
+    "--store",
+    "pack/.tae/results-v1",
+  ], streams);
+
+  assert.equal(exit, 0);
+  assert.deepEqual(calls[0].storeEnvironment, {
+    TAE_RESULT_STORE_MODE: "local",
+    TAE_RESULT_STORE_ROOT: join(root, "pack", ".tae", "results-v1"),
+  });
+});
+
+test("constructor failures close Postgres and dispose the compiled Suite without leaking secrets", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  for (const factory of ["createAnthropicJsonJudge", "createAgentAdapter", "createLocalExecutionEnvironment", "createRunEngine"]) {
+    const root = mkdtempSync(join(tmpdir(), "tae-constructor-cleanup-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    writeJudgePack(root);
+    writeFileSync(join(root, "runtime.json"), JSON.stringify({
+      schemaVersion: 1,
+      environment: { kind: "local" },
+      resultStore: { kind: "postgres", databaseUrlEnv: "TEST_DB", artifactRoot: "artifacts" },
+      judge: { kind: "anthropic-json-v1", model: "judge-model", credentialEnv: "TEST_JUDGE" },
+    }));
+    const processTarget = new EventEmitter();
+    let generatedRoot;
+    let closed = 0;
+    const cli = createFrameworkCli({
+      processTarget,
+      env: { TEST_DB: "postgresql://sensitive", TEST_JUDGE: "sensitive-judge" },
+      async resolveV1Suite(options) {
+        const suite = await resolveV1Suite(options);
+        generatedRoot = suite.generatedRoot;
+        return suite;
+      },
+      async openPostgresResultStore() { return {}; },
+      async closePostgresResultStore() { closed += 1; },
+      createAnthropicJsonJudge() { return {}; },
+      createAgentAdapter() { return {}; },
+      createLocalExecutionEnvironment() { return {}; },
+      createRunEngine() { return { async run() { return completedResult(); } }; },
+      [factory]() { throw new Error("sensitive-judge"); },
+    });
+    const streams = ttyIo(root);
+    assert.equal(await cli.main(["run", "example.suite.mjs", "--runtime", "runtime.json"], streams), 1, factory);
+    assert.equal(closed, 1, factory);
+    assert.equal(existsSync(generatedRoot), false, factory);
+    for (const signal of ["exit", "SIGINT", "SIGTERM"]) assert.equal(processTarget.listenerCount(signal), 0, factory);
+    assert.doesNotMatch(JSON.stringify(streams.read()), /sensitive/);
+    assert.match(streams.read().stderr, /run-failed/);
+    const stopped = streams.read();
+    t.mock.timers.tick(1000);
+    assert.deepEqual(streams.read(), stopped, "no spinner survives a constructor failure");
+  }
+});

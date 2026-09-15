@@ -1,0 +1,39 @@
+# Dependencies & build
+node_modules/
+.next/
+.vercel/
+
+# Local credentials (examples use placeholders only)
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+
+# Local results (generated per-machine, never committed)
+.tae/
+results/
+
+# Python bytecode (e.g. harness/verify/proxy addon)
+__pycache__/
+
+# Downloaded model checkpoints (multi-GB; the model still exists on Together)
+checkpoints/
+
+# Local Claude Code project state
+.claude/
+
+# Viewer runtime data is generated locally.
+viewer/data/*
+!viewer/data/.gitkeep
+
+# IDE configs
+viewer/.codex/
+viewer/.cursor/
+viewer/.gemini/
+viewer/.vscode/
+viewer/.zed/
+viewer/config/
+viewer/.mcp.json
+viewer/opencode.json

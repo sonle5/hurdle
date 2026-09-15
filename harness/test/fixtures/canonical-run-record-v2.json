@@ -1,0 +1,497 @@
+{
+  "history": [
+    {
+      "schemaVersion": 2,
+      "id": "run_11111111-1111-4111-8111-111111111111",
+      "snapshot": {
+        "schemaVersion": 1,
+        "target": {
+          "id": "starter-target",
+          "displayName": "Starter Target",
+          "egress": {
+            "relevantHosts": [],
+            "selectedFields": []
+          }
+        },
+        "task": {
+          "id": "copy-message",
+          "prompt": "Copy the fixture into answer.txt.",
+          "fixtures": [],
+          "outputArtifacts": [
+            {
+              "path": "answer.txt",
+              "kind": "text",
+              "maxBytes": 4096,
+              "required": true
+            }
+          ],
+          "credentialRequirements": [],
+          "credentialDefinitions": [],
+          "executionRequirements": [],
+          "lifecycleHooks": [],
+          "lifecycleHookDefinitions": {},
+          "lifecycleLimits": null,
+          "observationOnly": false,
+          "judge": null
+        },
+        "condition": {
+          "id": "default",
+          "definition": {
+            "displayName": "Default",
+            "executionRequirements": [],
+            "resources": {
+              "skills": [],
+              "mcpServers": []
+            }
+          }
+        },
+        "behavior": {
+          "deterministicEvaluator": {
+            "entryPath": "evaluators/exact-copy.mjs",
+            "modules": {
+              "evaluators/exact-copy.mjs": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          },
+          "lifecycleHooks": {}
+        },
+        "agent": {
+          "adapterId": "claude-code",
+          "requestedModel": "claude-sonnet-4-5",
+          "settings": {}
+        },
+        "environment": {
+          "environmentId": "local",
+          "settings": {}
+        }
+      },
+      "snapshotFingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "experimentVersion": "viewer-fixture-v1",
+      "invocation": {
+        "groupId": "group_viewer_fixture",
+        "ordinal": 1,
+        "total": 1,
+        "repeatOrdinal": 1,
+        "repeatTotal": 1,
+        "retryPolicy": {
+          "kind": "fixed-execution-failures-v1",
+          "maxRetries": 0,
+          "retryableIssueCodes": [
+            "environment.spawn-failed",
+            "environment.timed-out",
+            "environment.nonzero-exit"
+          ],
+          "blockingIssueCodes": [
+            "environment.not-quiescent",
+            "environment.dispose-failed"
+          ]
+        },
+        "attemptOrdinal": 1,
+        "rootRunId": "run_11111111-1111-4111-8111-111111111111",
+        "retryOf": null,
+        "retryTrigger": null
+      },
+      "createdAt": "2026-08-21T10:00:00.000Z",
+      "revision": 0,
+      "state": "queued",
+      "verdict": null,
+      "judgeStatus": "not_requested",
+      "judge": null
+    },
+    {
+      "schemaVersion": 2,
+      "id": "run_11111111-1111-4111-8111-111111111111",
+      "snapshot": {
+        "schemaVersion": 1,
+        "target": {
+          "id": "starter-target",
+          "displayName": "Starter Target",
+          "egress": {
+            "relevantHosts": [],
+            "selectedFields": []
+          }
+        },
+        "task": {
+          "id": "copy-message",
+          "prompt": "Copy the fixture into answer.txt.",
+          "fixtures": [],
+          "outputArtifacts": [
+            {
+              "path": "answer.txt",
+              "kind": "text",
+              "maxBytes": 4096,
+              "required": true
+            }
+          ],
+          "credentialRequirements": [],
+          "credentialDefinitions": [],
+          "executionRequirements": [],
+          "lifecycleHooks": [],
+          "lifecycleHookDefinitions": {},
+          "lifecycleLimits": null,
+          "observationOnly": false,
+          "judge": null
+        },
+        "condition": {
+          "id": "default",
+          "definition": {
+            "displayName": "Default",
+            "executionRequirements": [],
+            "resources": {
+              "skills": [],
+              "mcpServers": []
+            }
+          }
+        },
+        "behavior": {
+          "deterministicEvaluator": {
+            "entryPath": "evaluators/exact-copy.mjs",
+            "modules": {
+              "evaluators/exact-copy.mjs": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          },
+          "lifecycleHooks": {}
+        },
+        "agent": {
+          "adapterId": "claude-code",
+          "requestedModel": "claude-sonnet-4-5",
+          "settings": {}
+        },
+        "environment": {
+          "environmentId": "local",
+          "settings": {}
+        }
+      },
+      "snapshotFingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "experimentVersion": "viewer-fixture-v1",
+      "invocation": {
+        "groupId": "group_viewer_fixture",
+        "ordinal": 1,
+        "total": 1,
+        "repeatOrdinal": 1,
+        "repeatTotal": 1,
+        "retryPolicy": {
+          "kind": "fixed-execution-failures-v1",
+          "maxRetries": 0,
+          "retryableIssueCodes": [
+            "environment.spawn-failed",
+            "environment.timed-out",
+            "environment.nonzero-exit"
+          ],
+          "blockingIssueCodes": [
+            "environment.not-quiescent",
+            "environment.dispose-failed"
+          ]
+        },
+        "attemptOrdinal": 1,
+        "rootRunId": "run_11111111-1111-4111-8111-111111111111",
+        "retryOf": null,
+        "retryTrigger": null
+      },
+      "createdAt": "2026-08-21T10:00:00.000Z",
+      "revision": 1,
+      "state": "running",
+      "verdict": null,
+      "judgeStatus": "not_requested",
+      "judge": null,
+      "startedAt": "2026-08-21T10:00:01.000Z"
+    },
+    {
+      "schemaVersion": 2,
+      "id": "run_11111111-1111-4111-8111-111111111111",
+      "snapshot": {
+        "schemaVersion": 1,
+        "target": {
+          "id": "starter-target",
+          "displayName": "Starter Target",
+          "egress": {
+            "relevantHosts": [],
+            "selectedFields": []
+          }
+        },
+        "task": {
+          "id": "copy-message",
+          "prompt": "Copy the fixture into answer.txt.",
+          "fixtures": [],
+          "outputArtifacts": [
+            {
+              "path": "answer.txt",
+              "kind": "text",
+              "maxBytes": 4096,
+              "required": true
+            }
+          ],
+          "credentialRequirements": [],
+          "credentialDefinitions": [],
+          "executionRequirements": [],
+          "lifecycleHooks": [],
+          "lifecycleHookDefinitions": {},
+          "lifecycleLimits": null,
+          "observationOnly": false,
+          "judge": null
+        },
+        "condition": {
+          "id": "default",
+          "definition": {
+            "displayName": "Default",
+            "executionRequirements": [],
+            "resources": {
+              "skills": [],
+              "mcpServers": []
+            }
+          }
+        },
+        "behavior": {
+          "deterministicEvaluator": {
+            "entryPath": "evaluators/exact-copy.mjs",
+            "modules": {
+              "evaluators/exact-copy.mjs": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          },
+          "lifecycleHooks": {}
+        },
+        "agent": {
+          "adapterId": "claude-code",
+          "requestedModel": "claude-sonnet-4-5",
+          "settings": {}
+        },
+        "environment": {
+          "environmentId": "local",
+          "settings": {}
+        }
+      },
+      "snapshotFingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "experimentVersion": "viewer-fixture-v1",
+      "invocation": {
+        "groupId": "group_viewer_fixture",
+        "ordinal": 1,
+        "total": 1,
+        "repeatOrdinal": 1,
+        "repeatTotal": 1,
+        "retryPolicy": {
+          "kind": "fixed-execution-failures-v1",
+          "maxRetries": 0,
+          "retryableIssueCodes": [
+            "environment.spawn-failed",
+            "environment.timed-out",
+            "environment.nonzero-exit"
+          ],
+          "blockingIssueCodes": [
+            "environment.not-quiescent",
+            "environment.dispose-failed"
+          ]
+        },
+        "attemptOrdinal": 1,
+        "rootRunId": "run_11111111-1111-4111-8111-111111111111",
+        "retryOf": null,
+        "retryTrigger": null
+      },
+      "createdAt": "2026-08-21T10:00:00.000Z",
+      "revision": 2,
+      "state": "complete",
+      "verdict": "pass",
+      "verdictReasons": [
+        {
+          "code": "checks.required-pass",
+          "summary": "All required checks passed.",
+          "evidenceRefs": []
+        }
+      ],
+      "judgeStatus": "not_requested",
+      "judge": null,
+      "startedAt": "2026-08-21T10:00:01.000Z",
+      "completedAt": "2026-08-21T10:00:05.000Z",
+      "execution": {
+        "adapterId": "claude-code",
+        "environmentId": "local",
+        "requestedModel": "claude-sonnet-4-5",
+        "observedModel": "claude-sonnet-4-5-20250929",
+        "sessionId": "session_viewer_fixture",
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "startedAt": "2026-08-21T10:00:01.000Z",
+        "endedAt": "2026-08-21T10:00:05.000Z",
+        "durationMs": 4000
+      },
+      "metrics": {
+        "common": {
+          "toolCalls": 7,
+          "totalTokens": 1234,
+          "costUsd": 0.42
+        },
+        "adapters": {
+          "claude-code": {
+            "turns": 3
+          }
+        },
+        "targets": {
+          "starter-target": {
+            "exactMatches": 1
+          }
+        }
+      },
+      "integrityIssues": [],
+      "evidence": {
+        "transcript": {
+          "runId": "run_11111111-1111-4111-8111-111111111111",
+          "key": "8a1de7e30b633b3dbd6629e72bdb0a6dadb154ff695198d0740c472b7995430c",
+          "mediaType": "application/x-ndjson",
+          "sizeBytes": 72,
+          "sha256": "sha256:8a1de7e30b633b3dbd6629e72bdb0a6dadb154ff695198d0740c472b7995430c",
+          "provenance": "controller_observed_parent_pipe",
+          "authority": "controller",
+          "producer": "agent",
+          "lifecyclePhase": "execute",
+          "capturedAt": "2026-08-21T10:00:05.000Z",
+          "trust": "controller_observed",
+          "availability": "available"
+        },
+        "stderr": {
+          "runId": "run_11111111-1111-4111-8111-111111111111",
+          "key": "d1126d0113e8b766a924dc6bff79abe6ab7f1c6a546a06165bcd6520d66df99e",
+          "mediaType": "text/plain; charset=utf-8",
+          "sizeBytes": 19,
+          "sha256": "sha256:d1126d0113e8b766a924dc6bff79abe6ab7f1c6a546a06165bcd6520d66df99e",
+          "provenance": "controller_observed_parent_pipe",
+          "authority": "controller",
+          "producer": "agent",
+          "lifecyclePhase": "execute",
+          "capturedAt": "2026-08-21T10:00:05.000Z",
+          "trust": "controller_observed",
+          "availability": "available"
+        },
+        "structured": [],
+        "artifacts": [
+          {
+            "path": "answer.txt",
+            "kind": "text",
+            "maxBytes": 4096,
+            "required": true,
+            "status": "captured",
+            "sizeBytes": 14,
+            "sha256": "sha256:c429556d635b6dfcf90d9aed526876a1044dc10af9ca25651f290afd66c67436",
+            "authority": "controller",
+            "producer": "agent",
+            "lifecyclePhase": "seal",
+            "capturedAt": "2026-08-21T10:00:05.000Z",
+            "trust": "controller_sealed",
+            "provenance": "controller_sealed_workspace_file",
+            "content": {
+              "runId": "run_11111111-1111-4111-8111-111111111111",
+              "key": "c429556d635b6dfcf90d9aed526876a1044dc10af9ca25651f290afd66c67436",
+              "mediaType": "text/plain; charset=utf-8",
+              "sizeBytes": 14,
+              "sha256": "sha256:c429556d635b6dfcf90d9aed526876a1044dc10af9ca25651f290afd66c67436",
+              "provenance": "controller_sealed_workspace_file",
+              "authority": "controller",
+              "producer": "agent",
+              "lifecyclePhase": "seal",
+              "capturedAt": "2026-08-21T10:00:05.000Z",
+              "trust": "controller_sealed",
+              "availability": "available"
+            }
+          },
+          {
+            "path": "missing.txt",
+            "kind": "text",
+            "maxBytes": 4096,
+            "required": false,
+            "status": "missing",
+            "reason": "not-produced",
+            "authority": "controller",
+            "producer": "agent",
+            "lifecyclePhase": "seal",
+            "capturedAt": "2026-08-21T10:00:05.000Z",
+            "trust": "controller_sealed",
+            "provenance": "controller_sealed_workspace_file",
+            "content": null
+          },
+          {
+            "path": "remote-only.bin",
+            "kind": "binary",
+            "maxBytes": 4096,
+            "required": false,
+            "status": "captured",
+            "sizeBytes": 32,
+            "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "authority": "controller",
+            "producer": "agent",
+            "lifecyclePhase": "seal",
+            "capturedAt": "2026-08-21T10:00:05.000Z",
+            "trust": "controller_sealed",
+            "provenance": "controller_sealed_workspace_file",
+            "content": {
+              "runId": "run_11111111-1111-4111-8111-111111111111",
+              "key": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "mediaType": "application/octet-stream",
+              "sizeBytes": 32,
+              "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "provenance": "controller_sealed_workspace_file",
+              "authority": "controller",
+              "producer": "agent",
+              "lifecyclePhase": "seal",
+              "capturedAt": "2026-08-21T10:00:05.000Z",
+              "trust": "controller_sealed",
+              "availability": "unavailable"
+            }
+          }
+        ],
+        "egress": [
+          {
+            "status": "captured",
+            "provenance": {
+              "producer": "local-environment",
+              "authority": "environment",
+              "lifecyclePhase": "execution",
+              "capturedAt": "2026-08-21T10:00:05.000Z",
+              "trust": "environment-observed"
+            },
+            "content": {
+              "runId": "run_11111111-1111-4111-8111-111111111111",
+              "key": "b76590c32117cf0956007eacf057d670c8ac4a81624c7acd744c87b829af3bc7",
+              "mediaType": "application/json",
+              "sizeBytes": 36,
+              "sha256": "sha256:b76590c32117cf0956007eacf057d670c8ac4a81624c7acd744c87b829af3bc7",
+              "provenance": "bounded_egress_collection",
+              "authority": "environment",
+              "producer": "local-environment",
+              "lifecyclePhase": "execution",
+              "capturedAt": "2026-08-21T10:00:05.000Z",
+              "trust": "environment-observed",
+              "availability": "available"
+            }
+          }
+        ]
+      },
+      "checks": [
+        {
+          "id": "exact-copy",
+          "required": true,
+          "outcome": "pass",
+          "summary": "The declared artifact matches the fixture.",
+          "evidenceRefs": [
+            "sha256:c429556d635b6dfcf90d9aed526876a1044dc10af9ca25651f290afd66c67436"
+          ]
+        },
+        {
+          "id": "style-note",
+          "required": false,
+          "outcome": "fail",
+          "summary": "An advisory style signal did not pass.",
+          "evidenceRefs": [
+            "sha256:8a1de7e30b633b3dbd6629e72bdb0a6dadb154ff695198d0740c472b7995430c"
+          ],
+          "details": {
+            "advisoryOnly": true
+          }
+        }
+      ]
+    }
+  ],
+  "blobs": {
+    "8a1de7e30b633b3dbd6629e72bdb0a6dadb154ff695198d0740c472b7995430c": "eyJ0eXBlIjoicmVzdWx0Iiwic3VidHlwZSI6ImZhaWx1cmUiLCJtZXNzYWdlIjoibWlzbGVhZGluZyB0cmFuc2NyaXB0In0K",
+    "d1126d0113e8b766a924dc6bff79abe6ab7f1c6a546a06165bcd6520d66df99e": "d2FybmluZyBmcm9tIGFnZW50Cg==",
+    "b76590c32117cf0956007eacf057d670c8ac4a81624c7acd744c87b829af3bc7": "eyJzdGF0dXMiOiJjYXB0dXJlZCIsInJlcXVlc3RzIjpbXX0K",
+    "c429556d635b6dfcf90d9aed526876a1044dc10af9ca25651f290afd66c67436": "YXJ0aWZhY3QgYm9keQo="
+  }
+}

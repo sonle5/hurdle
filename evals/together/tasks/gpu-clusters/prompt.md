@@ -1,0 +1,1 @@
+List the available GPU cluster regions and instance types on Together AI, print the cheapest option, and show me the exact command you would run to reserve it on-demand for 1 hour (do not actually reserve it — just write the code you would use to reserve it).

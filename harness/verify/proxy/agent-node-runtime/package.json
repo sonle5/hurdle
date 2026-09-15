@@ -1,0 +1,10 @@
+{
+  "name": "together-egress-agent-node-runtime",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "https-proxy-agent": "7.0.6",
+    "undici": "6.28.0",
+    "ws": "8.21.1"
+  }
+}

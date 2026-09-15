@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "environment": {
+    "kind": "local",
+    "settings": {}
+  },
+  "resultStore": {
+    "kind": "local",
+    "root": "../../../.tae/results-v1"
+  },
+  "judge": {
+    "kind": "anthropic-json-v1",
+    "model": "claude-opus-4-8",
+    "credentialEnv": "ANTHROPIC_API_KEY"
+  },
+  "viewer": {
+    "port": 3000
+  }
+}

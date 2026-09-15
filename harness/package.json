@@ -1,0 +1,37 @@
+{
+  "name": "harness",
+  "version": "1.0.0",
+  "description": "",
+  "main": "./index.mjs",
+  "types": "./types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "import": "./index.mjs",
+      "default": "./index.mjs"
+    }
+  },
+  "bin": {
+    "tae": "./bin/tae.mjs"
+  },
+  "scripts": {
+    "test": "cd .. && node --test harness/test/*.test.mjs",
+    "result-store:migrate": "node bin/migrate-postgres-result-store.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "pg": "^8.23.0"
+  },
+  "optionalDependencies": {
+    "e2b": "^2.38.2",
+    "https-proxy-agent": "7.0.6",
+    "ws": "8.21.1"
+  },
+  "private": true
+}

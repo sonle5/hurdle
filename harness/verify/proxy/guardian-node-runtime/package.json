@@ -1,0 +1,8 @@
+{
+  "name": "together-egress-guardian-node-runtime",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "ws": "8.21.1"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "source": {
+    "workflow_run": 29991824629,
+    "revision": "c88bbc08594e61173a3243e6bd8eecf8ac204352",
+    "version": "2026-07-23-weekly",
+    "cell": "vision-bench/baseline/claude-sonnet-4-6/run1"
+  },
+  "attempt": {
+    "runner": "sdk",
+    "mode": "claude-defaults",
+    "prompt_bytes": 272,
+    "prompt_overflow": true,
+    "terminal_record": {
+      "type": "result",
+      "subtype": "error_during_execution",
+      "is_error": true,
+      "result": "Prompt is too long"
+    },
+    "observed_context": {
+      "schema_version": 1,
+      "session_jsonl_bytes": 852471,
+      "controller_stdout_bytes": 740,
+      "controller_stderr_bytes": 0,
+      "skill_listing": {
+        "count": 3,
+        "content_bytes": 4511
+      },
+      "invoked_skills": [
+        "claude-api"
+      ],
+      "injected_skills": [
+        {
+          "name": "claude-api",
+          "source": "bundled",
+          "content_bytes": 808740
+        }
+      ],
+      "max_user_message_bytes": 808767,
+      "max_observed_input_tokens": 23082
+    }
+  },
+  "expected": {
+    "cause": "bundled_skill_payload_expansion",
+    "fingerprint": "sha256:2e805c311a0e361b8c1857863aa3af9f1ce0088809aef9c20db36eaf01d90c06"
+  }
+}

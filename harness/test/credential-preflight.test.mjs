@@ -1,0 +1,168 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  checkAnthropicCredential,
+  checkE2bCredential,
+  checkPostgresCredential,
+  checkTogetherCredential,
+  runCredentialPreflight,
+} from "../lib/credential-preflight.mjs";
+import { normalizePostgresConnectionString } from "../lib/postgres-connection-string.mjs";
+
+function response(status, body) {
+  const bytes = Buffer.from(JSON.stringify(body));
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get(name) { return name === "content-length" ? String(bytes.length) : null; } },
+    async arrayBuffer() { return bytes; },
+  };
+}
+
+test("Anthropic preflight makes a bounded Sonnet request without exposing the key", async () => {
+  let request;
+  const result = await checkAnthropicCredential("secret-anthropic", {
+    async fetch(url, options) {
+      request = { url, options };
+      return response(200, { type: "message" });
+    },
+  });
+
+  assert.deepEqual(result, {
+    provider: "Anthropic",
+    status: "pass",
+    message: "claude-sonnet-4-6 request succeeded",
+  });
+  assert.equal(request.url, "https://api.anthropic.com/v1/messages");
+  assert.equal(request.options.headers["x-api-key"], "secret-anthropic");
+  assert.equal(JSON.parse(request.options.body).max_tokens, 1);
+  assert.doesNotMatch(JSON.stringify(result), /secret-anthropic/);
+});
+
+test("Anthropic preflight gives a safe low-credit diagnosis", async () => {
+  const result = await checkAnthropicCredential("secret", {
+    fetch: async () => response(400, { error: { message: "Your credit balance is too low" } }),
+  });
+  assert.deepEqual(result, {
+    provider: "Anthropic",
+    status: "fail",
+    message: "authenticated, but the credit balance is too low",
+  });
+});
+
+test("Together preflight verifies embeddings and native tool calls", async () => {
+  const requests = [];
+  const result = await checkTogetherCredential("secret-together", {
+    async fetch(url, options) {
+      requests.push({ url, options });
+      return requests.length === 1
+        ? response(200, { data: [{ embedding: [0.1, 0.2] }] })
+        : response(200, { choices: [{ message: { tool_calls: [{ id: "call_1" }] } }] });
+    },
+  });
+
+  assert.equal(result.status, "pass");
+  assert.deepEqual(requests.map(({ url }) => url), [
+    "https://api.together.xyz/v1/embeddings",
+    "https://api.together.xyz/v1/chat/completions",
+  ]);
+  assert.ok(requests.every(({ options }) => options.headers.authorization === "Bearer secret-together"));
+  assert.doesNotMatch(JSON.stringify(result), /secret-together/);
+});
+
+test("E2B preflight lists resources without allocating a sandbox", async () => {
+  const calls = [];
+  const result = await checkE2bCredential("secret-e2b", {
+    async loadE2b() {
+      return {
+        Sandbox: {
+          list(options) {
+            calls.push(options);
+            return { async nextItems() { return []; } };
+          },
+        },
+      };
+    },
+  });
+  assert.equal(result.status, "pass");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].apiKey, "secret-e2b");
+  assert.doesNotMatch(JSON.stringify(result), /secret-e2b/);
+});
+
+test("Postgres preflight is read-only and reports migration state", async () => {
+  const queries = [];
+  let selectedConnectionString;
+  let released = false;
+  let ended = false;
+  const result = await checkPostgresCredential("postgresql://secret", {
+    createPool(connectionString) {
+      selectedConnectionString = connectionString;
+      return {
+        async connect() {
+          return {
+            async query(sql) {
+              queries.push(sql);
+              return sql === "SELECT 1" ? { rows: [{ "?column?": 1 }] } : { rows: [{ runs: "tae.runs" }] };
+            },
+            release() { released = true; },
+          };
+        },
+        async end() { ended = true; },
+      };
+    },
+  });
+
+  assert.equal(result.status, "pass");
+  assert.equal(selectedConnectionString, "postgresql://secret");
+  assert.deepEqual(queries, ["SELECT 1", "SELECT to_regclass('tae.runs') AS runs"]);
+  assert.equal(released, true);
+  assert.equal(ended, true);
+  assert.doesNotMatch(JSON.stringify(result), /postgresql|secret/);
+});
+
+test("Postgres preflight preserves pg 8 strict TLS semantics without its deprecation warning", async () => {
+  let selectedConnectionString;
+  await checkPostgresCredential("postgresql://user:secret@example.test/db?sslmode=require", {
+    createPool(connectionString) {
+      selectedConnectionString = connectionString;
+      return {
+        async connect() {
+          return {
+            async query(sql) {
+              return sql === "SELECT 1" ? { rows: [{}] } : { rows: [{ runs: null }] };
+            },
+            release() {},
+          };
+        },
+        async end() {},
+      };
+    },
+  });
+  const parsed = new URL(selectedConnectionString);
+  assert.equal(parsed.searchParams.get("sslmode"), "verify-full");
+});
+
+test("every Postgres connection path preserves pg 8 strict TLS semantics", () => {
+  for (const mode of ["prefer", "require", "verify-ca"]) {
+    const selected = normalizePostgresConnectionString(
+      `postgresql://user:secret@example.test/db?sslmode=${mode}`,
+    );
+    assert.equal(new URL(selected).searchParams.get("sslmode"), "verify-full");
+  }
+
+  const explicit = "postgresql://example.test/db?sslmode=disable";
+  assert.equal(normalizePostgresConnectionString(explicit), explicit);
+  assert.equal(normalizePostgresConnectionString("not a URL"), "not a URL");
+});
+
+test("unconfigured services are skipped and the aggregate remains secret-safe", async () => {
+  const results = await runCredentialPreflight({}, {
+    fetch: async () => { throw new Error("must not be called"); },
+    loadE2b: async () => { throw new Error("must not be called"); },
+    createPool: () => { throw new Error("must not be called"); },
+  });
+  assert.equal(results.length, 4);
+  assert.ok(results.every(({ status }) => status === "skip"));
+});

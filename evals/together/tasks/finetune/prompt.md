@@ -1,0 +1,1 @@
+Using the dataset at `harness/fixtures/finetune-sample.jsonl` (relative to the repo root), run a finetuning job for a model on Together AI. When it's done, spin it up as a Dedicated Endpoint and evaluate the finetuned model against the base model on the first 10 training samples. Delete the endpoint when done. Use sensible defaults for everything.
