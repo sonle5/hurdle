@@ -8,7 +8,7 @@ Together Agent Evals is a preview. Security fixes target the latest commit on
 Do not open a public issue for a suspected vulnerability or exposed secret.
 Use this repository's private Security Advisory flow:
 
-<https://github.com/sambarrowclough/together-agent-evals/security/advisories/new>
+<https://github.com/Nutlope/together-agent-evals/security/advisories/new>
 
 Include the affected commit, reproduction steps, impact and any suggested
 mitigation. Avoid including real credentials or unnecessary sensitive data.

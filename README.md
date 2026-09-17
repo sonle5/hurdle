@@ -37,7 +37,7 @@ To install without running an evaluation, use `npm run setup`.
 The local runtime uses a temporary home directory and requires a Python virtual
 environment for ordinary pip installs. These safeguards reduce accidental host
 writes, but they do not contain agent code. Read
-[local execution and credentials](docs/authoring.md#api-credentials-and-evidence).
+[local execution and credentials](docs/authoring.md#credentials-and-safety).
 
 ## Write your own evaluations
 
