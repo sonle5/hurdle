@@ -1,8 +1,16 @@
 # Authoring evaluations
 
-From repository root after setup, run `npm --prefix harness exec -- tae init my-evals`. There is one public authoring path:
-Suite modules and Task folders. The framework derives its internal execution
-data; there is no second configuration file to maintain.
+Create a starter evaluation from the repository root:
+
+```sh
+npm run setup
+npm --prefix harness exec -- tae init my-evals
+```
+
+An evaluation has two parts: a **Suite** selects what to run, and each **Task**
+defines a prompt and its checks.
+
+## 1. Define a Suite
 
 ```js
 import { defineSuite } from "tae";
@@ -16,135 +24,136 @@ export default defineSuite({
 });
 ```
 
-Each Task has a `prompt.md` and `checks.mjs`. Files under `fixtures/` are
-staged with that prefix; files under `workspace/` are staged at workspace root.
-Use workspace files when a prompt names an existing exact path. Symlinks and
-overlapping staged paths are rejected.
+- `tasks` contains paths relative to the Suite file.
+- `agents` selects the runner and, optionally, its model.
+- `conditions` defines the skills and MCP servers available to the Agent.
+- `repeats` runs every selected cell independently, even after a failure.
+- `verdict` chooses code checks, a Judge, or both.
 
-For Claude Code, a Condition with `skills: []` disables all skills, including
-built-in skills, on initial and resumed turns. Conditions with selected skills
-keep skills enabled and stage the selected files; Claude Code's own bundled
-skills may also be available in those Conditions. MCP selection is independent.
-This baseline isolation fixes older preview behavior; do not mix results from
-before and after the change as evidence of score continuity.
+An empty `skills` array creates a no-skills baseline. Skills and MCP servers are
+selected independently.
+
+## 2. Write a Task
+
+```text
+tasks/copy-message/
+├── prompt.md
+├── checks.mjs
+├── fixtures/
+│   └── message.txt
+└── workspace/
+```
+
+Write the Agent's instructions in `prompt.md`. Put read-only inputs in
+`fixtures/`; they appear under `fixtures/` during the run. Files in `workspace/`
+are placed at the workspace root, which is useful when the prompt names an exact
+path.
+
+Every Task needs `prompt.md` and `checks.mjs`. Symlinks and overlapping staged
+paths are rejected.
+
+## 3. Write deterministic checks
 
 ```js
 import { defineChecks } from "tae";
 
 export default defineChecks((run) => {
   run.expect.completed();
+
   run.expect.artifact({
-    id: "answer", path: "answer.txt", format: "text", maxBytes: 4096,
+    id: "answer",
+    path: "answer.txt",
+    format: "text",
+    maxBytes: 4096,
   });
+
   run.check({
     id: "exact-copy",
     passed: run.artifacts.text("answer.txt") === "Hello from the fixture.\n",
-    summary: "The output must match the fixture exactly.",
+    summary: "answer.txt must match the fixture exactly.",
   });
 });
 ```
 
-Checks execute against captured results, not a live Agent workspace. They must
-be deterministic trusted repository code. No arbitrary helper imports, network
-calls or credentials belong in checks. Other existing helpers include
-`replyIncludes`, `request`, `tool` and advisory `run.observe.request`.
-Declare bounded artifacts before reading them. Ordinary `run.check` is enough
-for task-specific assertions; do not build a new assertion DSL.
+This example checks that the Agent exited cleanly, captured `answer.txt`, and
+wrote the exact expected text. Declare an artifact before reading it.
 
-## Verdicts and repeats
+Checks run against captured results, not the live Agent workspace. Keep them
+deterministic: do not import arbitrary helpers, make network calls, or access
+credentials. The built-in helpers also cover reply text, HTTP requests, and
+tool calls:
 
-- `code`: required checks decide quality; no Judge.
-- `judge`: `run.judge(rubric)` supplies the rubric; code checks are advisory.
-- `hybrid`: required code checks must pass **and** the Judge must return pass.
-  Missing required code evidence or an unavailable Judge means incomplete;
-  a required code failure stays fail even if the Judge passes. HTTP observations
-  authored as advisory remain advisory. With no required code checks, the result
-  is unknown, not a Judge-only pass.
+```js
+run.expect.replyIncludes("in stock");
+run.expect.request({ id: "chat", method: "POST", path: "/v1/chat/completions", status: 200 });
+run.expect.tool("lookup_inventory", { count: 1 });
+```
 
-New hybrid Suites snapshot internal authority policy version 2. Older version-1
-snapshots retain their original code-pass fallback when a Judge is unavailable;
-stored results are not rewritten or rescored. Judge mode and code mode keep their
-existing policy. Treat new hybrid results as a separate comparison cohort.
+Required request and tool checks need a Runtime that can capture trusted
+traffic, such as E2B. Native Local runs cannot prove those observations.
 
-For judged modes, add `judge: { model: "claude-opus-4-8" }` to the Suite
-and configure the matching Judge credential/backend in a Runtime file.
-Do not confuse a missing Judge configuration (rejected before execution) with
-a configured provider failing during a Run.
+## 4. Choose how a run is scored
 
-The Judge receives a bounded, redacted transcript. New Suites split long JSONL
-transcripts at message boundaries into ordered chunks, using the existing total
-evidence budget. Oversized individual messages may have long payloads shortened
-with explicit markers; message IDs, ordering and short tool results are retained.
-If the complete structure cannot fit, judging reports input unavailable rather
-than silently dropping messages. Existing verdict rules still apply to that
-Judge failure. This internal projection is versioned in the Run snapshot; use a
-new experiment label after this change. Old results are not rewritten or rescored.
+- `code`: required code checks decide the result. No Judge runs.
+- `judge`: `run.judge(rubric)` decides the result. Code checks are advisory.
+- `hybrid`: required code checks and the Judge must both pass.
 
-Run Trust is mandatory in every mode: execution, capture, cleanup or disposal
-problems cannot become a pass because the Judge liked the answer. Pass, fail,
-incomplete and unknown stay distinct; unknown is not a scored failure.
-Repeats are independent: two repeats run twice even if the first fails.
+For `judge` or `hybrid`, add both a rubric and a Judge model:
 
-`--task`, `--condition`, `--agent` and `--model` only narrow selections
-already present in the Suite. Change the Suite to change models or repeats.
-The selected and Agent-reported model identifiers are stored with the Run;
-snapshots preserve prompts, fixtures, checks and Condition resources.
-Native Local runs record the actual Claude Code/Codex runner, Node, Python and
-pip versions observed before Agent execution, when those tools respond. Probes
-are bounded, use no API credentials, and stay outside the scored transcript and
-Judge input. Values live in `metrics.adapters[adapterId].toolVersions`; the
-Viewer shows them in run details. Unavailable versions stay null, never inferred
-from requested models or the machine viewing the results. Remote E2B versions,
-MCP-server versions and arbitrary libraries installed during a Task are not
-captured by this Local observation. Matching labels alone do not establish
-reproducibility; the Viewer excludes mismatched or unavailable snapshot identities
-from scored comparisons.
-Runner-version differences also split comparison cohorts. Node/Python/pip values
-are visibility metadata: inspect them before comparing results; those differences
-are not automatically excluded by Compare.
+```js
+// checks.mjs
+run.judge("Pass only when the answer clearly explains the quoted price.");
 
-Local sets `PIP_REQUIRE_VIRTUALENV=true` so ordinary `pip`, `pip3` and
-`python -m pip install` cannot install into the host Python. Create and use a
-venv inside the temporary workspace. This is an accidental-host-write guard,
-not containment against explicit overrides, absolute host paths or other tools.
-`HOME` and `PIP_REQUIRE_VIRTUALENV` are framework-owned Local environment names,
-not Target credential names. Existing pip configuration is otherwise preserved.
+// example.suite.mjs
+verdict: "hybrid",
+judge: { model: "claude-opus-4-8" },
+```
 
-## Label runs for comparison
+Configure the Judge credential in the Runtime. Run Trust is always enforced, so
+execution, evidence-capture, or cleanup failures cannot become a pass.
 
-By default, the Viewer groups unlabeled runs under **Unversioned runs**.
-Use an experiment label to keep separate runs or batches easy to select:
+Results stay distinct:
+
+- `pass`: the configured scoring requirements passed.
+- `fail`: the evidence proves a required check or Judge failed.
+- `incomplete`: required execution, evidence, or Judge data was unavailable.
+- `unknown`: there was not enough scoring authority to decide.
+
+## 5. Run, inspect, and compare
+
+```sh
+npm --prefix harness exec -- tae run my-evals/example.suite.mjs --view
+```
+
+Use `--task`, `--condition`, `--agent`, or `--model` to narrow selections already
+defined by the Suite. These flags do not add new Suite entries.
+
+Label runs that you want to compare:
 
 ```sh
 npm --prefix harness exec -- tae run my-evals/example.suite.mjs --experiment-version before
 npm --prefix harness exec -- tae run my-evals/example.suite.mjs --experiment-version after
 ```
 
-Each command runs the Suite and may incur Agent/API costs. In **Compare**, select
-the two labels. A label names a cohort, not a claim of score continuity:
-mismatched or missing captured definition identities are excluded from scored
-comparison even if the task names match.
+Open **Compare** in the Viewer and select the two labels. Runs are compared only
+when their saved evaluation definitions are compatible; a matching label alone
+does not make two runs equivalent.
 
-## API credentials and evidence
+## Credentials and safety
 
-A Suite may name `api: { authorizationCredential: "YOUR_API_KEY",
-hosts: ["api.example.com"] }`. This exposes that named credential to its Tasks
-for Local execution, including Judge-only Tasks. Supply values at runtime;
-never commit them. The CLI warns before execution.
+Declare a target API only when a Task needs it:
 
-Before persistence and Judge delivery, the framework redacts known credentials
-and their printed leading fragments of at least eight characters, including in
-transcripts, stderr and captured artifacts. It does not guarantee removal of
-arbitrary encodings, shorter fragments or unrelated sensitive data. Avoid asking
-Agents to print keys and review artifacts before sharing them. This protection
-applies to newly captured evidence; it does not rewrite existing Result Stores.
-Text that coincidentally matches a known credential prefix is also redacted.
+```js
+api: {
+  authorizationCredential: "YOUR_API_KEY",
+  hosts: ["api.example.com"],
+},
+```
 
-Native Local cannot prove intercepted HTTP/tool evidence. Required request/tool
-checks reject an unsupported runtime before allocation. Advisory observations
-report unavailable rather than inventing evidence. Use the beta E2B Runtime for
-trusted interception and inspect its recorded Run Trust.
+Supply the value through the Runtime or `.env.local`; never commit it. The
+framework redacts known credentials from newly captured evidence, but you should
+still avoid asking Agents to print secrets and review results before sharing
+them.
 
-An evidence SHA identifies captured, content-addressed bytes; it is not the
-evidence itself and does not prove that a check passed. The Viewer projects
-the stored outcome, transcript and check source without rescoring.
+Local runs execute Agent code on the host and are not a security sandbox. Use
+the optional E2B Runtime when you need isolation or trusted HTTP/tool evidence.
