@@ -14,6 +14,8 @@ You need Node.js 22.13 or newer, the Claude Code CLI, and either
 ```sh
 git clone https://github.com/Nutlope/together-agent-evals.git
 cd together-agent-evals
+cp .env.example .env.local
+# Add your Anthropic API key or Claude Code OAuth token to .env.local.
 npm run quickstart
 ```
 
@@ -95,9 +97,12 @@ See the [authoring guide](docs/authoring.md) and
 The included Together tasks cover chat, RAG search, tool calling, and GPU
 discovery without reservation.
 
-Add these credentials to the ignored `.env.local` file:
+Copy `.env.example` to the ignored `.env.local` file, then add the credentials
+you use:
 
 ```sh
+cp .env.example .env.local
+
 ANTHROPIC_API_KEY=...
 TOGETHER_API_KEY=...
 ```
