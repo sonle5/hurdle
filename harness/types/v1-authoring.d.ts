@@ -55,6 +55,7 @@ export interface V1CheckRun {
       host: string;
       path: string;
       status: number | null;
+      disposition: "forwarded" | "blocked";
       evidence: string | null;
     }>[] | null;
     artifact(path: string): string | null;
@@ -83,6 +84,13 @@ export interface V1CheckRun {
     tool(name: string, expected: Readonly<{
       count: number;
       required?: boolean;
+    }>): void;
+  }>;
+  readonly block: Readonly<{
+    request(expected: Readonly<{
+      id: string;
+      method: string;
+      path: string;
     }>): void;
   }>;
   readonly observe: Readonly<{

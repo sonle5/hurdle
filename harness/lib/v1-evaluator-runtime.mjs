@@ -76,6 +76,33 @@ function requestDefinition(value, label = "run.expect.request") {
   };
 }
 
+function blockedRequestDefinition(value) {
+  const label = "run.block.request";
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} requires an object`);
+  }
+  if (Object.keys(value).some((key) => !["id", "method", "path"].includes(key))) {
+    throw new TypeError(`${label} contains an unknown field`);
+  }
+  if (typeof value.method !== "string" || !/^[A-Z]{1,16}$/.test(value.method)) {
+    throw new TypeError(`${label} method must be uppercase and at most 16 characters`);
+  }
+  if (
+    typeof value.path !== "string"
+    || !value.path.startsWith("/")
+    || value.path.includes("?")
+    || value.path.includes("#")
+    || Buffer.byteLength(value.path) > 4_096
+  ) {
+    throw new TypeError(`${label} path must be an exact query-free path`);
+  }
+  return {
+    id: checkId(value.id, "blocked request"),
+    method: value.method,
+    path: value.path,
+  };
+}
+
 function artifactDefinition(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("run.expect.artifact requires an object");
@@ -112,6 +139,7 @@ function artifactDefinition(value) {
 
 export function collectDeclarations(callback) {
   const requests = [];
+  const blockedRequests = [];
   const artifacts = [];
   const tools = [];
   let completion = false;
@@ -126,6 +154,12 @@ export function collectDeclarations(callback) {
       if (rubric !== null) throw new TypeError("run.judge may be declared only once");
       rubric = rubricDefinition(value);
     },
+    block: Object.freeze({
+      request(value) {
+        blockedRequests.push(blockedRequestDefinition(value));
+        deterministicCheckCount += 1;
+      },
+    }),
     expect: Object.freeze({
       completed() {
         if (completion) throw new TypeError("run.expect.completed may be declared only once");
@@ -162,11 +196,22 @@ export function collectDeclarations(callback) {
   callback(run);
   const ids = [
     ...(completion ? ["completed"] : []),
-    ...[...requests, ...artifacts, ...tools].map(({ id }) => id),
+    ...[...requests, ...blockedRequests, ...artifacts, ...tools].map(({ id }) => id),
   ];
   if (new Set(ids).size !== ids.length) throw new TypeError("expectation ids must be unique");
   if (new Set(artifacts.map(({ path }) => path)).size !== artifacts.length) {
     throw new TypeError("artifact paths must be unique");
+  }
+  if (
+    new Set(blockedRequests.map(({ method, path }) => `${method}\n${path}`)).size
+    !== blockedRequests.length
+  ) {
+    throw new TypeError("blocked request method and path pairs must be unique");
+  }
+  if (blockedRequests.some((blocked) => requests.some((request) => (
+    request.method === blocked.method && request.path === blocked.path
+  )))) {
+    throw new TypeError("a request cannot be both expected and blocked");
   }
   if (tools.length > 0) {
     const chatRequests = requests.filter(({ path }) => /\/chat\/completions$/.test(path));
@@ -177,6 +222,7 @@ export function collectDeclarations(callback) {
   }
   return {
     requests,
+    blockedRequests,
     artifacts,
     tools,
     rubric,
@@ -302,6 +348,7 @@ export function evaluateChecks(callback, input) {
         host: request.host,
         path: request.path,
         status: request.statusCode,
+        disposition: request.disposition ?? "forwarded",
         evidence: request.evidenceRef ?? null,
       })),
   );
@@ -359,6 +406,27 @@ export function evaluateChecks(callback, input) {
       evidence: matches.map(({ evidenceRef }) => evidenceRef),
     });
   };
+  const recordBlockedRequest = (expected) => {
+    const available = trustedCollections.length > 0;
+    const matches = trustedCollections.flatMap((collection) => collection.requests ?? [])
+      .filter((request) => (
+        relevantHosts.has(request.host)
+        && request.method === expected.method
+        && request.path === expected.path
+        && request.disposition === "blocked"
+      ));
+    recordCheck({
+      id: expected.id,
+      required: true,
+      passed: available ? matches.length === 0 : null,
+      summary: !available
+        ? "Trusted request-blocking evidence was unavailable."
+        : matches.length === 0
+          ? "No blocked request was attempted."
+          : `Blocked ${matches.length} matching request${matches.length === 1 ? "" : "s"} before reaching the target API.`,
+      evidence: matches.map(({ evidenceRef }) => evidenceRef),
+    });
+  };
   const run = Object.freeze({
     agentReply: reply,
     evidence: Object.freeze({
@@ -379,6 +447,11 @@ export function evaluateChecks(callback, input) {
     }),
     check: recordCheck,
     judge(value) { rubricDefinition(value); },
+    block: Object.freeze({
+      request(value) {
+        recordBlockedRequest(blockedRequestDefinition(value));
+      },
+    }),
     expect: Object.freeze({
       completed() {
         recordCheck({

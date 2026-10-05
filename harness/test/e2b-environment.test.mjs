@@ -254,6 +254,7 @@ test("E2B runs one canonical cell with Guardian-only Target credentials and term
   assert.deepEqual(environment.capabilities, [
     "environment.isolated-workspace",
     "environment.trusted-egress-capture",
+    "environment.trusted-request-blocking",
     "environment.exclusive-resources",
     "environment.fixed-workspace-layout",
     "environment.workspace-artifact-metadata",

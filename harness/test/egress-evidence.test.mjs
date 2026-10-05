@@ -124,3 +124,58 @@ test("capture requests carry explicit protocols without product semantics", () =
     routes: [{ host: "api.example.com", selectedFields: ["x-cluster"] }],
   });
 });
+
+test("capture requests and normalized evidence preserve exact request blockers", () => {
+  const blockedRequests = [{
+    id: "no-reservation",
+    method: "POST",
+    path: "/v1/compute/clusters",
+  }];
+  assert.deepEqual(createCaptureRequest({
+    egress: {
+      relevantHosts: ["api.example.com"],
+      selectedFields: [],
+      blockedRequests,
+    },
+  }), {
+    mode: "network-egress-metadata-v1",
+    protocols: ["http", "https"],
+    routes: [{ host: "api.example.com", selectedFields: [] }],
+    blockedRequests,
+  });
+
+  const normalized = normalizeEgressCollections({
+    collections: [{
+      status: "captured",
+      requests: [httpEvent({
+        path: "/v1/compute/clusters",
+        statusCode: 403,
+        durationMs: 0,
+        selectedFields: {},
+        disposition: "blocked",
+      })],
+      provenance,
+    }],
+    selectedFieldNames: [],
+    blockedRequests,
+    redactText: String,
+  });
+  assert.equal(normalized[0].requests[0].disposition, "blocked");
+
+  assert.throws(() => normalizeEgressCollections({
+    collections: [{
+      status: "captured",
+      requests: [httpEvent({
+        path: "/v1/other",
+        statusCode: 403,
+        durationMs: 0,
+        selectedFields: {},
+        disposition: "blocked",
+      })],
+      provenance,
+    }],
+    selectedFieldNames: [],
+    blockedRequests,
+    redactText: String,
+  }), /invalid blocked request/);
+});

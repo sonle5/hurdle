@@ -637,12 +637,20 @@ export async function resolveV1Suite({ suitePath }) {
           checksFile,
         );
       }
-      if ((declarations.requests.length > 0 || declarations.tools.length > 0) && !validated.api) {
+      if (
+        (
+          declarations.requests.length > 0
+          || declarations.blockedRequests.length > 0
+          || declarations.tools.length > 0
+        )
+        && !validated.api
+      ) {
         fail("task.api-missing", "HTTP expectations require Suite api configuration.", checksFile);
       }
       const usesApi = validated.api !== null;
       const requiresTrustedEgress = declarations.requests.some(({ required }) => required)
-        || declarations.tools.some(({ required }) => required);
+        || declarations.tools.some(({ required }) => required)
+        || declarations.blockedRequests.length > 0;
       const judgeOnly = validated.verdict === "judge" && !declarations.hasDeterministicChecks;
       if (!judgeOnly) {
         writeFileSync(
@@ -688,6 +696,13 @@ export async function resolveV1Suite({ suitePath }) {
             relevantHosts: [...validated.api.hosts],
             selectedFields: [],
             protocols: ["https"],
+            ...(declarations.blockedRequests.length > 0 ? {
+              blockedRequests: declarations.blockedRequests.map(({ id, method, path }) => ({
+                id,
+                method,
+                path,
+              })),
+            } : {}),
             ...(declarations.tools.length > 0 ? {
               exchangeFactProfiles: [nativeToolExchangeProfile(declarations.tools[0].request.path)],
             } : {}),
@@ -695,6 +710,9 @@ export async function resolveV1Suite({ suitePath }) {
           executionRequirements: [
             "environment.isolated-workspace",
             ...(requiresTrustedEgress ? ["environment.trusted-egress-capture"] : []),
+            ...(declarations.blockedRequests.length > 0
+              ? ["environment.trusted-request-blocking"]
+              : []),
           ],
         } : {}),
         evaluation: {
@@ -727,6 +745,11 @@ export async function resolveV1Suite({ suitePath }) {
       if (task.egress?.exchangeFactProfiles) {
         task.egress.exchangeFactProfiles = normalizeExchangeFactProfiles(task.egress.exchangeFactProfiles);
       }
+      task.egress?.blockedRequests?.sort((left, right) => (
+        left.id.localeCompare(right.id)
+        || left.method.localeCompare(right.method)
+        || left.path.localeCompare(right.path)
+      ));
     }
     const value = compileRunPlan({
       root: generatedRoot,

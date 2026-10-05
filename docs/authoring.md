@@ -92,6 +92,29 @@ run.expect.tool("lookup_inventory", { count: 1 });
 Required request and tool checks need a Runtime that can capture trusted
 traffic, such as E2B. Native Local runs cannot prove those observations.
 
+### Block an expensive or destructive request
+
+For an E2B run, a Task can prevent one exact HTTP method and path from reaching
+the target API:
+
+```js
+run.block.request({
+  id: "no-reservation",
+  method: "POST",
+  path: "/v1/compute/clusters",
+});
+```
+
+The Guardian returns a synthetic `403` before it substitutes the real API
+credential or contacts the target. The check passes when the Agent never tries
+the request and fails when the Guardian blocks an attempt. The blocked attempt
+is retained as trusted, payload-free request evidence.
+
+Blocking is deliberately narrow in this release: `method` and `path` are exact,
+the path cannot contain a query or fragment, and request bodies are not
+inspected. A Task that declares a blocker requires the E2B Runtime; Local runs
+are rejected before the Agent starts.
+
 ## 4. Choose how a run is scored
 
 - `code`: required code checks decide the result. No Judge runs.

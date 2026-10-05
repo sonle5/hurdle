@@ -62,6 +62,35 @@ SELECTED_RESPONSE_HEADERS = {
 }
 
 
+def _load_blocked_requests() -> tuple[tuple[str, str], ...]:
+    try:
+        rules = json.loads(os.environ.get("TAE_EGRESS_BLOCKED_REQUESTS", "[]"))
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("invalid blocked request policy") from error
+    if not isinstance(rules, list) or len(rules) > 128:
+        raise RuntimeError("invalid blocked request policy")
+    ids: set[str] = set()
+    pairs: set[tuple[str, str]] = set()
+    for rule in rules:
+        if not _closed_object(rule, frozenset(("id", "method", "path"))):
+            raise RuntimeError("invalid blocked request policy")
+        rule_id = rule.get("id")
+        method = rule.get("method")
+        path = rule.get("path")
+        if (
+            not _valid_id(rule_id)
+            or not isinstance(method, str)
+            or re.fullmatch(r"[A-Z]{1,16}", method) is None
+            or not _valid_path(path)
+            or rule_id in ids
+            or (method, path) in pairs
+        ):
+            raise RuntimeError("invalid blocked request policy")
+        ids.add(rule_id)
+        pairs.add((method, path))
+    return tuple(sorted(pairs))
+
+
 class FactCaptureError(Exception):
     """Closed exchange-fact failure whose message is never persisted."""
 
@@ -143,6 +172,9 @@ def _valid_path(path: object) -> bool:
     return isinstance(path, str) and path.startswith("/") and "?" not in path and "#" not in path and (
         len(path.encode("utf-8")) <= MAX_PATH_BYTES
     )
+
+
+BLOCKED_REQUESTS = frozenset(_load_blocked_requests())
 
 
 def _template_segments(template: object) -> list[str] | None:
@@ -333,6 +365,27 @@ class GenericGuardian:
             return
         if self.sealed:
             flow.response = http.Response.make(503, b"capture sealed")
+            return
+        method = flow.request.method.upper()
+        path = urlsplit(flow.request.path).path or "/"
+        if (method, path) in BLOCKED_REQUESTS:
+            self._append({
+                "kind": "http-request",
+                "observedAt": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                "method": method,
+                "scheme": flow.request.scheme.lower() if flow.request.scheme else None,
+                "host": host,
+                "path": path,
+                "statusCode": 403,
+                "durationMs": 0,
+                "selectedFields": {},
+                "disposition": "blocked",
+            })
+            flow.response = http.Response.make(
+                403,
+                b"request blocked by evaluation policy",
+                {"content-type": "text/plain; charset=utf-8"},
+            )
             return
         for binding in SUBSTITUTIONS:
             if host not in binding.get("hosts", []):

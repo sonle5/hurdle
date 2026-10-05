@@ -164,6 +164,7 @@ function validateEnvelope(envelope) {
     throw new TypeError("E2B workspace metadata selection must be boolean");
   }
   const routes = envelope.capture?.routes ?? [];
+  const blockedRequests = envelope.capture?.blockedRequests ?? [];
   assertExchangeFactCapturePolicy(envelope.capture?.exchangeFacts);
   const requestedProtocols = envelope.capture?.mode === "none"
     ? []
@@ -182,6 +183,31 @@ function validateEnvelope(envelope) {
     ))
   ) {
     throw new TypeError("E2B selected-field capture is not supported by this profile");
+  }
+  if (
+    !Array.isArray(blockedRequests)
+    || blockedRequests.length > 128
+    || blockedRequests.some((rule) => (
+      !rule
+      || typeof rule !== "object"
+      || Array.isArray(rule)
+      || Object.keys(rule).length !== 3
+      || Object.keys(rule).some((key) => !["id", "method", "path"].includes(key))
+      || typeof rule.id !== "string"
+      || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(rule.id)
+      || typeof rule.method !== "string"
+      || !/^[A-Z]{1,16}$/.test(rule.method)
+      || typeof rule.path !== "string"
+      || !rule.path.startsWith("/")
+      || rule.path.includes("?")
+      || rule.path.includes("#")
+      || Buffer.byteLength(rule.path) > 4_096
+    ))
+    || new Set(blockedRequests.map(({ id }) => id)).size !== blockedRequests.length
+    || new Set(blockedRequests.map(({ method, path }) => `${method}\n${path}`)).size
+      !== blockedRequests.length
+  ) {
+    throw new TypeError("E2B request blocking is not supported by this profile");
   }
   const captureHosts = new Set(routes.map(({ host }) => host));
   for (const binding of envelope.credentialBindings) {
@@ -208,9 +234,12 @@ function validateEnvelope(envelope) {
     ))
     || (
       envelope.capture?.mode === "none"
-      && envelope.credentialBindings.some(({ delivery }) => (
-        delivery.kind === "captured-http-header"
-      ))
+      && (
+        blockedRequests.length > 0
+        || envelope.credentialBindings.some(({ delivery }) => (
+          delivery.kind === "captured-http-header"
+        ))
+      )
     )
   ) {
     throw new TypeError("E2B capture request is not supported by this capture profile");
@@ -289,6 +318,7 @@ export function createE2BExecutionEnvironment({
     capabilities: Object.freeze([
       "environment.isolated-workspace",
       "environment.trusted-egress-capture",
+      "environment.trusted-request-blocking",
       "environment.exclusive-resources",
       "environment.fixed-workspace-layout",
       ...(workspaceArtifactMetadataSupported
