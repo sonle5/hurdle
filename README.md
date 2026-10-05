@@ -4,23 +4,20 @@
 
 Test how Claude Code and Codex use an API, SDK, or documentation. Score each run
 with deterministic checks, an LLM Judge, or both, then inspect the saved evidence
-in a local Viewer.
+in a local viewer.
 
 ## Quick start
 
-You need Node.js 22.13 or newer, the Claude Code CLI, and either
-`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`.
+Get started by cloning the repo. Quickstart uses Claude Code. So set either ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN.
 
 ```sh
 git clone https://github.com/Nutlope/together-agent-evals.git
 cd together-agent-evals
-cp .env.example .env.local
-# Add your Anthropic API key or Claude Code OAuth token to .env.local.
 npm run quickstart
 ```
 
 Quickstart installs dependencies, runs one copy-message task, and opens the
-Viewer. It does not need a Together key, Judge, E2B account, or database. Your
+viewer. It does not need a Together key, Judge, E2B account, or database. Your
 agent provider may charge for the run.
 
 Results are saved in `.tae/results-v1`. Reopen them with:
@@ -32,9 +29,6 @@ npm run view
 > [!WARNING]
 > Local runs execute agent code on your computer with network access. They are
 > not a security sandbox. Only run tasks, checks, and suites you trust.
-
-E2B tasks can also prevent an exact expensive or destructive API request from
-reaching the provider. See [request blocking](docs/authoring.md#block-an-expensive-or-destructive-request).
 
 ## Create an evaluation
 
@@ -97,12 +91,9 @@ See the [authoring guide](docs/authoring.md) and
 The included Together tasks cover chat, RAG search, tool calling, and GPU
 discovery without reservation.
 
-Copy `.env.example` to the ignored `.env.local` file, then add the credentials
-you use:
+Add these credentials to the ignored `.env.local` file:
 
 ```sh
-cp .env.example .env.local
-
 ANTHROPIC_API_KEY=...
 TOGETHER_API_KEY=...
 ```
