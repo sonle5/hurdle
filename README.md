@@ -46,6 +46,41 @@ npm --prefix harness exec -- tae run my-evals/example.suite.mjs --view
 A **Task** contains a prompt, checks, and optional inputs. A **Suite** selects the
 tasks, agents, models, conditions, and repeat count.
 
+Use `checks.mjs` to evaluate what happened:
+
+```js
+import { defineChecks } from "tae";
+
+export default defineChecks((run) => {
+  run.expect.completed();
+
+  run.expect.request({
+    id: "regions",
+    method: "GET",
+    path: "/v1/compute/regions",
+    status: 200,
+  });
+});
+```
+
+For an E2B Task, add an optional `guard.mjs` to prevent an exact request from
+reaching the API:
+
+```js
+import { defineGuard } from "tae";
+
+export default defineGuard((guard) => {
+  guard.block.request({
+    id: "no-reservation",
+    method: "POST",
+    path: "/v1/compute/clusters",
+  });
+});
+```
+
+TAE records each guard as a deterministic check. A forbidden attempt receives a
+synthetic `403` and is never forwarded to the target API.
+
 Choose one scoring mode:
 
 - `code`: deterministic checks decide the result.
