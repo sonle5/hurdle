@@ -59,9 +59,16 @@ allowed.response = Response.make(201, headers={
 })
 addon.response(allowed)
 
-blocked = flow("blocked", "other.example.com", "/v1/chat")
-addon.requestheaders(blocked)
-assert blocked.response.status_code == 403
+policy_blocked = flow("policy-blocked", "api.example.com", "/v1/compute/clusters", {
+    "authorization": "Bearer " + os.environ["SURROGATE"],
+})
+addon.requestheaders(policy_blocked)
+assert policy_blocked.response.status_code == 403
+assert policy_blocked.request.headers["authorization"] == "Bearer " + os.environ["SURROGATE"]
+
+route_rejected = flow("route-rejected", "other.example.com", "/v1/chat")
+addon.requestheaders(route_rejected)
+assert route_rejected.response.status_code == 403
 
 control = flow("control", "tae-egress-control.invalid", "/__tae_egress_control__/seal", {
     "x-tae-egress-control": os.environ["TAE_EGRESS_CONTROL_TOKEN"],
@@ -70,7 +77,7 @@ addon.requestheaders(control)
 state = json.loads(control.response.content)
 assert state["sealed"] is True
 assert state["activeFlows"] == 0
-assert state["rowCount"] == 1
+assert state["rowCount"] == 2
 assert state["truncated"] is False
 assert state["journalDigest"].startswith("sha256:")
 print(json.dumps(state, separators=(",", ":")))
@@ -88,6 +95,11 @@ print(json.dumps(state, separators=(",", ":")))
       TAE_EGRESS_SELECTED_RESPONSE_HEADERS: JSON.stringify({
         "api.example.com": ["x-cluster"],
       }),
+      TAE_EGRESS_BLOCKED_REQUESTS: JSON.stringify([{
+        id: "no-reservation",
+        method: "POST",
+        path: "/v1/compute/clusters",
+      }]),
       TAE_EGRESS_SUBSTITUTIONS: JSON.stringify([{
         surrogate,
         value: secret,
@@ -98,20 +110,34 @@ print(json.dumps(state, separators=(",", ":")))
   });
 
   assert.equal(result.status, 0, result.stderr);
-  const rows = readFileSync(journal, "utf8");
-  assert.doesNotMatch(rows, new RegExp(secret));
-  assert.doesNotMatch(rows, /must-not-persist|authorization|token=/);
-  assert.deepEqual(JSON.parse(rows), {
+  const contents = readFileSync(journal, "utf8");
+  const rows = contents.trim().split("\n").map((line) => JSON.parse(line));
+  assert.doesNotMatch(contents, new RegExp(secret));
+  assert.doesNotMatch(contents, /must-not-persist|authorization|token=/);
+  assert.deepEqual(rows[0], {
     kind: "http-request",
     sequence: 0,
-    observedAt: JSON.parse(rows).observedAt,
+    observedAt: rows[0].observedAt,
     method: "POST",
     scheme: "https",
     host: "api.example.com",
     path: "/v1/chat",
     statusCode: 201,
-    durationMs: JSON.parse(rows).durationMs,
+    durationMs: rows[0].durationMs,
     selectedFields: { "x-cluster": "cluster-1" },
+  });
+  assert.deepEqual(rows[1], {
+    kind: "http-request",
+    sequence: 1,
+    observedAt: rows[1].observedAt,
+    method: "POST",
+    scheme: "https",
+    host: "api.example.com",
+    path: "/v1/compute/clusters",
+    statusCode: 403,
+    durationMs: 0,
+    selectedFields: {},
+    disposition: "blocked",
   });
 });
 

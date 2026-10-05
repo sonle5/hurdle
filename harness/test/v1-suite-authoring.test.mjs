@@ -13,6 +13,11 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { openLocalResultStore } from "../lib/local-result-store.mjs";
+import { resolveV1Suite } from "../lib/v1-authoring.mjs";
+import {
+  collectTaskDeclarations,
+  evaluateChecks,
+} from "../lib/v1-evaluator-runtime.mjs";
 import { createCanonicalDashboardProjection } from "../../viewer/lib/canonical-dashboard-projection.mjs";
 
 const cliPath = fileURLToPath(new URL("../bin/tae.mjs", import.meta.url));
@@ -284,6 +289,120 @@ test("a Local API Task can require completion while observing unavailable HTTP e
   ));
   assert.match(transcript, /credential-present/);
   assert.doesNotMatch(transcript, /TEST-LOCAL-TARGET-CREDENTIAL/);
+});
+
+test("request blockers compile to E2B-only policy and fail on a blocked attempt", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-v1-block-request-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const taskRoot = join(root, "tasks", "safe-cluster-advice");
+  mkdirSync(taskRoot, { recursive: true });
+  writeFileSync(join(taskRoot, "prompt.md"), "Explain how to create a cluster without creating one.\n");
+  writeFileSync(join(taskRoot, "checks.mjs"), [
+    'import { defineChecks } from "tae";',
+    "export default defineChecks((run) => {",
+    "  run.expect.completed();",
+    "});",
+    "",
+  ].join("\n"));
+  writeFileSync(join(taskRoot, "guard.mjs"), [
+    'import { defineGuard } from "tae";',
+    "export default defineGuard((guard) => {",
+    "  guard.block.request({",
+    '    id: "no-reservation",',
+    '    method: "POST",',
+    '    path: "/v1/compute/clusters",',
+    "  });",
+    "});",
+    "",
+  ].join("\n"));
+  writeFileSync(join(root, "safe.suite.mjs"), [
+    'import { defineSuite } from "tae";',
+    "export default defineSuite({",
+    '  api: { authorizationCredential: "TOGETHER_API_KEY", hosts: ["api.together.xyz"] },',
+    '  tasks: ["./tasks/safe-cluster-advice"],',
+    '  agents: [{ runner: "claude-code", model: "test-model" }],',
+    "  conditions: { default: { skills: [], mcpServers: [] } },",
+    "  repeats: 1,",
+    '  verdict: "code",',
+    "});",
+    "",
+  ].join("\n"));
+
+  const resolved = await resolveV1Suite({ suitePath: join(root, "safe.suite.mjs") });
+  t.after(() => resolved.dispose());
+  assert.equal(resolved.ok, true);
+  const task = resolved.value.definition.tasks["safe-cluster-advice"];
+  assert.deepEqual(task.egress.blockedRequests, [{
+    id: "no-reservation",
+    method: "POST",
+    path: "/v1/compute/clusters",
+  }]);
+  assert.deepEqual(task.executionRequirements, [
+    "environment.isolated-workspace",
+    "environment.trusted-egress-capture",
+    "environment.trusted-request-blocking",
+  ]);
+  assert.equal(task.credentialDeliveryOverrides.TOGETHER_API_KEY.kind, "captured-http-header");
+
+  assert.ok(resolved.value.behaviorGraphsByEntry["evaluators/safe-cluster-advice.mjs"]
+    .includes("evaluators/safe-cluster-advice-guard.mjs"));
+
+  const checks = (run) => run.expect.completed();
+  const guard = (value) => value.block.request({
+    id: "no-reservation",
+    method: "POST",
+    path: "/v1/compute/clusters",
+  });
+  const result = evaluateChecks(checks, {
+    snapshot: { target: { egress: { relevantHosts: ["api.together.xyz"] } } },
+    transcript: {
+      evidenceRef: `sha256:${"b".repeat(64)}`,
+      jsonl: `${JSON.stringify({ type: "result", subtype: "success", result: "done" })}\n`,
+    },
+    readArtifactText() { return { status: "missing", evidenceRef: null }; },
+    egress: [{
+      status: "captured",
+      provenance: {
+        lifecyclePhase: "execution",
+        trust: "environment-observed",
+      },
+      requests: [{
+        method: "POST",
+        host: "api.together.xyz",
+        path: "/v1/compute/clusters",
+        statusCode: 403,
+        disposition: "blocked",
+        evidenceRef: `sha256:${"a".repeat(64)}`,
+      }],
+    }],
+  }, guard);
+  assert.deepEqual(result.checks.map(({ id, outcome }) => ({ id, outcome })), [
+    { id: "completed", outcome: "pass" },
+    { id: "no-reservation", outcome: "fail" },
+  ]);
+  assert.equal(
+    result.checks[1].summary,
+    "Blocked 1 matching request before reaching the target API.",
+  );
+  assert.deepEqual(result.checks[1].evidenceRefs, [`sha256:${"a".repeat(64)}`]);
+});
+
+test("request blockers reject contradictory expectations", () => {
+  assert.throws(() => collectTaskDeclarations((run) => {
+    run.expect.request({
+      id: "create-succeeds",
+      method: "POST",
+      path: "/v1/compute/clusters",
+      status: 200,
+    });
+  }, (guard) => {
+    guard.block.request({
+      id: "no-reservation",
+      method: "POST",
+      path: "/v1/compute/clusters",
+    });
+  }), /cannot be both expected and blocked/);
 });
 
 test("failed and unavailable checks remain distinct and do not stop later repeats", async (t) => {

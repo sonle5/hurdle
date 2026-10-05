@@ -70,6 +70,7 @@ export interface HttpRequestEvidence extends EgressEvidenceBase {
   readonly kind: "http-request";
   readonly method: string;
   readonly scheme: "http" | "https" | null;
+  readonly disposition?: "blocked";
   readonly exchangeFacts?: ExchangeFactsV1;
 }
 

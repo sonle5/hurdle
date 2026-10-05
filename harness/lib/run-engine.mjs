@@ -304,6 +304,7 @@ async function persistEgressCollections(
   credentials,
   selectedFieldNames,
   exchangeFactProfiles,
+  blockedRequests,
 ) {
   const normalized = normalizeEgressCollections({
     collections: observed.egressCollections ?? [{
@@ -320,6 +321,7 @@ async function persistEgressCollections(
     }],
     selectedFieldNames,
     exchangeFactProfiles,
+    blockedRequests,
     redactText: (value) => redactTargetText(value, credentials),
   });
   const manifest = [];
@@ -792,6 +794,7 @@ async function runOne({
         credentials,
         prepared.snapshot.target.egress.selectedFields,
         prepared.snapshot.target.egress.exchangeFactProfiles,
+        prepared.snapshot.target.egress.blockedRequests,
       );
       const authorityFields = authorityRecordFields({
         snapshot: prepared.snapshot,
@@ -974,6 +977,7 @@ async function runOne({
       credentials,
       prepared.snapshot.target.egress.selectedFields,
       prepared.snapshot.target.egress.exchangeFactProfiles,
+      prepared.snapshot.target.egress.blockedRequests,
     );
     const evaluatorArtifacts = artifacts.map((artifact) => {
       const sealed = artifactManifest.find(({ path }) => path === artifact.path);

@@ -39,6 +39,7 @@ selected independently.
 tasks/copy-message/
 ├── prompt.md
 ├── checks.mjs
+├── guard.mjs       # optional
 ├── fixtures/
 │   └── message.txt
 └── workspace/
@@ -49,8 +50,8 @@ Write the Agent's instructions in `prompt.md`. Put read-only inputs in
 are placed at the workspace root, which is useful when the prompt names an exact
 path.
 
-Every Task needs `prompt.md` and `checks.mjs`. Symlinks and overlapping staged
-paths are rejected.
+Every Task needs `prompt.md` and `checks.mjs`. Add `guard.mjs` only when the
+Task must prevent a request. Symlinks and overlapping staged paths are rejected.
 
 ## 3. Write deterministic checks
 
@@ -91,6 +92,34 @@ run.expect.tool("lookup_inventory", { count: 1 });
 
 Required request and tool checks need a Runtime that can capture trusted
 traffic, such as E2B. Native Local runs cannot prove those observations.
+
+### Block an expensive or destructive request
+
+Put preventive policy in `guard.mjs`, separate from the checks that inspect the
+completed run:
+
+```js
+import { defineGuard } from "tae";
+
+export default defineGuard((guard) => {
+  guard.block.request({
+    id: "no-reservation",
+    method: "POST",
+    path: "/v1/compute/clusters",
+  });
+});
+```
+
+During an E2B run, the Guardian returns a synthetic `403` before it substitutes
+the real API credential or contacts the target. TAE automatically records a
+deterministic check for every guard: it passes when the Agent never tries the
+request and fails when the Guardian blocks an attempt. The blocked attempt is
+retained as trusted, payload-free request evidence.
+
+Blocking is deliberately narrow in this release: `method` and `path` are exact,
+the path cannot contain a query or fragment, and request bodies are not
+inspected. A Task that declares a blocker requires the E2B Runtime; Local runs
+are rejected before the Agent starts.
 
 ## 4. Choose how a run is scored
 

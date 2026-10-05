@@ -76,6 +76,33 @@ function requestDefinition(value, label = "run.expect.request") {
   };
 }
 
+function blockedRequestDefinition(value) {
+  const label = "guard.block.request";
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} requires an object`);
+  }
+  if (Object.keys(value).some((key) => !["id", "method", "path"].includes(key))) {
+    throw new TypeError(`${label} contains an unknown field`);
+  }
+  if (typeof value.method !== "string" || !/^[A-Z]{1,16}$/.test(value.method)) {
+    throw new TypeError(`${label} method must be uppercase and at most 16 characters`);
+  }
+  if (
+    typeof value.path !== "string"
+    || !value.path.startsWith("/")
+    || value.path.includes("?")
+    || value.path.includes("#")
+    || Buffer.byteLength(value.path) > 4_096
+  ) {
+    throw new TypeError(`${label} path must be an exact query-free path`);
+  }
+  return {
+    id: checkId(value.id, "blocked request"),
+    method: value.method,
+    path: value.path,
+  };
+}
+
 function artifactDefinition(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("run.expect.artifact requires an object");
@@ -114,14 +141,19 @@ export function collectDeclarations(callback) {
   const requests = [];
   const artifacts = [];
   const tools = [];
+  const checkIds = [];
   let completion = false;
+  let replyIncludes = false;
   let deterministicCheckCount = 0;
   let rubric = null;
   const run = Object.freeze({
     agentReply: null,
     evidence: Object.freeze({ transcript: null, requests: null, artifact() { return null; } }),
     artifacts: Object.freeze({ json() { return null; }, text() { return null; } }),
-    check() { deterministicCheckCount += 1; },
+    check(value) {
+      checkIds.push(checkId(value?.id, "run.check"));
+      deterministicCheckCount += 1;
+    },
     judge(value) {
       if (rubric !== null) throw new TypeError("run.judge may be declared only once");
       rubric = rubricDefinition(value);
@@ -130,19 +162,31 @@ export function collectDeclarations(callback) {
       completed() {
         if (completion) throw new TypeError("run.expect.completed may be declared only once");
         completion = true;
+        checkIds.push("completed");
         deterministicCheckCount += 1;
       },
-      replyIncludes() { deterministicCheckCount += 1; },
+      replyIncludes() {
+        if (replyIncludes) throw new TypeError("run.expect.replyIncludes may be declared only once");
+        replyIncludes = true;
+        checkIds.push("reply-includes");
+        deterministicCheckCount += 1;
+      },
       request(value) {
-        requests.push(requestDefinition(value));
+        const definition = requestDefinition(value);
+        requests.push(definition);
+        checkIds.push(definition.id);
         deterministicCheckCount += 1;
       },
       artifact(value) {
-        artifacts.push(artifactDefinition(value));
+        const definition = artifactDefinition(value);
+        artifacts.push(definition);
+        checkIds.push(definition.id);
         deterministicCheckCount += 1;
       },
       tool(name, value) {
-        tools.push(toolDefinition(name, value));
+        const definition = toolDefinition(name, value);
+        tools.push(definition);
+        checkIds.push(definition.id);
         deterministicCheckCount += 1;
       },
     }),
@@ -151,20 +195,18 @@ export function collectDeclarations(callback) {
         if (value && Object.hasOwn(value, "required")) {
           throw new TypeError("run.observe.request does not accept required");
         }
-        requests.push(requestDefinition(
+        const definition = requestDefinition(
           { ...value, required: false },
           "run.observe.request",
-        ));
+        );
+        requests.push(definition);
+        checkIds.push(definition.id);
         deterministicCheckCount += 1;
       },
     }),
   });
   callback(run);
-  const ids = [
-    ...(completion ? ["completed"] : []),
-    ...[...requests, ...artifacts, ...tools].map(({ id }) => id),
-  ];
-  if (new Set(ids).size !== ids.length) throw new TypeError("expectation ids must be unique");
+  if (new Set(checkIds).size !== checkIds.length) throw new TypeError("check ids must be unique");
   if (new Set(artifacts.map(({ path }) => path)).size !== artifacts.length) {
     throw new TypeError("artifact paths must be unique");
   }
@@ -179,8 +221,61 @@ export function collectDeclarations(callback) {
     requests,
     artifacts,
     tools,
+    checkIds,
     rubric,
     hasDeterministicChecks: deterministicCheckCount > 0,
+  };
+}
+
+export function collectGuardDeclarations(callback) {
+  if (typeof callback !== "function") {
+    throw new TypeError("defineGuard must export a function");
+  }
+  const blockedRequests = [];
+  const guard = Object.freeze({
+    block: Object.freeze({
+      request(value) {
+        blockedRequests.push(blockedRequestDefinition(value));
+      },
+    }),
+  });
+  callback(guard);
+  if (blockedRequests.length === 0) {
+    throw new TypeError("defineGuard must declare at least one guard");
+  }
+  if (new Set(blockedRequests.map(({ id }) => id)).size !== blockedRequests.length) {
+    throw new TypeError("guard ids must be unique");
+  }
+  if (
+    new Set(blockedRequests.map(({ method, path }) => `${method}\n${path}`)).size
+    !== blockedRequests.length
+  ) {
+    throw new TypeError("blocked request method and path pairs must be unique");
+  }
+  return { blockedRequests };
+}
+
+export function collectTaskDeclarations(checksCallback, guardCallback = null) {
+  const declarations = collectDeclarations(checksCallback);
+  const blockedRequests = guardCallback === null
+    ? []
+    : collectGuardDeclarations(guardCallback).blockedRequests;
+  const ids = [
+    ...declarations.checkIds,
+    ...blockedRequests.map(({ id }) => id),
+  ];
+  if (new Set(ids).size !== ids.length) {
+    throw new TypeError("check and guard ids must be unique");
+  }
+  if (blockedRequests.some((blocked) => declarations.requests.some((request) => (
+    request.method === blocked.method && request.path === blocked.path
+  )))) {
+    throw new TypeError("a request cannot be both expected and blocked");
+  }
+  return {
+    ...declarations,
+    blockedRequests,
+    hasDeterministicChecks: declarations.hasDeterministicChecks || blockedRequests.length > 0,
   };
 }
 
@@ -282,7 +377,7 @@ function agentCompleted(transcript) {
   return terminal ?? false;
 }
 
-export function evaluateChecks(callback, input) {
+export function evaluateChecks(callback, input, guardCallback = null) {
   const checks = [];
   const declaredRequests = [];
   const transcriptEvidence = input.transcript?.evidenceRef ?? null;
@@ -302,6 +397,7 @@ export function evaluateChecks(callback, input) {
         host: request.host,
         path: request.path,
         status: request.statusCode,
+        disposition: request.disposition ?? "forwarded",
         evidence: request.evidenceRef ?? null,
       })),
   );
@@ -356,6 +452,27 @@ export function evaluateChecks(callback, input) {
         : matches.length > 0
           ? "Observed the expected successful HTTP request."
           : "The expected successful HTTP request was not observed.",
+      evidence: matches.map(({ evidenceRef }) => evidenceRef),
+    });
+  };
+  const recordBlockedRequest = (expected) => {
+    const available = trustedCollections.length > 0;
+    const matches = trustedCollections.flatMap((collection) => collection.requests ?? [])
+      .filter((request) => (
+        relevantHosts.has(request.host)
+        && request.method === expected.method
+        && request.path === expected.path
+        && request.disposition === "blocked"
+      ));
+    recordCheck({
+      id: expected.id,
+      required: true,
+      passed: available ? matches.length === 0 : null,
+      summary: !available
+        ? "Trusted request-blocking evidence was unavailable."
+        : matches.length === 0
+          ? "No blocked request was attempted."
+          : `Blocked ${matches.length} matching request${matches.length === 1 ? "" : "s"} before reaching the target API.`,
       evidence: matches.map(({ evidenceRef }) => evidenceRef),
     });
   };
@@ -467,6 +584,11 @@ export function evaluateChecks(callback, input) {
     }),
   });
   callback(run);
+  if (guardCallback !== null) {
+    for (const blockedRequest of collectGuardDeclarations(guardCallback).blockedRequests) {
+      recordBlockedRequest(blockedRequest);
+    }
+  }
   if (checks.length === 0) throw new TypeError("defineChecks must record at least one check");
   return { checks, targetMetrics: {} };
 }

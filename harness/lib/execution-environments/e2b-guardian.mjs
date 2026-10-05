@@ -260,7 +260,15 @@ function capturePolicy(capture) {
     if (capture.exchangeFacts !== null && capture.exchangeFacts !== undefined) {
       throw new TypeError("E2B exchange-fact capture requires egress capture");
     }
-    return { hosts: [], selectedResponseHeaders: {}, exchangeFacts: null };
+    if ((capture.blockedRequests?.length ?? 0) > 0) {
+      throw new TypeError("E2B request blocking requires egress capture");
+    }
+    return {
+      hosts: [],
+      selectedResponseHeaders: {},
+      exchangeFacts: null,
+      blockedRequests: [],
+    };
   }
   if (
     !["http-egress-metadata-v1", "network-egress-metadata-v1"].includes(capture?.mode)
@@ -276,10 +284,37 @@ function capturePolicy(capture) {
     host,
     selectedFields,
   }) => [host, [...selectedFields]]));
+  const blockedRequests = capture.blockedRequests ?? [];
+  if (
+    !Array.isArray(blockedRequests)
+    || blockedRequests.length > 128
+    || blockedRequests.some((rule) => (
+      !rule
+      || typeof rule !== "object"
+      || Array.isArray(rule)
+      || Object.keys(rule).length !== 3
+      || Object.keys(rule).some((key) => !["id", "method", "path"].includes(key))
+      || typeof rule.id !== "string"
+      || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(rule.id)
+      || typeof rule.method !== "string"
+      || !/^[A-Z]{1,16}$/.test(rule.method)
+      || typeof rule.path !== "string"
+      || !rule.path.startsWith("/")
+      || rule.path.includes("?")
+      || rule.path.includes("#")
+      || Buffer.byteLength(rule.path) > 4_096
+    ))
+    || new Set(blockedRequests.map(({ id }) => id)).size !== blockedRequests.length
+    || new Set(blockedRequests.map(({ method, path }) => `${method}\n${path}`)).size
+      !== blockedRequests.length
+  ) {
+    throw new TypeError("E2B request-blocking policy is invalid");
+  }
   return {
     hosts,
     selectedResponseHeaders,
     exchangeFacts: assertExchangeFactCapturePolicy(capture.exchangeFacts),
+    blockedRequests,
   };
 }
 
@@ -528,7 +563,12 @@ export function createE2BGuardianController() {
       if (profile !== "external-guardian-http-metadata-v1") {
         throw new TypeError("unsupported E2B Guardian capture profile");
       }
-      const { hosts, selectedResponseHeaders, exchangeFacts } = capturePolicy(capture);
+      const {
+        hosts,
+        selectedResponseHeaders,
+        exchangeFacts,
+        blockedRequests,
+      } = capturePolicy(capture);
       const substitutions = credentialBindings
         .filter(({ delivery }) => delivery.kind === "captured-http-header")
         .map(({ environmentName, delivery }) => ({
@@ -559,6 +599,7 @@ export function createE2BGuardianController() {
               selectedResponseHeaders,
             ),
             TAE_EGRESS_EXCHANGE_FACTS: JSON.stringify(exchangeFacts),
+            TAE_EGRESS_BLOCKED_REQUESTS: JSON.stringify(blockedRequests),
             TAE_EGRESS_SUBSTITUTIONS: JSON.stringify(substitutions),
             TAE_EGRESS_MAX_ROWS: String(MAX_CAPTURE_ROWS),
             TAE_EGRESS_MAX_BYTES: String(MAX_CAPTURE_BYTES),

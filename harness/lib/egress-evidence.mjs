@@ -19,6 +19,7 @@ const COMMON_EVENT_FIELDS = new Set([
 const HTTP_EVENT_FIELDS = new Set([
   ...COMMON_EVENT_FIELDS,
   "method",
+  "disposition",
   "exchangeFacts",
 ]);
 const WEBSOCKET_EVENT_FIELDS = new Set([
@@ -49,6 +50,13 @@ export function createCaptureRequest(target) {
       host,
       selectedFields: [...egress.selectedFields],
     })),
+    ...((egress.blockedRequests?.length ?? 0) > 0 ? {
+      blockedRequests: egress.blockedRequests.map(({ id, method, path }) => ({
+        id,
+        method,
+        path,
+      })),
+    } : {}),
     ...(exchangeFacts ? { exchangeFacts } : {}),
   });
 }
@@ -180,7 +188,44 @@ function validCounter(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
-function normalizeEvent(event, index, allowedFields, exchangeFactPolicy, redactText) {
+function validBlockedRequest(rule) {
+  return rule
+    && typeof rule === "object"
+    && !Array.isArray(rule)
+    && Object.keys(rule).length === 3
+    && Object.keys(rule).every((key) => ["id", "method", "path"].includes(key))
+    && typeof rule.id === "string"
+    && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(rule.id)
+    && typeof rule.method === "string"
+    && /^[A-Z]{1,16}$/.test(rule.method)
+    && typeof rule.path === "string"
+    && rule.path.startsWith("/")
+    && !rule.path.includes("?")
+    && !rule.path.includes("#")
+    && Buffer.byteLength(rule.path) <= 4_096;
+}
+
+function blockedRequestPolicy(rules) {
+  if (
+    !Array.isArray(rules)
+    || rules.length > 128
+    || rules.some((rule) => !validBlockedRequest(rule))
+    || new Set(rules.map(({ id }) => id)).size !== rules.length
+    || new Set(rules.map(({ method, path }) => `${method}\n${path}`)).size !== rules.length
+  ) {
+    throw new TypeError("Invalid blocked request policy");
+  }
+  return rules;
+}
+
+function normalizeEvent(
+  event,
+  index,
+  allowedFields,
+  exchangeFactPolicy,
+  blockedRequests,
+  redactText,
+) {
   const kind = event?.kind;
   const selectedFields = event?.selectedFields ?? {};
   const allowedEventFields = kind === "http-request"
@@ -193,6 +238,7 @@ function normalizeEvent(event, index, allowedFields, exchangeFactPolicy, redactT
     && !hasUnexpectedFields
     && typeof event.method === "string"
     && /^[A-Z]{1,16}$/.test(event.method)
+    && [undefined, "blocked"].includes(event.disposition)
     && (event.scheme === null || ["http", "https"].includes(event.scheme));
   const websocketValid = kind === "websocket-session"
     && !hasUnexpectedFields
@@ -205,6 +251,20 @@ function normalizeEvent(event, index, allowedFields, exchangeFactPolicy, redactT
     && validCounter(event.bytesReceived);
   if (!validCommonEvent(event) || (!httpValid && !websocketValid)) {
     throw new TypeError(`Execution Environment returned invalid egress request ${index}`);
+  }
+  if (
+    event.disposition === "blocked"
+    && (
+      event.statusCode !== 403
+      || event.durationMs !== 0
+      || Object.keys(selectedFields).length !== 0
+      || event.exchangeFacts !== undefined
+      || !blockedRequests.some(({ method, path }) => (
+        method === event.method && path === event.path
+      ))
+    )
+  ) {
+    throw new TypeError(`Execution Environment returned invalid blocked request ${index}`);
   }
   const requiresExchangeFacts = kind === "http-request"
     && exchangeFactPolicy?.profiles.some((profile) => (
@@ -236,6 +296,7 @@ function normalizeEvent(event, index, allowedFields, exchangeFactPolicy, redactT
     return {
       ...common,
       method: redactText(event.method),
+      ...(event.disposition === "blocked" ? { disposition: "blocked" } : {}),
       ...(event.exchangeFacts === undefined
         ? {}
         : { exchangeFacts: normalizeExchangeFacts(event.exchangeFacts, exchangeFactPolicy, event) }),
@@ -254,6 +315,7 @@ export function normalizeEgressCollections({
   collections,
   selectedFieldNames,
   exchangeFactProfiles = [],
+  blockedRequests = [],
   redactText,
 }) {
   if (!Array.isArray(collections) || collections.length < 1 || collections.length > 16) {
@@ -264,6 +326,7 @@ export function normalizeEgressCollections({
   }
   const allowedFields = new Set(selectedFieldNames);
   const exchangeFactPolicy = compileExchangeFactProfiles(exchangeFactProfiles);
+  const blockedRequestRules = blockedRequestPolicy(blockedRequests);
   return collections.map((collection) => {
     if (!validProvenance(collection?.provenance)) {
       throw new TypeError("Execution Environment returned invalid egress provenance");
@@ -322,7 +385,14 @@ export function normalizeEgressCollections({
     return deepFreeze({
       status: "captured",
       requests: collection.requests.map((event, index) => (
-        normalizeEvent(event, index, allowedFields, exchangeFactPolicy, redactText)
+        normalizeEvent(
+          event,
+          index,
+          allowedFields,
+          exchangeFactPolicy,
+          blockedRequestRules,
+          redactText,
+        )
       )),
       provenance,
     });

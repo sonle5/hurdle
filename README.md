@@ -31,6 +31,9 @@ npm run view
 > Local runs execute agent code on your computer with network access. They are
 > not a security sandbox. Only run tasks, checks, and suites you trust.
 
+E2B tasks can also prevent an exact expensive or destructive API request from
+reaching the provider. See [request blocking](docs/authoring.md#block-an-expensive-or-destructive-request).
+
 ## Create an evaluation
 
 ```sh
