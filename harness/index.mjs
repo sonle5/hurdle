@@ -1,1 +1,1 @@
-export { defineChecks, defineSuite } from "./lib/v1-authoring.mjs";
+export { defineChecks, defineGuard, defineSuite } from "./lib/v1-authoring.mjs";

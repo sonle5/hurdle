@@ -78,6 +78,10 @@ export function defineChecks(checks) {
   return checks;
 }
 
+export function defineGuard(guard) {
+  return guard;
+}
+
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === "object") {
@@ -241,6 +245,17 @@ function readRegularText(path, missingCode, missingMessage) {
     return readFileSync(path, "utf8");
   } catch {
     fail(missingCode, missingMessage, path);
+  }
+}
+
+function readOptionalRegularText(path, invalidCode, invalidMessage) {
+  try {
+    const stats = lstatSync(path);
+    if (stats.isSymbolicLink() || !stats.isFile()) throw new TypeError("not a regular file");
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    fail(invalidCode, invalidMessage, path);
   }
 }
 
@@ -455,7 +470,7 @@ export async function resolveV1Suite({ suitePath }) {
   try {
     writeFileSync(
       join(generatedRoot, "tae-authoring.mjs"),
-      "export const defineSuite = (value) => value; export const defineChecks = (value) => value;\n",
+      "export const defineSuite = (value) => value; export const defineChecks = (value) => value; export const defineGuard = (value) => value;\n",
     );
     const suiteSource = readRegularText(
       suiteFile,
@@ -573,6 +588,7 @@ export async function resolveV1Suite({ suitePath }) {
       }
       const promptFile = join(taskRoot, "prompt.md");
       const checksFile = join(taskRoot, "checks.mjs");
+      const guardFile = join(taskRoot, "guard.mjs");
       const prompt = readRegularText(
         promptFile,
         "task.prompt-invalid",
@@ -582,6 +598,11 @@ export async function resolveV1Suite({ suitePath }) {
         checksFile,
         "task.checks-invalid",
         "Each Task requires a regular checks.mjs file.",
+      );
+      const guardSource = readOptionalRegularText(
+        guardFile,
+        "task.guard-invalid",
+        "Task guard.mjs must be a regular readable file.",
       );
       if (!prompt.trim()) fail("task.prompt-empty", "Task prompt.md must be nonblank.", promptFile);
       const generatedTaskRoot = join(generatedRoot, "tasks", taskId);
@@ -621,13 +642,34 @@ export async function resolveV1Suite({ suitePath }) {
         generatedChecks,
         rewriteTaeImport(checksSource, "../tae-authoring.mjs", checksFile),
       );
+      const generatedGuard = guardSource === null
+        ? null
+        : join(generatedRoot, "evaluators", `${taskId}-guard.mjs`);
+      if (generatedGuard !== null) {
+        writeFileSync(
+          generatedGuard,
+          rewriteTaeImport(guardSource, "../tae-authoring.mjs", guardFile),
+        );
+      }
       let declarations;
       try {
         const checksModule = await import(pathToFileURL(generatedChecks).href);
         if (typeof checksModule.default !== "function") throw new TypeError("invalid checks export");
-        declarations = evaluatorRuntime.collectDeclarations(checksModule.default);
+        let guard = null;
+        if (generatedGuard !== null) {
+          const guardModule = await import(pathToFileURL(generatedGuard).href);
+          if (typeof guardModule.default !== "function") throw new TypeError("invalid guard export");
+          guard = guardModule.default;
+        }
+        declarations = evaluatorRuntime.collectTaskDeclarations(checksModule.default, guard);
       } catch {
-        fail("task.checks-invalid", "Task checks could not be evaluated.", checksFile);
+        fail(
+          guardSource === null ? "task.checks-invalid" : "task.behavior-invalid",
+          guardSource === null
+            ? "Task checks could not be evaluated."
+            : "Task checks or guard could not be evaluated.",
+          guardSource === null ? checksFile : taskRoot,
+        );
       }
       const rubric = validated.verdict === "code" ? null : declarations.rubric;
       if (validated.verdict !== "code" && rubric === null) {
@@ -645,7 +687,11 @@ export async function resolveV1Suite({ suitePath }) {
         )
         && !validated.api
       ) {
-        fail("task.api-missing", "HTTP expectations require Suite api configuration.", checksFile);
+        fail(
+          "task.api-missing",
+          "HTTP expectations and guards require Suite api configuration.",
+          declarations.blockedRequests.length > 0 ? guardFile : checksFile,
+        );
       }
       const usesApi = validated.api !== null;
       const requiresTrustedEgress = declarations.requests.some(({ required }) => required)
@@ -653,17 +699,24 @@ export async function resolveV1Suite({ suitePath }) {
         || declarations.blockedRequests.length > 0;
       const judgeOnly = validated.verdict === "judge" && !declarations.hasDeterministicChecks;
       if (!judgeOnly) {
+        const evaluatorImports = [
+          `import checks from ${JSON.stringify(`./${taskId}-checks.mjs`)};`,
+          ...(generatedGuard === null
+            ? []
+            : [`import guard from ${JSON.stringify(`./${taskId}-guard.mjs`)};`]),
+          'import { evaluateChecks } from "./runtime.mjs";',
+        ];
         writeFileSync(
           join(generatedRoot, "evaluators", `${taskId}.mjs`),
           [
-            `import checks from ${JSON.stringify(`./${taskId}-checks.mjs`)};`,
-            'import { evaluateChecks } from "./runtime.mjs";',
-            "export function evaluate(input) { return evaluateChecks(checks, input); }",
+            ...evaluatorImports,
+            `export function evaluate(input) { return evaluateChecks(checks, input${generatedGuard === null ? "" : ", guard"}); }`,
             "",
           ].join("\n"),
         );
         behaviorGraphs[`evaluators/${taskId}.mjs`] = [
           `evaluators/${taskId}-checks.mjs`,
+          ...(generatedGuard === null ? [] : [`evaluators/${taskId}-guard.mjs`]),
           `evaluators/${taskId}.mjs`,
           "evaluators/runtime.mjs",
           "tae-authoring.mjs",

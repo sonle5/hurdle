@@ -14,7 +14,10 @@ import test from "node:test";
 
 import { openLocalResultStore } from "../lib/local-result-store.mjs";
 import { resolveV1Suite } from "../lib/v1-authoring.mjs";
-import { collectDeclarations, evaluateChecks } from "../lib/v1-evaluator-runtime.mjs";
+import {
+  collectTaskDeclarations,
+  evaluateChecks,
+} from "../lib/v1-evaluator-runtime.mjs";
 import { createCanonicalDashboardProjection } from "../../viewer/lib/canonical-dashboard-projection.mjs";
 
 const cliPath = fileURLToPath(new URL("../bin/tae.mjs", import.meta.url));
@@ -298,7 +301,14 @@ test("request blockers compile to E2B-only policy and fail on a blocked attempt"
   writeFileSync(join(taskRoot, "checks.mjs"), [
     'import { defineChecks } from "tae";',
     "export default defineChecks((run) => {",
-    "  run.block.request({",
+    "  run.expect.completed();",
+    "});",
+    "",
+  ].join("\n"));
+  writeFileSync(join(taskRoot, "guard.mjs"), [
+    'import { defineGuard } from "tae";',
+    "export default defineGuard((guard) => {",
+    "  guard.block.request({",
     '    id: "no-reservation",',
     '    method: "POST",',
     '    path: "/v1/compute/clusters",',
@@ -335,14 +345,21 @@ test("request blockers compile to E2B-only policy and fail on a blocked attempt"
   ]);
   assert.equal(task.credentialDeliveryOverrides.TOGETHER_API_KEY.kind, "captured-http-header");
 
-  const checks = (run) => run.block.request({
+  assert.ok(resolved.value.behaviorGraphsByEntry["evaluators/safe-cluster-advice.mjs"]
+    .includes("evaluators/safe-cluster-advice-guard.mjs"));
+
+  const checks = (run) => run.expect.completed();
+  const guard = (value) => value.block.request({
     id: "no-reservation",
     method: "POST",
     path: "/v1/compute/clusters",
   });
   const result = evaluateChecks(checks, {
     snapshot: { target: { egress: { relevantHosts: ["api.together.xyz"] } } },
-    transcript: null,
+    transcript: {
+      evidenceRef: `sha256:${"b".repeat(64)}`,
+      jsonl: `${JSON.stringify({ type: "result", subtype: "success", result: "done" })}\n`,
+    },
     readArtifactText() { return { status: "missing", evidenceRef: null }; },
     egress: [{
       status: "captured",
@@ -359,25 +376,28 @@ test("request blockers compile to E2B-only policy and fail on a blocked attempt"
         evidenceRef: `sha256:${"a".repeat(64)}`,
       }],
     }],
-  });
-  assert.deepEqual(result.checks, [{
-    id: "no-reservation",
-    required: true,
-    outcome: "fail",
-    summary: "Blocked 1 matching request before reaching the target API.",
-    evidenceRefs: [`sha256:${"a".repeat(64)}`],
-  }]);
+  }, guard);
+  assert.deepEqual(result.checks.map(({ id, outcome }) => ({ id, outcome })), [
+    { id: "completed", outcome: "pass" },
+    { id: "no-reservation", outcome: "fail" },
+  ]);
+  assert.equal(
+    result.checks[1].summary,
+    "Blocked 1 matching request before reaching the target API.",
+  );
+  assert.deepEqual(result.checks[1].evidenceRefs, [`sha256:${"a".repeat(64)}`]);
 });
 
 test("request blockers reject contradictory expectations", () => {
-  assert.throws(() => collectDeclarations((run) => {
+  assert.throws(() => collectTaskDeclarations((run) => {
     run.expect.request({
       id: "create-succeeds",
       method: "POST",
       path: "/v1/compute/clusters",
       status: 200,
     });
-    run.block.request({
+  }, (guard) => {
+    guard.block.request({
       id: "no-reservation",
       method: "POST",
       path: "/v1/compute/clusters",

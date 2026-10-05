@@ -4,8 +4,8 @@ import test from "node:test";
 import * as authoring from "../index.mjs";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-test("the source CLI exposes only the Suite/check authoring API", () => {
-  assert.deepEqual(Object.keys(authoring).sort(), ["defineChecks", "defineSuite"]);
+test("the source CLI exposes only the Suite, guard, and check authoring API", () => {
+  assert.deepEqual(Object.keys(authoring).sort(), ["defineChecks", "defineGuard", "defineSuite"]);
   assert.deepEqual(Object.keys(pkg.exports), ["."]);
   assert.equal(pkg.private, true);
   assert.equal(pkg.scripts.prepack, undefined);

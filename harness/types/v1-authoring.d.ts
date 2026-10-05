@@ -86,13 +86,6 @@ export interface V1CheckRun {
       required?: boolean;
     }>): void;
   }>;
-  readonly block: Readonly<{
-    request(expected: Readonly<{
-      id: string;
-      method: string;
-      path: string;
-    }>): void;
-  }>;
   readonly observe: Readonly<{
     request(expected: Readonly<{
       id: string;
@@ -105,5 +98,16 @@ export interface V1CheckRun {
   check(check: V1Check): void;
 }
 
+export interface V1Guard {
+  readonly block: Readonly<{
+    request(expected: Readonly<{
+      id: string;
+      method: string;
+      path: string;
+    }>): void;
+  }>;
+}
+
 export function defineSuite(suite: V1Suite): V1Suite;
 export function defineChecks(checks: (run: V1CheckRun) => void): (run: V1CheckRun) => void;
+export function defineGuard(guard: (guard: V1Guard) => void): (guard: V1Guard) => void;
