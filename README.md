@@ -1,52 +1,56 @@
-![tae · together agent evals. Tasks run through coding agents and produce evidence for evaluation.](docs/assets/readme-hero.png)
+![TAE — Together Agent Evals. Test how Claude Code and Codex use your API, SDK, or docs.](docs/assets/readme-hero.png)
 
 # Together Agent Evals
 
-Test how Claude Code and Codex use an API, SDK, or documentation. Score each run
-with deterministic checks, an LLM Judge, or both, then inspect the saved evidence
-in a local viewer.
+Run Claude Code or Codex against real tasks and record what they did. Score each
+run with deterministic code, an LLM Judge, or both, then inspect the transcript,
+API calls, tool use, and artifacts in a local viewer.
 
 ## Quick start
 
-Quickstart runs one local task with Claude Code. Set either
-`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, then run:
+Install Node.js 22.13 or newer and Claude Code, then clone the repository:
 
 ```sh
 git clone https://github.com/Nutlope/together-agent-evals.git
 cd together-agent-evals
+cp .env.example .env.local
+```
+
+Add either `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` to `.env.local`,
+then run:
+
+```sh
 npm run quickstart
 ```
 
-Quickstart installs dependencies, runs one copy-message task, and starts the
-viewer. It does not need a Together key, Judge, E2B account, or database. Your
-agent provider may charge for the run.
+This installs the local dependencies, runs the `copy-message` task, and opens
+the results viewer. It does not need a Together key, Judge, E2B account, or
+database.
 
-Results are saved in `.tae/results-v1`. Reopen them with:
-
-```sh
-npm run view
-```
-
-> [!WARNING]
 > Local runs execute agent code on your computer with network access. They are
-> not a security sandbox. Only run tasks, checks, and suites you trust.
+> not a security sandbox. Only run tasks, checks, and Suites you trust.
 
-E2B tasks can also prevent an exact expensive or destructive API request from
-reaching the provider. See [request blocking](docs/authoring.md#block-an-expensive-or-destructive-request).
+## How it works
 
-## Create a minimal evaluation
+1. A **Task** gives the agent a prompt and any files it needs.
+2. A **Suite** chooses the Tasks, agents, models, conditions, repeats, and
+   scoring mode.
+3. TAE runs the matrix, evaluates the captured evidence, and saves each result
+   for review and comparison.
+
+Create a starter Suite and run it with:
 
 ```sh
 npm run setup
-npm run tae -- init my-evals
-npm run tae -- validate my-evals/example.suite.mjs
-npm run tae -- run my-evals/example.suite.mjs --view
+npm run tae -- init
+npm run tae -- validate
+npm run tae -- run --view
 ```
 
-This creates one Suite and one Task:
+Each Task keeps its instructions and evaluation together:
 
 ```text
-my-evals/
+evals/
 ├── example.suite.mjs
 └── tasks/
     └── copy-message/
@@ -55,25 +59,7 @@ my-evals/
         └── fixtures/message.txt
 ```
 
-The Suite selects what runs and how it is scored:
-
-```js
-import { defineSuite } from "tae";
-
-export default defineSuite({
-  tasks: ["./tasks/copy-message"],
-  agents: [{ runner: "claude-code" }],
-  verdict: "code",
-});
-```
-
-The Task's `prompt.md` tells the Agent what to do:
-
-```md
-Read `fixtures/message.txt` and write its exact contents to `answer.txt`.
-```
-
-Its `checks.mjs` evaluates the captured result:
+Checks run against the captured result:
 
 ```js
 import { defineChecks } from "tae";
@@ -86,6 +72,7 @@ export default defineChecks((run) => {
     format: "text",
     maxBytes: 4096,
   });
+
   run.check({
     id: "exact-copy",
     passed: run.artifacts.text("answer.txt") === "Hello from the fixture.\n",
@@ -94,88 +81,19 @@ export default defineChecks((run) => {
 });
 ```
 
-A **Task** can also include workspace files and preventive guards. A **Suite**
-can add models, conditions, repeats, an LLM Judge, and additional Tasks without
-changing this basic structure.
+Use `code` for deterministic checks, `judge` for an LLM rubric, or `hybrid`
+when both must pass. Tasks can also block an exact expensive or destructive
+request before it reaches the provider.
 
-For an E2B Task, add an optional `guard.mjs` to prevent an exact request from
-reaching the API:
+## Included evaluations
 
-```js
-import { defineGuard } from "tae";
+The repository includes Together API tasks for chat, RAG search, tool calling,
+and GPU discovery. See [Together evaluations](evals/together/README.md) for the
+tasks, costs, credentials, and scoring behavior.
 
-export default defineGuard((guard) => {
-  guard.block.request({
-    id: "no-reservation",
-    method: "POST",
-    path: "/v1/compute/clusters",
-  });
-});
-```
+## Documentation
 
-TAE records each guard as a deterministic check. A forbidden attempt receives a
-synthetic `403` and is never forwarded to the target API.
-
-Choose one scoring mode:
-
-- `code`: deterministic checks decide the result.
-- `judge`: the Task's rubric decides the result.
-- `hybrid`: both the required checks and Judge must pass.
-
-See the [authoring guide](docs/authoring.md) and
-[copy-message example](examples/copy-message/example.suite.mjs).
-
-## Run the Together evaluations
-
-The included Together tasks cover chat, RAG search, tool calling, and GPU
-discovery without reservation.
-
-Add these credentials to the ignored `.env.local` file:
-
-```sh
-ANTHROPIC_API_KEY=...
-TOGETHER_API_KEY=...
-```
-
-Verify them before starting a paid run:
-
-```sh
-npm run preflight
-```
-
-Preflight makes small Anthropic and Together requests, so minimal provider
-charges may apply. Then run one cell:
-
-```sh
-npm run hybrid -- --task rag-search --condition baseline
-```
-
-Read [Together tasks, scoring, and costs](evals/together/README.md) before
-running a full Suite. These scores are not a continuation of the legacy trend.
-
-## Optional E2B and Postgres backends
-
-Local execution and filesystem storage are the defaults. E2B execution and
-Postgres storage are opt-in beta features.
-
-```sh
-npm run setup:backends
-npm run runtime:init -- e2b-postgres --template YOUR_E2B_TEMPLATE
-npm run db:migrate
-npm run preflight
-```
-
-See [E2B and Postgres setup](docs/beta-backends.md) for individual backend
-recipes and limitations.
-
-## Contribute
-
-```sh
-npm run setup:ci
-npm test
-npm run build
-```
-
-The tests do not call paid APIs. Read [CONTRIBUTING.md](CONTRIBUTING.md) before
-opening a pull request. Report vulnerabilities privately using
-[SECURITY.md](SECURITY.md).
+- [Authoring Tasks, Suites, checks, Judges, and request guards](docs/authoring.md)
+- [E2B and Postgres setup](docs/beta-backends.md)
+- [Copy-message example](examples/copy-message/example.suite.mjs)
+- [Contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md)

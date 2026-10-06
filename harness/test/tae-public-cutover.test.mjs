@@ -27,6 +27,7 @@ test("the release source has no legacy manifest, resource tour or private deploy
     ".github/workflows/framework-e2b-smoke.yml", ".github/workflows/framework-sweep.yml",
   ]) assert.equal(existsSync(new URL(path, root)), false, path);
   const readme = readFileSync(new URL("README.md", root), "utf8");
-  assert.match(readme, /not a continuation of the legacy trend/);
+  const togetherReadme = readFileSync(new URL("evals/together/README.md", root), "utf8");
+  assert.match(togetherReadme, /Do not combine these results with the\s+historical score series/);
   assert.match(readme, /not a security sandbox/);
 });
