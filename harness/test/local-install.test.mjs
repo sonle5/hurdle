@@ -26,6 +26,18 @@ test("Local setup skips beta SDKs and the unused harness TypeScript install; CI 
   assert.match(quickstart, /prefix === "harness".*"--omit=optional"/);
 });
 
+test("the root tae command exposes the public CLI", () => {
+  const result = spawnSync("npm", ["run", "tae", "--", "--help"], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^> tae\n> node harness\/bin\/tae\.mjs --help\n/m);
+  assert.match(result.stdout, /^TAE\n\nUsage:\n  tae <command> \[options\]/m);
+});
+
 test("a Local install runs a real controller without E2B and rejects missing E2B before opening a store", (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "tae-core-only-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));

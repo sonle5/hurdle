@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -151,6 +151,93 @@ function printDiagnostics(diagnostics, io) {
   }
 }
 
+const HELP_TEXT = Object.freeze({
+  main: [
+    "TAE",
+    "",
+    "Usage:",
+    "  tae <command> [options]",
+    "",
+    "Commands:",
+    "  init [directory]   Create a starter evaluation",
+    "  validate [suite]   Validate a Suite without running it",
+    "  run [suite]        Run a Suite",
+    "  view               Start the Results Viewer",
+    "  help [command]     Show help for a command",
+    "",
+    "Run `tae help <command>` for command options.",
+  ].join("\n"),
+  init: [
+    "Usage:",
+    "  tae init [directory]",
+    "",
+    "Create a starter evaluation. The default directory is `evals`.",
+    "The destination must not already exist.",
+    "",
+    "Options:",
+    "  -h, --help         Show this help",
+  ].join("\n"),
+  validate: [
+    "Usage:",
+    "  tae validate [suite]",
+    "",
+    "Validate a .suite.mjs Suite without running an Agent.",
+    "The default Suite is `evals/example.suite.mjs` when it exists,",
+    "otherwise `example.suite.mjs`.",
+    "",
+    "Options:",
+    "  -h, --help         Show this help",
+  ].join("\n"),
+  run: [
+    "Usage:",
+    "  tae run [suite] [options]",
+    "",
+    "Run a .suite.mjs Suite. The default is `evals/example.suite.mjs` when",
+    "it exists, otherwise `example.suite.mjs`.",
+    "Agent and model options filter selections already defined by the Suite.",
+    "",
+    "Selection:",
+    "  --task ID                   Select a Task; repeat to select more",
+    "  --condition ID              Select a Condition; repeat to select more",
+    "  --agent claude-code|codex   Select an Agent",
+    "  --model MODEL               Select a model",
+    "",
+    "Runtime:",
+    "  --runtime FILE              Use a Runtime Profile",
+    "  --environment local|e2b     Select an Execution Environment",
+    "  --environment-settings JSON Configure the Environment with a JSON object",
+    "  --store DIR                 Save results to a local directory",
+    "",
+    "Output:",
+    "  --experiment-version LABEL  Label runs for comparison",
+    "  --view                      Start the Results Viewer after the run",
+    "  -h, --help                  Show this help",
+    "",
+    "`--runtime` cannot be combined with `--environment`,",
+    "`--environment-settings`, or `--store`.",
+  ].join("\n"),
+  view: [
+    "Usage:",
+    "  tae view [--runtime FILE | --store DIR]",
+    "",
+    "Start the Results Viewer for the default or selected Result Store.",
+    "",
+    "Options:",
+    "  --runtime FILE      Read the Result Store from a Runtime Profile",
+    "  --store DIR         Open a local Result Store directory",
+    "  -h, --help          Show this help",
+  ].join("\n"),
+});
+
+function help(topic, io) {
+  io.stdout.write(`${HELP_TEXT[topic]}\n`);
+  return 0;
+}
+
+function hasHelpFlag(args) {
+  return args.some((argument) => ["--help", "-h"].includes(argument));
+}
+
 function usage(io) {
   io.stderr.write("Usage: tae <init [directory] | validate [suite] | run [suite] [options] [--view] | view [--runtime FILE | --store DIR]>\n");
   return 2;
@@ -161,9 +248,15 @@ function argumentError(message, io) {
   return { ok: false, exitCode: 2 };
 }
 
+function defaultSuiteArgument(cwd) {
+  return existsSync(resolve(cwd, "evals/example.suite.mjs"))
+    ? "evals/example.suite.mjs"
+    : "example.suite.mjs";
+}
+
 function parseRunArguments(args, io) {
   const values = {
-    suite: "example.suite.mjs",
+    suite: defaultSuiteArgument(io.cwd),
     taskIds: [],
     conditionIds: [],
     agent: undefined,
@@ -318,7 +411,7 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies) {
     if (readyPrinted) return;
     readyPrinted = true;
     progress?.succeed("Results Viewer ready", `${Date.now() - viewerStartedAt}ms`);
-    io.stdout.write(`Viewer: ${url}\n`);
+    io.stdout.write(`Viewer: ${url}\nPress Ctrl+C to stop the Viewer\n`);
   };
   progress?.start("Starting Results Viewer");
   const outcome = await dependencies.launchViewer({
@@ -367,7 +460,23 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies) {
 
 async function runCliMain(argv, io, dependencies) {
   const [command, ...args] = argv;
-  if (!command) return usage(io);
+  if (!command) return help("main", io);
+
+  if (["--help", "-h"].includes(command) && args.length === 0) {
+    return help("main", io);
+  }
+  if (command === "help") {
+    if (args.length === 0 || (args.length === 1 && ["--help", "-h"].includes(args[0]))) {
+      return help("main", io);
+    }
+    if (args.length === 1 && Object.hasOwn(HELP_TEXT, args[0]) && args[0] !== "main") {
+      return help(args[0], io);
+    }
+    return usage(io);
+  }
+  if (["init", "validate", "run", "view"].includes(command) && hasHelpFlag(args)) {
+    return help(command, io);
+  }
 
   if (command === "init") {
     if (args.length > 1 || args[0]?.startsWith("-")) return usage(io);
@@ -381,14 +490,16 @@ async function runCliMain(argv, io, dependencies) {
     io.stdout.write(`Created evaluation: ${evalName}\n`);
     io.stdout.write(`Suite: ${evalName}/example.suite.mjs\n`);
     io.stdout.write(
-      `Compiled definition fingerprint: ${result.value.definitionFingerprint}\n`,
+      `\nNext:\n`
+      + `  npm run tae -- validate ${evalName}/example.suite.mjs\n`
+      + `  npm run tae -- run ${evalName}/example.suite.mjs --view\n`,
     );
     return 0;
   }
 
   if (command === "validate") {
     if (args.length > 1 || args[0]?.startsWith("-")) return usage(io);
-    const suiteArgument = args[0] ?? "example.suite.mjs";
+    const suiteArgument = args[0] ?? defaultSuiteArgument(io.cwd);
     if (/\.suite\.mjs$/.test(suiteArgument)) {
       let suite;
       try {
@@ -409,9 +520,6 @@ async function runCliMain(argv, io, dependencies) {
         io.stdout.write(
           `Tasks: ${Object.keys(suite.value.definition.tasks).length}  `
           + `Conditions: ${Object.keys(suite.value.definition.conditions).length}\n`,
-        );
-        io.stdout.write(
-          `Compiled definition fingerprint: ${suite.value.definitionFingerprint}\n`,
         );
         return 0;
       } finally {

@@ -28,7 +28,7 @@ test("init produces the same Suite format used by quickstart and user tasks", as
   assert.equal(await cli(["validate"], output(join(root, "evals"))), 0);
   assert.equal(await cli(["init"], io), 1, "existing files must not be overwritten");
   const readme = readFileSync(join(root, "evals", "README.md"), "utf8");
-  assert.match(readme, /npm --prefix harness exec -- tae/);
+  assert.match(readme, /npm run tae --/);
   assert.doesNotMatch(readme, /Two repeats execute twice/);
   renameSync(join(root, "evals/tasks/copy-message/checks.mjs"), join(root, "evals/tasks/copy-message/checks.ts"));
   await assert.rejects(resolveV1Suite({ suitePath }), { code: "task.checks-invalid" });

@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "noEmit": true,
+    "paths": {
+      "tae": ["harness"]
+    }
+  },
+  "include": [
+    "**/*.suite.mjs",
+    "**/checks.mjs",
+    "**/guard.mjs"
+  ]
+}

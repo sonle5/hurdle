@@ -285,10 +285,12 @@ function validateApi(value, label, file) {
 
 function validateConditionResources(value, conditionId, file) {
   assertClosedKeys(value, ["skills", "mcpServers"], `Suite Condition '${conditionId}'`, file);
-  if (!Array.isArray(value.skills) || !Array.isArray(value.mcpServers)) {
+  const declaredSkills = value.skills === undefined ? [] : value.skills;
+  const declaredMcpServers = value.mcpServers === undefined ? [] : value.mcpServers;
+  if (!Array.isArray(declaredSkills) || !Array.isArray(declaredMcpServers)) {
     fail("suite.conditions-invalid", "Suite Condition resources require skills and mcpServers arrays.", file);
   }
-  const skills = value.skills.map((skill, index) => {
+  const skills = declaredSkills.map((skill, index) => {
     assertClosedKeys(skill, ["name", "sourceDirectory"], `Suite skill ${index + 1}`, file);
     if (
       typeof skill.name !== "string"
@@ -303,7 +305,7 @@ function validateConditionResources(value, conditionId, file) {
     }
     return Object.freeze({ name: skill.name, sourceDirectory: skill.sourceDirectory });
   });
-  const mcpServers = value.mcpServers.map((server, index) => {
+  const mcpServers = declaredMcpServers.map((server, index) => {
     assertClosedKeys(server, ["id", "transport"], `Suite MCP Server ${index + 1}`, file);
     if (typeof server.id !== "string" || !TASK_ID.test(server.id)) {
       fail("suite.conditions-invalid", "Suite MCP Server ids must use lowercase kebab-case.", file);
@@ -368,16 +370,20 @@ function validateSuite(suite, suiteFile) {
   if (new Set(agents.map((agent) => JSON.stringify(agent))).size !== agents.length) {
     fail("suite.agent-duplicate", "Suite agents must be unique.", suiteFile);
   }
-  if (!plainObject(suite.conditions) || Object.keys(suite.conditions).length === 0) {
+  const declaredConditions = suite.conditions === undefined
+    ? { baseline: {} }
+    : suite.conditions;
+  if (!plainObject(declaredConditions) || Object.keys(declaredConditions).length === 0) {
     fail("suite.conditions-invalid", "Suite conditions must be a nonempty object.", suiteFile);
   }
-  const conditions = Object.fromEntries(Object.entries(suite.conditions).map(([condition, resources]) => {
+  const conditions = Object.fromEntries(Object.entries(declaredConditions).map(([condition, resources]) => {
     if (!CONDITION_ID.test(condition)) {
       fail("suite.condition-invalid", "Suite Condition ids must use lowercase kebab-case.", suiteFile);
     }
     return [condition, validateConditionResources(resources, condition, suiteFile)];
   }));
-  if (!Number.isSafeInteger(suite.repeats) || suite.repeats < 1 || suite.repeats > 100) {
+  const repeats = suite.repeats === undefined ? 1 : suite.repeats;
+  if (!Number.isSafeInteger(repeats) || repeats < 1 || repeats > 100) {
     fail("suite.repeats-invalid", "Suite repeats must be an integer between 1 and 100.", suiteFile);
   }
   if (!VERDICTS.has(suite.verdict)) {
@@ -399,7 +405,7 @@ function validateSuite(suite, suiteFile) {
     api,
     agents,
     conditions: Object.freeze(conditions),
-    repeats: suite.repeats,
+    repeats,
     verdict: suite.verdict,
     judge,
   });

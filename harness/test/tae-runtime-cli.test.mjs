@@ -647,7 +647,7 @@ test("tae view shows one live readiness status in an interactive terminal", asyn
   assert.match(streams.read().stderr, /Results Viewer ready/);
   assert.equal(
     streams.read().stdout,
-    "Viewer: http://127.0.0.1:3000\n",
+    "Viewer: http://127.0.0.1:3000\nPress Ctrl+C to stop the Viewer\n",
   );
 });
 

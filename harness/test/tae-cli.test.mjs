@@ -47,6 +47,68 @@ function runCli(cwd, args, env = {}) {
   });
 }
 
+test("tae exposes global and per-command help without executing a command", (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "tae-cli-help-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  for (const args of [[], ["--help"], ["-h"], ["help"]]) {
+    const result = runCli(cwd, args);
+    assert.equal(result.status, 0);
+    assert.equal(result.stderr, "");
+    assert.match(result.stdout, /^TAE\n\nUsage:\n  tae <command> \[options\]/);
+    for (const command of ["init", "validate", "run", "view"]) {
+      assert.match(result.stdout, new RegExp(`^  ${command}\\b`, "m"));
+    }
+  }
+
+  const commandHelp = new Map();
+  for (const [command, expected] of [
+    ["init", /tae init \[directory\]/],
+    ["validate", /tae validate \[suite\]/],
+    ["run", /tae run \[suite\] \[options\]/],
+    ["view", /tae view \[--runtime FILE \| --store DIR\]/],
+  ]) {
+    const direct = runCli(cwd, [command, "--help"]);
+    const topic = runCli(cwd, ["help", command]);
+    assert.equal(direct.status, 0);
+    assert.equal(direct.stderr, "");
+    assert.match(direct.stdout, expected);
+    assert.equal(topic.status, 0);
+    assert.equal(topic.stderr, "");
+    assert.equal(topic.stdout, direct.stdout);
+    commandHelp.set(command, direct.stdout);
+  }
+
+  for (const [args, command] of [
+    [["init", "custom-evals", "--help"], "init"],
+    [["validate", "custom.suite.mjs", "--help"], "validate"],
+    [["run", "custom.suite.mjs", "--help"], "run"],
+    [["view", "--store", "results", "--help"], "view"],
+  ]) {
+    const result = runCli(cwd, args);
+    assert.equal(result.status, 0);
+    assert.equal(result.stderr, "");
+    assert.equal(result.stdout, commandHelp.get(command));
+  }
+
+  const runHelp = runCli(cwd, ["run", "--help"]);
+  for (const option of [
+    "--task",
+    "--condition",
+    "--agent",
+    "--model",
+    "--runtime",
+    "--environment",
+    "--environment-settings",
+    "--store",
+    "--experiment-version",
+    "--view",
+  ]) {
+    assert.match(runHelp.stdout, new RegExp(`^  ${option}\\b`, "m"));
+  }
+  assert.equal(existsSync(join(cwd, "evals")), false);
+});
+
 test("tae init and tae validate complete the credential-free Starter Pack workflow", (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "tae-cli-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -55,20 +117,15 @@ test("tae init and tae validate complete the credential-free Starter Pack workfl
   assert.equal(initialized.status, 0);
   assert.equal(initialized.stderr, "");
   assert.match(initialized.stdout, /^Created evaluation: evals\n/);
-  assert.match(
-    initialized.stdout,
-    /Compiled definition fingerprint: sha256:[a-f0-9]{64}\n$/,
-  );
+  assert.match(initialized.stdout, /Next:\n  npm run tae -- validate evals\/example\.suite\.mjs\n/);
+  assert.doesNotMatch(initialized.stdout, /sha256:/);
 
-  const validated = runCli(cwd, ["validate", "evals/example.suite.mjs"]);
+  const validated = runCli(cwd, ["validate"]);
   assert.equal(validated.status, 0);
   assert.equal(validated.stderr, "");
   assert.match(validated.stdout, /^Valid Suite: evals\/example.suite.mjs\n/);
   assert.match(validated.stdout, /Tasks: 1  Conditions: 1\n/);
-  assert.match(
-    validated.stdout,
-    /Compiled definition fingerprint: sha256:[a-f0-9]{64}\n$/,
-  );
+  assert.doesNotMatch(validated.stdout, /sha256:/);
 });
 
 test("the npm-installed tae symlink invokes the CLI", (t) => {
@@ -138,7 +195,6 @@ test("tae run composes Claude Code and local execution into the canonical store"
     cwd,
     [
       "run",
-      "evals/example.suite.mjs",
       "--agent",
       "claude-code",
       "--model",

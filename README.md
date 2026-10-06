@@ -8,7 +8,8 @@ in a local viewer.
 
 ## Quick start
 
-Get started by cloning the repo. Quickstart uses Claude Code. So set either ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN.
+Quickstart runs one local task with Claude Code. Set either
+`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, then run:
 
 ```sh
 git clone https://github.com/Nutlope/together-agent-evals.git
@@ -16,7 +17,7 @@ cd together-agent-evals
 npm run quickstart
 ```
 
-Quickstart installs dependencies, runs one copy-message task, and opens the
+Quickstart installs dependencies, runs one copy-message task, and starts the
 viewer. It does not need a Together key, Judge, E2B account, or database. Your
 agent provider may charge for the run.
 
@@ -30,34 +31,72 @@ npm run view
 > Local runs execute agent code on your computer with network access. They are
 > not a security sandbox. Only run tasks, checks, and suites you trust.
 
-## Create an evaluation
+E2B tasks can also prevent an exact expensive or destructive API request from
+reaching the provider. See [request blocking](docs/authoring.md#block-an-expensive-or-destructive-request).
+
+## Create a minimal evaluation
 
 ```sh
 npm run setup
-npm --prefix harness exec -- tae init my-evals
-npm --prefix harness exec -- tae validate my-evals/example.suite.mjs
-npm --prefix harness exec -- tae run my-evals/example.suite.mjs --view
+npm run tae -- init my-evals
+npm run tae -- validate my-evals/example.suite.mjs
+npm run tae -- run my-evals/example.suite.mjs --view
 ```
 
-A **Task** contains a prompt, checks, and optional inputs. A **Suite** selects the
-tasks, agents, models, conditions, and repeat count.
+This creates one Suite and one Task:
 
-Use `checks.mjs` to evaluate what happened:
+```text
+my-evals/
+├── example.suite.mjs
+└── tasks/
+    └── copy-message/
+        ├── prompt.md
+        ├── checks.mjs
+        └── fixtures/message.txt
+```
+
+The Suite selects what runs and how it is scored:
+
+```js
+import { defineSuite } from "tae";
+
+export default defineSuite({
+  tasks: ["./tasks/copy-message"],
+  agents: [{ runner: "claude-code" }],
+  verdict: "code",
+});
+```
+
+The Task's `prompt.md` tells the Agent what to do:
+
+```md
+Read `fixtures/message.txt` and write its exact contents to `answer.txt`.
+```
+
+Its `checks.mjs` evaluates the captured result:
 
 ```js
 import { defineChecks } from "tae";
 
 export default defineChecks((run) => {
   run.expect.completed();
-
-  run.expect.request({
-    id: "regions",
-    method: "GET",
-    path: "/v1/compute/regions",
-    status: 200,
+  run.expect.artifact({
+    id: "answer",
+    path: "answer.txt",
+    format: "text",
+    maxBytes: 4096,
+  });
+  run.check({
+    id: "exact-copy",
+    passed: run.artifacts.text("answer.txt") === "Hello from the fixture.\n",
+    summary: "answer.txt must match the fixture exactly.",
   });
 });
 ```
+
+A **Task** can also include workspace files and preventive guards. A **Suite**
+can add models, conditions, repeats, an LLM Judge, and additional Tasks without
+changing this basic structure.
 
 For an E2B Task, add an optional `guard.mjs` to prevent an exact request from
 reaching the API:

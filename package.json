@@ -5,6 +5,7 @@
     "setup:backends": "npm --prefix harness install --include=optional",
     "setup:ci": "npm --prefix harness ci --include=optional && npm --prefix viewer ci",
     "test": "npm --prefix harness test && npm --prefix viewer test",
+    "tae": "node harness/bin/tae.mjs",
     "preflight": "node harness/bin/preflight.mjs",
     "runtime:init": "node harness/bin/init-runtime.mjs",
     "db:migrate": "node harness/bin/migrate-postgres-result-store.mjs",
@@ -13,7 +14,7 @@
     "legacy": "node harness/bin/tae.mjs run evals/together/legacy.suite.mjs --runtime evals/together/runtime/local-judge.json --experiment-version together-legacy --view",
     "hybrid": "node harness/bin/tae.mjs run evals/together/hybrid.suite.mjs --runtime evals/together/runtime/local-judge.json --experiment-version together-hybrid --view",
     "chat-app": "node harness/bin/tae.mjs run evals/together/chat-app.suite.mjs --runtime evals/together/runtime/local-judge.json",
-    "view": "npm --prefix harness exec -- tae view",
+    "view": "node harness/bin/tae.mjs view",
     "build": "npm --prefix viewer run build"
   }
 }

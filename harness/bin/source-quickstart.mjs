@@ -186,6 +186,7 @@ try {
             pending = pending.slice(newline + 1);
             const match = /^Viewer: (.+)$/.exec(line);
             if (!match) {
+              if (line === "Press Ctrl+C to stop the Viewer") continue;
               process.stdout.write(`${line}\n`);
               continue;
             }

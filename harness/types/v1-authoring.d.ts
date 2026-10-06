@@ -6,11 +6,11 @@ export interface V1Agent {
 }
 
 export interface V1ConditionResources {
-  readonly skills: readonly Readonly<{
+  readonly skills?: readonly Readonly<{
     readonly name: string;
     readonly sourceDirectory: string;
   }>[];
-  readonly mcpServers: readonly Readonly<{
+  readonly mcpServers?: readonly Readonly<{
     readonly id: string;
     readonly transport: Readonly<{
       readonly kind: "http";
@@ -26,8 +26,8 @@ export interface V1SuiteBase {
   }>;
   readonly tasks: readonly `./${string}`[];
   readonly agents: readonly V1Agent[];
-  readonly conditions: Readonly<Record<string, V1ConditionResources>>;
-  readonly repeats: number;
+  readonly conditions?: Readonly<Record<string, V1ConditionResources>>;
+  readonly repeats?: number;
 }
 
 export type V1Suite = V1SuiteBase & (

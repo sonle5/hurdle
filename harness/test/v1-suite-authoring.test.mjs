@@ -149,6 +149,57 @@ test("a code-authored Suite runs two independent Local repeats through the canon
   assert.ok(sessions.every(({ passed, result }) => passed === true && result === "pass"));
 });
 
+test("compact Suite defaults compile identically to their explicit forms", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-v1-suite-defaults-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const taskRoot = join(root, "tasks", "copy-message");
+  mkdirSync(taskRoot, { recursive: true });
+  writeFileSync(join(taskRoot, "prompt.md"), "Reply with hello.\n");
+  writeFileSync(join(taskRoot, "checks.mjs"), [
+    'import { defineChecks } from "tae";',
+    "",
+    "export default defineChecks((run) => {",
+    '  run.expect.replyIncludes("hello");',
+    "});",
+    "",
+  ].join("\n"));
+
+  const sharedSuiteSource = [
+    'import { defineSuite } from "tae";',
+    "",
+    "export default defineSuite({",
+    '  tasks: ["./tasks/copy-message"],',
+    '  agents: [{ runner: "claude-code", model: "test-model" }],',
+  ];
+  writeFileSync(join(root, "compact.suite.mjs"), [
+    ...sharedSuiteSource,
+    '  verdict: "code",',
+    "});",
+    "",
+  ].join("\n"));
+  writeFileSync(join(root, "verbose.suite.mjs"), [
+    ...sharedSuiteSource,
+    "  conditions: { baseline: { skills: [], mcpServers: [] } },",
+    "  repeats: 1,",
+    '  verdict: "code",',
+    "});",
+    "",
+  ].join("\n"));
+
+  const compact = await resolveV1Suite({ suitePath: join(root, "compact.suite.mjs") });
+  const verbose = await resolveV1Suite({ suitePath: join(root, "verbose.suite.mjs") });
+  t.after(() => compact.dispose());
+  t.after(() => verbose.dispose());
+
+  assert.equal(compact.ok, true, JSON.stringify(compact.diagnostics));
+  assert.equal(verbose.ok, true, JSON.stringify(verbose.diagnostics));
+  assert.deepEqual(compact.value.definition, verbose.value.definition);
+  assert.equal(compact.value.definitionFingerprint, verbose.value.definitionFingerprint);
+  assert.deepEqual(compact.defaults.conditionIds, ["baseline"]);
+  assert.equal(compact.defaults.repeat, 1);
+});
+
 test("a Task workspace preserves legacy fixture paths at the Agent workspace root", (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-v1-workspace-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

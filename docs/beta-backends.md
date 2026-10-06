@@ -90,7 +90,7 @@ Set the Runtime path you created, then run a RAG cell:
 ```sh
 RUNTIME=.tae/runtime/e2b.json
 
-node harness/bin/tae.mjs run \
+npm run tae -- run \
   evals/together/hybrid.suite.mjs \
   --runtime "$RUNTIME" \
   --task rag-search \
@@ -107,7 +107,7 @@ results are written to the configured database.
 ## Reopen results
 
 ```sh
-node harness/bin/tae.mjs view --runtime .tae/runtime/postgres.json
+npm run tae -- view --runtime .tae/runtime/postgres.json
 ```
 
 Use the same Runtime file that produced the run.

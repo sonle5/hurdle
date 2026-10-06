@@ -26,8 +26,8 @@ import { createRunEngine } from "../lib/run-engine.mjs";
 import { resolveRuntimeProfile } from "../lib/runtime-profile.mjs";
 import { resolveV1Suite } from "../lib/v1-authoring.mjs";
 
-const showcaseSuite = fileURLToPath(new URL(
-  "../../evals/together/showcase.suite.mjs",
+const legacySuite = fileURLToPath(new URL(
+  "../../evals/together/legacy.suite.mjs",
   import.meta.url,
 ));
 const chatAppSuite = fileURLToPath(new URL(
@@ -424,7 +424,7 @@ test("the CLI previews the showcase denominator and billable services before exe
 
   const exit = await cli.main([
     "run",
-    showcaseSuite,
+    legacySuite,
     "--runtime",
     join(root, "runtime.json"),
   ], { cwd: root, stdout, stderr });
@@ -445,7 +445,7 @@ test("the CLI previews the showcase denominator and billable services before exe
 test("representative Claude and Codex Runs store code, Judge, version, and denominator truth", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-v1-showcase-records-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const resolved = await resolveV1Suite({ suitePath: showcaseSuite });
+  const resolved = await resolveV1Suite({ suitePath: legacySuite });
   t.after(() => resolved.dispose());
   assert.equal(resolved.ok, true, JSON.stringify(resolved.diagnostics));
   const store = await openLocalResultStore({ root: join(root, "results") });

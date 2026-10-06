@@ -13,9 +13,8 @@ export default defineSuite({
   ],
   agents: [{ runner: "claude-code", model: "claude-sonnet-4-6" }],
   conditions: {
-    baseline: { skills: [], mcpServers: [] },
+    baseline: {},
     mcp: {
-      skills: [],
       mcpServers: [{
         id: "together-docs",
         transport: { kind: "http", url: "https://docs.together.ai/mcp" },
@@ -36,10 +35,8 @@ export default defineSuite({
         { name: "together-sandboxes", sourceDirectory: "skills/together-sandboxes" },
         { name: "together-video", sourceDirectory: "skills/together-video" },
       ],
-      mcpServers: [],
     },
   },
-  repeats: 1,
   verdict: "judge",
   judge: { model: "claude-opus-4-8" },
 });

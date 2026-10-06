@@ -7,8 +7,6 @@ export default defineSuite({
   },
   tasks: ["./tasks/chat-app"],
   agents: [{ runner: "claude-code", model: "claude-sonnet-4-6" }],
-  conditions: { baseline: { skills: [], mcpServers: [] } },
-  repeats: 1,
   verdict: "judge",
   judge: { model: "claude-opus-4-8" },
 });

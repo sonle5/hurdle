@@ -4,7 +4,7 @@ Create a starter evaluation from the repository root:
 
 ```sh
 npm run setup
-npm --prefix harness exec -- tae init my-evals
+npm run tae -- init my-evals
 ```
 
 An evaluation has two parts: a **Suite** selects what to run, and each **Task**
@@ -18,20 +18,20 @@ import { defineSuite } from "tae";
 export default defineSuite({
   tasks: ["./tasks/copy-message"],
   agents: [{ runner: "claude-code", model: "claude-sonnet-4-6" }],
-  conditions: { baseline: { skills: [], mcpServers: [] } },
-  repeats: 2,
   verdict: "code",
 });
 ```
 
 - `tasks` contains paths relative to the Suite file.
 - `agents` selects the runner and, optionally, its model.
-- `conditions` defines the skills and MCP servers available to the Agent.
-- `repeats` runs every selected cell independently, even after a failure.
+- `conditions` defines the skills and MCP servers available to the Agent. When
+  omitted, the Suite has one empty `baseline` Condition.
+- `repeats` runs every selected cell independently, even after a failure. It
+  defaults to `1`.
 - `verdict` chooses code checks, a Judge, or both.
 
-An empty `skills` array creates a no-skills baseline. Skills and MCP servers are
-selected independently.
+Omitted `skills` or `mcpServers` are empty. Skills and MCP servers are selected
+independently.
 
 ## 2. Write a Task
 
@@ -151,7 +151,7 @@ Results stay distinct:
 ## 5. Run, inspect, and compare
 
 ```sh
-npm --prefix harness exec -- tae run my-evals/example.suite.mjs --view
+npm run tae -- run my-evals/example.suite.mjs --view
 ```
 
 Use `--task`, `--condition`, `--agent`, or `--model` to narrow selections already
@@ -160,8 +160,8 @@ defined by the Suite. These flags do not add new Suite entries.
 Label runs that you want to compare:
 
 ```sh
-npm --prefix harness exec -- tae run my-evals/example.suite.mjs --experiment-version before
-npm --prefix harness exec -- tae run my-evals/example.suite.mjs --experiment-version after
+npm run tae -- run my-evals/example.suite.mjs --experiment-version before
+npm run tae -- run my-evals/example.suite.mjs --experiment-version after
 ```
 
 Open **Compare** in the Viewer and select the two labels. Runs are compared only

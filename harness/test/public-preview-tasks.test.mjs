@@ -45,8 +45,8 @@ test("the Together catalogue preserves all eight ported legacy task prompts and 
   }
 });
 
-test("Together showcase uses only four Judge tasks and the complete selected skill suite", async (t) => {
-  const suite = await resolveV1Suite({ suitePath: fileURLToPath(new URL("showcase.suite.mjs", together)) });
+test("Together legacy Suite uses only four Judge tasks and the complete selected skill suite", async (t) => {
+  const suite = await resolveV1Suite({ suitePath: fileURLToPath(new URL("legacy.suite.mjs", together)) });
   t.after(() => suite.dispose());
   assert.equal(suite.ok, true, JSON.stringify(suite.diagnostics));
   assert.deepEqual([...suite.defaults.taskIds].sort(), defaultTasks);

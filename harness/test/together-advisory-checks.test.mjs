@@ -155,12 +155,9 @@ test("ported artifact validators retain legacy aliases and reject malformed or i
 test("legacy and hybrid share task inputs, models and all Conditions, but select different authority", async (t) => {
   const legacy = await resolveSuite(t);
   const hybrid = await resolveSuite(t, "hybrid.suite.mjs");
-  const alias = await resolveSuite(t, "showcase.suite.mjs");
   assert.deepEqual(hybrid.defaults.taskIds, ["rag-search", "tool-calling-agent-loop"]);
   assert.deepEqual(legacy.defaults.agentSelections, hybrid.defaults.agentSelections);
-  assert.deepEqual(legacy.defaults.agentSelections, alias.defaults.agentSelections);
   assert.deepEqual(legacy.value.definition.conditions, hybrid.value.definition.conditions);
-  assert.deepEqual(legacy.value.definition.conditions, alias.value.definition.conditions);
   const legacyPolicy = legacy.value.definition.authorityProfiles[0];
   const hybridPolicy = hybrid.value.definition.authorityProfiles[0];
   assert.equal(hybridPolicy.schemaVersion, 2);

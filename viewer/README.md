@@ -11,7 +11,8 @@ npm run view
 npm --prefix harness exec -- tae view --store /absolute/path/to/.tae/results-v1
 ```
 
-The launcher binds to loopback and reports the URL. Use the same `--runtime`
+The launcher binds to loopback and reports the URL; open that link in your
+browser. Use the same `--runtime`
 file as the run to select an opt-in Postgres store. `DATABASE_URL` does not select
 that store; no legacy database fallback is present.
 
