@@ -3,8 +3,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export type TogetherRequest = {
   ts?: string;
   method?: string;
+  host?: string;
   path?: string;
   status?: number;
+  disposition?: "blocked";
   model?: string | null;
   response_id?: string | null;
   prompt_tokens?: number | null;
@@ -30,21 +32,38 @@ function fmtBytes(n?: number | null): string {
   return `${(n / 1024 / 1024).toFixed(1)}MB`;
 }
 
-// The egress-proxy capture: every Together API call the agent actually made,
+// The egress-proxy capture: every target API call the agent actually made,
 // logged out-of-band so a pass is backed by real server receipts, not narration.
-export function TogetherRequestsCard({ requests }: { requests: TogetherRequest[] }) {
+export function TogetherRequestsCard({
+  requests,
+  truncated = false,
+}: {
+  requests: TogetherRequest[];
+  truncated?: boolean;
+}) {
   if (!requests || requests.length === 0) return null;
   // 101 (WS upgrade) counts as ok, not a failure.
-  const failed = requests.filter((r) => !r.status || (r.status !== 101 && (r.status < 200 || r.status >= 300))).length;
+  const blocked = requests.filter((request) => request.disposition === "blocked").length;
+  const failed = requests.filter((request) => (
+    request.disposition !== "blocked"
+    && (!request.status || (request.status !== 101 && (request.status < 200 || request.status >= 300)))
+  )).length;
+  const showTraffic = requests.some((request) => request.method === "WS" || request.frames_sent != null);
+  const showModel = requests.some((request) => request.model);
+  const showTokens = requests.some((request) => (
+    request.prompt_tokens != null || request.completion_tokens != null
+  ));
+  const showResponseId = requests.some((request) => request.response_id);
 
   return (
     <div className="rounded-lg border border-rule overflow-hidden bg-background">
       <div className="flex items-center justify-between px-5 py-3 border-b border-rule bg-surface/40">
         <h2 className="text-xs font-semibold text-fg-muted uppercase tracking-[0.08em]">
-          Together API Calls — captured
+          API calls — captured
         </h2>
         <span className="text-xs text-fg-muted tabular-nums">
-          {requests.length} call{requests.length !== 1 ? "s" : ""}
+          {requests.length}{truncated ? "+" : ""} call{requests.length !== 1 || truncated ? "s" : ""}
+          {blocked > 0 && <span className="text-warn"> · {blocked} blocked</span>}
           {failed > 0 && <span className="text-fail"> · {failed} non-2xx</span>}
         </span>
       </div>
@@ -55,15 +74,17 @@ export function TogetherRequestsCard({ requests }: { requests: TogetherRequest[]
               <TableHead className="w-20">Time<span className="text-fg-faint font-normal"> ·UTC</span></TableHead>
               <TableHead className="w-16">Status</TableHead>
               <TableHead>Endpoint</TableHead>
-              <TableHead>Model</TableHead>
-              <TableHead className="text-right w-20">Tokens</TableHead>
+              {showTraffic && <TableHead>Traffic</TableHead>}
+              {showModel && <TableHead>Model</TableHead>}
+              {showTokens && <TableHead className="text-right w-20">Tokens</TableHead>}
               <TableHead className="text-right w-16">ms</TableHead>
-              <TableHead className="w-44">Response ID</TableHead>
+              {showResponseId && <TableHead className="w-44">Response ID</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {requests.map((r, i) => {
               const isWs = r.method === "WS" || r.frames_sent != null;
+              const isBlocked = r.disposition === "blocked";
               const ok = !!r.status && ((r.status >= 200 && r.status < 300) || r.status === 101);
               const tokens = r.prompt_tokens != null || r.completion_tokens != null
                 ? `${r.prompt_tokens ?? 0}→${r.completion_tokens ?? 0}`
@@ -75,22 +96,28 @@ export function TogetherRequestsCard({ requests }: { requests: TogetherRequest[]
                     {time}
                   </TableCell>
                   <TableCell>
-                    <span className={`inline-flex items-center gap-1.5 text-xs tabular-nums ${ok ? "text-pass" : "text-fail"}`}>
-                      <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-pass" : "bg-fail"}`} />
-                      {r.status ?? "?"}
+                    <span
+                      className={`inline-flex items-center gap-1.5 text-xs tabular-nums ${isBlocked ? "text-warn" : ok ? "text-pass" : "text-fail"}`}
+                      title={isBlocked && r.status ? `Blocked with HTTP ${r.status}` : undefined}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${isBlocked ? "bg-warn" : ok ? "bg-pass" : "bg-fail"}`} />
+                      {isBlocked ? "Blocked" : (r.status ?? "?")}
                     </span>
                   </TableCell>
                   <TableCell className="font-mono text-[11px]">
-                    <span className="text-fg-faint">{r.method} </span>{r.path}
+                    <span className="text-fg-faint">{r.method} {r.host ? `${r.host}` : ""}</span>{r.path}
                   </TableCell>
-                  <TableCell className="font-mono text-[11px] text-fg-muted">
-                    {isWs
-                      ? <span title="frames · bytes (↑ client→server, ↓ server→client)">↑{r.frames_sent ?? 0}f {fmtBytes(r.bytes_sent)} · ↓{r.frames_recv ?? 0}f {fmtBytes(r.bytes_recv)}</span>
-                      : (r.model || "—")}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-[11px] text-fg-muted tabular-nums">{isWs ? "—" : tokens}</TableCell>
+                  {showTraffic && (
+                    <TableCell className="font-mono text-[11px] text-fg-muted">
+                      {isWs
+                        ? <span title="frames · bytes (↑ client→server, ↓ server→client)">↑{r.frames_sent ?? 0}f {fmtBytes(r.bytes_sent)} · ↓{r.frames_recv ?? 0}f {fmtBytes(r.bytes_recv)}</span>
+                        : "—"}
+                    </TableCell>
+                  )}
+                  {showModel && <TableCell className="font-mono text-[11px] text-fg-muted">{r.model || "—"}</TableCell>}
+                  {showTokens && <TableCell className="text-right font-mono text-[11px] text-fg-muted tabular-nums">{isWs ? "—" : tokens}</TableCell>}
                   <TableCell className="text-right font-mono text-[11px] text-fg-muted tabular-nums">{r.duration_ms ?? "—"}</TableCell>
-                  <TableCell className="font-mono text-[10px] text-fg-faint truncate">{r.response_id || "—"}</TableCell>
+                  {showResponseId && <TableCell className="font-mono text-[10px] text-fg-faint truncate">{r.response_id || "—"}</TableCell>}
                 </TableRow>
               );
             })}

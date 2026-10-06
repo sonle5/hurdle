@@ -189,6 +189,7 @@ export default async function SessionPage({
   const togetherRequests = Array.isArray(rawTogetherRequests)
     ? (rawTogetherRequests.filter((row) => row && typeof row === "object") as Array<Record<string, unknown>>)
     : [];
+  const togetherRequestsTruncated = dbSessionRecord.togetherRequestsTruncated === true;
   // Completed sessions without JSONL — minimal placeholder.
   if (!dbSession.sessionJsonl) {
     return (
@@ -211,6 +212,12 @@ export default async function SessionPage({
             <ToolVersionBadges items={toolVersions} />
             {dbSession.note && <p className="text-sm text-fg-muted">{dbSession.note}</p>}
             <CanonicalSessionReview prompt={dbSession.prompt} checks={canonicalStoredChecks(dbSessionRecord.storedChecks)} judge={canonicalJudgeReview(dbSessionRecord.deepAudit)} runId={readString(dbSessionRecord.canonicalRunId)} evaluatorSources={canonicalEvaluatorSources(dbSessionRecord.evaluatorSources)} />
+            {togetherRequests.length > 0 && (
+              <TogetherRequestsCard
+                requests={togetherRequests as Parameters<typeof TogetherRequestsCard>[0]["requests"]}
+                truncated={togetherRequestsTruncated}
+              />
+            )}
             <p className="text-xs text-fg-faint pt-2">Session JSONL not available — conversation view requires the full session log.</p>
           </div>
         </div>
@@ -616,6 +623,7 @@ export default async function SessionPage({
                 {togetherRequests.length > 0 && (
                   <TogetherRequestsCard
                     requests={togetherRequests as Parameters<typeof TogetherRequestsCard>[0]["requests"]}
+                    truncated={togetherRequestsTruncated}
                   />
                 )}
 

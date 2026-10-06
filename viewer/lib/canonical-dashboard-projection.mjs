@@ -22,6 +22,9 @@ const CONDITIONS = Object.freeze({
 });
 
 export const MAX_CANONICAL_DASHBOARD_TRANSCRIPT_BYTES = 32 * 1024 * 1024;
+export const MAX_CANONICAL_DASHBOARD_EGRESS_BYTES = 16 * 1024 * 1024;
+const MAX_CANONICAL_DASHBOARD_REQUESTS = 250;
+const MAX_CANONICAL_EGRESS_SOURCE_REQUESTS = 10_000;
 
 function completeAt(record) {
   return record.completedAt ?? record.startedAt ?? record.createdAt;
@@ -201,13 +204,103 @@ async function transcript(reader, record) {
   }
 }
 
+function boundedString(value, maxLength = 4_096) {
+  return typeof value === "string" && value.length <= maxLength ? value : undefined;
+}
+
+function boundedNumber(value) {
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function projectRequest(request) {
+  if (!request || typeof request !== "object" || Array.isArray(request)) return null;
+  const path = boundedString(request.path);
+  const host = boundedString(request.host, 253);
+  if (!path || !host) return null;
+  const common = {
+    ts: boundedString(request.observedAt, 64),
+    host,
+    path,
+    status: boundedNumber(request.statusCode),
+    duration_ms: boundedNumber(request.durationMs),
+    model: null,
+    response_id: null,
+    prompt_tokens: null,
+    completion_tokens: null,
+  };
+  if (request.kind === "http-request") {
+    const method = boundedString(request.method, 32);
+    return method ? {
+      ...common,
+      method,
+      ...(request.disposition === "blocked" ? { disposition: "blocked" } : {}),
+    } : null;
+  }
+  if (request.kind === "websocket-session") {
+    return {
+      ...common,
+      method: "WS",
+      frames_sent: boundedNumber(request.framesSent),
+      frames_recv: boundedNumber(request.framesReceived),
+      bytes_sent: boundedNumber(request.bytesSent),
+      bytes_recv: boundedNumber(request.bytesReceived),
+    };
+  }
+  return null;
+}
+
+async function togetherRequests(reader, record) {
+  if (record.state !== "complete") return { rows: [], truncated: false };
+  const projected = [];
+  let truncated = false;
+  outer:
+  for (const entry of record.evidence?.egress ?? []) {
+    const reference = entry.status === "captured" ? entry.content : null;
+    if (
+      !reference
+      || reference.availability !== "available"
+      || reference.mediaType !== "application/json"
+      || !Number.isSafeInteger(reference.sizeBytes)
+      || reference.sizeBytes < 0
+      || reference.sizeBytes > MAX_CANONICAL_DASHBOARD_EGRESS_BYTES
+    ) continue;
+    try {
+      const bytes = await reader.readEvidence(reference, {
+        maxBytes: MAX_CANONICAL_DASHBOARD_EGRESS_BYTES,
+      });
+      const body = JSON.parse(bytes.toString("utf8"));
+      if (
+        body?.status !== "captured"
+        || !Array.isArray(body.requests)
+        || body.requests.length > MAX_CANONICAL_EGRESS_SOURCE_REQUESTS
+      ) continue;
+      for (const request of body.requests) {
+        const row = projectRequest(request);
+        if (!row) continue;
+        if (projected.length >= MAX_CANONICAL_DASHBOARD_REQUESTS) {
+          truncated = true;
+          break outer;
+        }
+        projected.push(row);
+      }
+    } catch {
+      // Evidence remains available from the immutable record when presentation fails.
+    }
+  }
+  return { rows: projected, truncated };
+}
+
 async function projectDetail(reader, record) {
   const summary = projectSummary(record);
   const resources = record.snapshot.condition.definition?.resources ?? {};
+  const [sessionJsonl, requestProjection] = await Promise.all([
+    transcript(reader, record),
+    togetherRequests(reader, record),
+  ]);
   return {
     ...summary,
     readOnly: true,
-    sessionJsonl: await transcript(reader, record),
+    sessionJsonl,
     gradingCriteria: null,
     findings: null,
     skills: resources.skills ?? [],
@@ -219,7 +312,8 @@ async function projectDetail(reader, record) {
     audit: null,
     deepAudit: deepAudit(record),
     judgeStatusLabel: judgeStatusLabel(record),
-    togetherRequests: null,
+    togetherRequests: requestProjection.rows,
+    togetherRequestsTruncated: requestProjection.truncated,
     docsCandidates: [],
     discovery: null,
     storedChecks: record.state === "complete" ? record.checks : [],

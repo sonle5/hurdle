@@ -189,18 +189,20 @@ test("canonical local runs list through the mature dashboard without copying or 
 });
 
 test("canonical dashboard detail reads only the selected digest-verified transcript", async () => {
+  const record = structuredClone(completeRecord);
+  record.evidence.egress = [];
   const calls = [];
-  const transcript = Buffer.from(fixture.blobs[completeRecord.evidence.transcript.key], "base64");
-  const reader = fixtureReader();
+  const transcript = Buffer.from(fixture.blobs[record.evidence.transcript.key], "base64");
+  const reader = fixtureReader(record);
   reader.readEvidence = async (reference, options) => {
     calls.push({ reference, options });
     return transcript;
   };
   const projection = createCanonicalDashboardProjection(reader);
 
-  const detail = await projection.findSession(`canonical--${completeRecord.id}`);
+  const detail = await projection.findSession(`canonical--${record.id}`);
 
-  assert.equal(detail.canonicalRunId, completeRecord.id);
+  assert.equal(detail.canonicalRunId, record.id);
   assert.equal(detail.sourceKind, "canonical");
   assert.equal(detail.readOnly, true);
   assert.equal("canonicalDetailHref" in detail, false);
@@ -210,9 +212,137 @@ test("canonical dashboard detail reads only the selected digest-verified transcr
   assert.deepEqual(detail.storedChecks, completeRecord.checks);
   assert.deepEqual(detail.evaluatorSources, []);
   assert.deepEqual(calls, [{
-    reference: completeRecord.evidence.transcript,
+    reference: record.evidence.transcript,
     options: { maxBytes: 32 * 1024 * 1024 },
   }]);
+});
+
+test("canonical dashboard projects captured API calls from bounded egress evidence", async () => {
+  const record = structuredClone(completeRecord);
+  const observedAt = "2026-08-21T10:00:03.000Z";
+  const egress = Buffer.from(`${JSON.stringify({
+    status: "captured",
+    requests: [{
+      kind: "http-request",
+      sequence: 0,
+      observedAt,
+      method: "POST",
+      scheme: "https",
+      host: "api.together.ai",
+      path: "/v1/chat/completions",
+      statusCode: 200,
+      durationMs: 42,
+      selectedFields: {},
+    }, {
+      kind: "http-request",
+      sequence: 1,
+      observedAt,
+      method: "POST",
+      scheme: "https",
+      host: "api.together.ai",
+      path: "/v1/compute/clusters",
+      statusCode: 403,
+      durationMs: 0,
+      disposition: "blocked",
+      selectedFields: {},
+    }, {
+      kind: "websocket-session",
+      sequence: 2,
+      observedAt,
+      scheme: "wss",
+      host: "api.together.ai",
+      path: "/v1/realtime",
+      statusCode: 101,
+      durationMs: 84,
+      selectedFields: {},
+      framesSent: 3,
+      framesReceived: 4,
+      bytesSent: 128,
+      bytesReceived: 256,
+    }],
+  })}\n`);
+  record.evidence.egress[0].content.sizeBytes = egress.byteLength;
+  const transcriptBytes = Buffer.from(fixture.blobs[record.evidence.transcript.key], "base64");
+  const reader = fixtureReader(record);
+  let egressReadOptions;
+  reader.readEvidence = async (reference, options) => {
+    if (reference.sha256 === record.evidence.transcript.sha256) return transcriptBytes;
+    egressReadOptions = options;
+    return egress;
+  };
+
+  const detail = await createCanonicalDashboardProjection(reader)
+    .findSession(`canonical--${record.id}`);
+
+  assert.deepEqual(detail.togetherRequests, [{
+    ts: observedAt,
+    method: "POST",
+    host: "api.together.ai",
+    path: "/v1/chat/completions",
+    status: 200,
+    model: null,
+    response_id: null,
+    prompt_tokens: null,
+    completion_tokens: null,
+    duration_ms: 42,
+  }, {
+    ts: observedAt,
+    method: "POST",
+    host: "api.together.ai",
+    path: "/v1/compute/clusters",
+    status: 403,
+    model: null,
+    response_id: null,
+    prompt_tokens: null,
+    completion_tokens: null,
+    duration_ms: 0,
+    disposition: "blocked",
+  }, {
+    ts: observedAt,
+    method: "WS",
+    host: "api.together.ai",
+    path: "/v1/realtime",
+    status: 101,
+    model: null,
+    response_id: null,
+    prompt_tokens: null,
+    completion_tokens: null,
+    duration_ms: 84,
+    frames_sent: 3,
+    frames_recv: 4,
+    bytes_sent: 128,
+    bytes_recv: 256,
+  }]);
+  assert.equal(detail.togetherRequestsTruncated, false);
+  assert.deepEqual(egressReadOptions, { maxBytes: 16 * 1024 * 1024 });
+});
+
+test("canonical dashboard bounds rendered API calls and marks truncation", async () => {
+  const record = structuredClone(completeRecord);
+  record.evidence.transcript = null;
+  const requests = Array.from({ length: 251 }, (_, sequence) => ({
+    kind: "http-request",
+    sequence,
+    observedAt: "2026-08-21T10:00:03.000Z",
+    method: "GET",
+    scheme: "https",
+    host: "api.together.ai",
+    path: `/v1/items/${sequence}`,
+    statusCode: 200,
+    durationMs: 1,
+    selectedFields: {},
+  }));
+  const egress = Buffer.from(`${JSON.stringify({ status: "captured", requests })}\n`);
+  record.evidence.egress[0].content.sizeBytes = egress.byteLength;
+  const reader = fixtureReader(record);
+  reader.readEvidence = async () => egress;
+
+  const detail = await createCanonicalDashboardProjection(reader)
+    .findSession(`canonical--${record.id}`);
+
+  assert.equal(detail.togetherRequests.length, 250);
+  assert.equal(detail.togetherRequests.at(-1).path, "/v1/items/249");
+  assert.equal(detail.togetherRequestsTruncated, true);
 });
 
 test("canonical dashboard explains Run Trust failures before downstream check symptoms", async () => {
@@ -243,6 +373,7 @@ test("canonical dashboard explains Run Trust failures before downstream check sy
 
 test("canonical dashboard exposes snapshot-matched evaluator source metadata without reading its bytes", async () => {
   const record = structuredClone(completeRecord);
+  record.evidence.egress = [];
   const [path, sha256] = Object.entries(record.snapshot.behavior.deterministicEvaluator.modules)[0];
   record.evidence.structured = [{
     runId: record.id,
@@ -326,6 +457,7 @@ test("canonical dashboard projects the stored deterministic result for the sessi
 
 test("canonical dashboard keeps absent headline unknown and never reads oversized transcript", async () => {
   const unknown = structuredClone(completeRecord);
+  unknown.evidence.egress = [];
   delete unknown.verdict;
   delete unknown.verdictReasons;
   delete unknown.headline;
