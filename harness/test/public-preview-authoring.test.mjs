@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createFrameworkCli } from "../bin/tae.mjs";
+import { createFrameworkCli } from "../bin/hurdle.mjs";
 import { resolveV1Suite } from "../lib/v1-authoring.mjs";
 
 function output(cwd) {

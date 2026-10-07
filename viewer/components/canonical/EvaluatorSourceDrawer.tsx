@@ -11,7 +11,7 @@ const DEFAULT_DRAWER_WIDTH = 760;
 const MIN_DRAWER_WIDTH = 420;
 const MAX_DRAWER_WIDTH = 1_200;
 const DRAWER_KEYBOARD_STEP = 40;
-const DRAWER_WIDTH_STORAGE_KEY = "tae-check-code-drawer-width";
+const DRAWER_WIDTH_STORAGE_KEY = "hurdle-check-code-drawer-width";
 
 function constrainedDrawerWidth(width: number) {
   const viewportMaximum = typeof window === "undefined"

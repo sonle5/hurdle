@@ -2,7 +2,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFrameworkCli } from "../bin/tae.mjs";
+import { createFrameworkCli } from "../bin/hurdle.mjs";
 import { checkAgentReadiness } from "../lib/agent-readiness.mjs";
 import { initializeSuite } from "../lib/starter-suite.mjs";
 

@@ -1,6 +1,6 @@
 # Security policy
 
-Together Agent Evals is a preview. Security fixes target the latest commit on
+Hurdle is a preview. Security fixes target the latest commit on
 `main`; older commits and preview tags are not maintained release lines.
 
 ## Report a vulnerability

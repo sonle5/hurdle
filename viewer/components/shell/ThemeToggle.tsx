@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
+import { readStoredPreference } from "@/lib/browser-preference-storage.mjs";
 import { cn } from "@/lib/utils";
 
 export type ThemeChoice = "light" | "system" | "dark";
 
-const STORAGE_KEY = "tae-theme";
+const STORAGE_KEY = "hurdle-theme";
 const TRANSITION_CLASS = "theme-changing";
 let transitionFrame: number | null = null;
 let cleanupFrame: number | null = null;
@@ -14,7 +15,7 @@ let cleanupFrame: number | null = null;
 function readChoice(): ThemeChoice {
   if (typeof window === "undefined") return "system";
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = readStoredPreference(localStorage, STORAGE_KEY);
     if (stored === "light" || stored === "system" || stored === "dark") {
       return stored;
     }

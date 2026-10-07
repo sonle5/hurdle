@@ -1,4 +1,4 @@
-import { defineChecks } from "tae";
+import { defineChecks } from "hurdle";
 
 export default defineChecks((run) => {
   // Exact scoring rules: legacy 0cf8a821, harness/audit-all.mjs:201-261.

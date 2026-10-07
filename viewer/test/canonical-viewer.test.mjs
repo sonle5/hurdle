@@ -63,9 +63,9 @@ test("the mature dashboard reads canonical records without copying or rescoring 
   assert.match(session, /<details open className="group">/);
 
   assert.match(source("../lib/canonical-results.server.ts"), /import "server-only"/);
-  assert.match(storeSource, /TAE_RESULT_STORE_ROOT/);
-  assert.match(storeSource, /TAE_RESULT_STORE_MODE/);
-  assert.match(storeSource, /TAE_RESULT_STORE_DATABASE_URL/);
+  assert.match(storeSource, /HURDLE_RESULT_STORE_ROOT/);
+  assert.match(storeSource, /HURDLE_RESULT_STORE_MODE/);
+  assert.match(storeSource, /HURDLE_RESULT_STORE_DATABASE_URL/);
   assert.match(storeSource, /openPostgresResultStoreReader/);
   assert.doesNotMatch(storeSource, /process\.env\.DATABASE_URL/);
 
@@ -76,7 +76,7 @@ test("the mature dashboard reads canonical records without copying or rescoring 
   const proxy = source("../proxy.ts");
   assert.match(proxy, /local-only/);
   assert.match(proxy, /read-only/);
-  assert.doesNotMatch(proxy, /TAE_VIEWER_READ_ONLY|clerk/i);
+  assert.doesNotMatch(proxy, /HURDLE_VIEWER_READ_ONLY|clerk/i);
 
   const packageJson = JSON.parse(source("../package.json"));
   assert.equal(packageJson.scripts.predev, undefined);
@@ -115,7 +115,7 @@ test("the Viewer follows the system theme by default and exposes a three-state c
 
   assert.doesNotMatch(layout, /dark h-full antialiased/);
   assert.match(layout, /THEME_SCRIPT/);
-  assert.match(layout, /localStorage\.getItem\('tae-theme'\)/);
+  assert.match(layout, /localStorage\.getItem\('hurdle-theme'\)/);
   assert.match(layout, /: 'system'/);
   assert.match(layout, /prefers-color-scheme: dark/);
   assert.match(layout, /preference\.addEventListener\('change', apply\)/);
@@ -336,7 +336,7 @@ test("the check-code drawer resizes from its left edge", () => {
   assert.match(drawer, /onKeyDown=\{resizeWithKeyboard\}/);
   assert.match(drawer, /MIN_DRAWER_WIDTH = 420/);
   assert.match(drawer, /MAX_DRAWER_WIDTH = 1_200/);
-  assert.match(drawer, /DRAWER_WIDTH_STORAGE_KEY = "tae-check-code-drawer-width"/);
+  assert.match(drawer, /DRAWER_WIDTH_STORAGE_KEY = "hurdle-check-code-drawer-width"/);
   assert.match(drawer, /readStoredWidth/);
   assert.match(drawer, /writeStoredWidth/);
   assert.match(styles, /\.evaluator-source-resizer[\s\S]*cursor: col-resize/);
@@ -355,7 +355,7 @@ test("the transcript sidebar uses the shared resizable panel interaction", () =>
   assert.match(shell, /minSize=\{MIN_TRANSCRIPT_RAIL_WIDTH\}/);
   assert.match(shell, /maxSize=\{MAX_TRANSCRIPT_RAIL_WIDTH\}/);
   assert.match(shell, /aria-label="Resize transcript sidebar"/);
-  assert.match(storage, /TRANSCRIPT_RAIL_WIDTH_STORAGE_KEY = "tae-transcript-rail-width"/);
+  assert.match(storage, /TRANSCRIPT_RAIL_WIDTH_STORAGE_KEY = "hurdle-transcript-rail-width"/);
   assert.match(shell, /writeStoredWidth/);
   assert.match(shell, /<SessionSidebar messages=\{messages\}/);
   assert.match(session, /parseStoredWidth\(/);
@@ -369,8 +369,8 @@ test("resizable app layouts persist user-adjusted widths", () => {
   const appShell = source("../components/shell/ResizableAppShell.tsx");
   const storage = source("../lib/browser-layout-storage.ts");
 
-  assert.match(appShell, /APP_RAIL_WIDTH_STORAGE_KEY = "tae-app-rail-width"/);
-  assert.match(appShell, /APP_RAIL_COLLAPSED_STORAGE_KEY = "tae-app-rail-collapsed"/);
+  assert.match(appShell, /APP_RAIL_WIDTH_STORAGE_KEY = "hurdle-app-rail-width"/);
+  assert.match(appShell, /APP_RAIL_COLLAPSED_STORAGE_KEY = "hurdle-app-rail-collapsed"/);
   assert.match(appShell, /readStoredWidth/);
   assert.match(appShell, /writeStoredWidth/);
   assert.match(appShell, /readStoredBoolean/);
@@ -378,7 +378,7 @@ test("resizable app layouts persist user-adjusted widths", () => {
   assert.match(appShell, /readyToPersistRef/);
   assert.match(appShell, /size\.inPixels <= COLLAPSED_RAIL_WIDTH \+ 1/);
   assert.match(storage, /typeof window === "undefined"/);
-  assert.match(storage, /window\.localStorage\.getItem/);
+  assert.match(storage, /readStoredPreference\(window\.localStorage, key\)/);
   assert.match(storage, /window\.localStorage\.setItem/);
   assert.match(storage, /document\.cookie/);
   assert.match(storage, /export function parseStoredWidth/);

@@ -7,9 +7,9 @@ const READY_PATTERN = /\bready\s+in\b/i;
 const READY_TIMEOUT_MS = 30_000;
 const READINESS_CAPTURE_MAX_CHARACTERS = 64 * 1024;
 const CANONICAL_STORE_KEYS = new Set([
-  "TAE_RESULT_STORE_MODE",
-  "TAE_RESULT_STORE_ROOT",
-  "TAE_RESULT_STORE_DATABASE_URL",
+  "HURDLE_RESULT_STORE_MODE",
+  "HURDLE_RESULT_STORE_ROOT",
+  "HURDLE_RESULT_STORE_DATABASE_URL",
 ]);
 const VIEWER_PROCESS_ENV_KEYS = new Set([
   "CI",
@@ -49,26 +49,37 @@ function startupFailureReason(output) {
   return null;
 }
 
+function readViewerEnvironment(env, key) {
+  return Object.hasOwn(env, key) ? env[key] : env[key.replace(/^HURDLE_/, "TAE_")];
+}
+
 function canonicalStoreEnvironment(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Viewer Store selection is invalid");
   }
-  const keys = Object.keys(value).sort();
-  const mode = value.TAE_RESULT_STORE_MODE;
+  const allowedKeys = new Set([...CANONICAL_STORE_KEYS, ...[...CANONICAL_STORE_KEYS].map(key => key.replace(/^HURDLE_/, "TAE_"))]);
+  if (Object.keys(value).some(key => !allowedKeys.has(key))) {
+    throw new TypeError("Viewer Store selection is invalid");
+  }
+  const selected = Object.fromEntries([...CANONICAL_STORE_KEYS]
+    .map(key => [key, readViewerEnvironment(value, key)])
+    .filter(([, setting]) => setting !== undefined));
+  const keys = Object.keys(selected).sort();
+  const mode = selected.HURDLE_RESULT_STORE_MODE;
   const required = mode === "local"
-    ? ["TAE_RESULT_STORE_MODE", "TAE_RESULT_STORE_ROOT"]
+    ? ["HURDLE_RESULT_STORE_MODE", "HURDLE_RESULT_STORE_ROOT"]
     : mode === "postgres"
-      ? ["TAE_RESULT_STORE_DATABASE_URL", "TAE_RESULT_STORE_MODE"]
+      ? ["HURDLE_RESULT_STORE_DATABASE_URL", "HURDLE_RESULT_STORE_MODE"]
       : null;
   if (
     !required
     || keys.length !== required.length
     || keys.some((key, index) => key !== required[index])
-    || keys.some((key) => !CANONICAL_STORE_KEYS.has(key) || !nonblank(value[key]))
+    || keys.some((key) => !CANONICAL_STORE_KEYS.has(key) || !nonblank(selected[key]))
   ) {
     throw new TypeError("Viewer Store selection is invalid");
   }
-  return Object.fromEntries(keys.map((key) => [key, value[key]]));
+  return Object.fromEntries(keys.map((key) => [key, selected[key]]));
 }
 
 function viewerEnvironment(env, storeEnvironment, runtimeEnvironment = {}) {
@@ -79,7 +90,7 @@ function viewerEnvironment(env, storeEnvironment, runtimeEnvironment = {}) {
   }
   return {
     ...viewerEnv,
-    TAE_VIEWER_READ_ONLY: "1",
+    HURDLE_VIEWER_READ_ONLY: "1",
     ...selected,
     ...runtimeEnvironment,
   };
@@ -177,7 +188,7 @@ export function launchViewer({
     runtimeEnvironment: {
       ...invocation.environment,
       ...(onboarding === undefined ? {} : {
-        TAE_VIEWER_ONBOARDING: JSON.stringify(validateViewerOnboarding(onboarding)),
+        HURDLE_VIEWER_ONBOARDING: JSON.stringify(validateViewerOnboarding(onboarding)),
       }),
     },
   });

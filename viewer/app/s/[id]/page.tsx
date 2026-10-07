@@ -174,7 +174,8 @@ export default async function SessionPage({
   const id = decodeURIComponent(rawId);
   const cookieStore = await cookies();
   const initialTranscriptRailWidth = parseStoredWidth(
-    cookieStore.get(TRANSCRIPT_RAIL_WIDTH_STORAGE_KEY)?.value,
+    cookieStore.get(TRANSCRIPT_RAIL_WIDTH_STORAGE_KEY)?.value
+      ?? cookieStore.get("tae-transcript-rail-width")?.value,
     DEFAULT_TRANSCRIPT_RAIL_WIDTH,
     MIN_TRANSCRIPT_RAIL_WIDTH,
     MAX_TRANSCRIPT_RAIL_WIDTH,

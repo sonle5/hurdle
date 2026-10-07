@@ -21,8 +21,8 @@ const COLLAPSED_RAIL_WIDTH = 56;
 const DEFAULT_RAIL_WIDTH = 256;
 const MIN_RAIL_WIDTH = 224;
 const MAX_RAIL_WIDTH = 384;
-const APP_RAIL_WIDTH_STORAGE_KEY = "tae-app-rail-width";
-const APP_RAIL_COLLAPSED_STORAGE_KEY = "tae-app-rail-collapsed";
+const APP_RAIL_WIDTH_STORAGE_KEY = "hurdle-app-rail-width";
+const APP_RAIL_COLLAPSED_STORAGE_KEY = "hurdle-app-rail-collapsed";
 
 export function ResizableAppShell({
   filters,

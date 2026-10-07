@@ -104,7 +104,7 @@ test("Postgres preflight is read-only and reports migration state", async () => 
           return {
             async query(sql) {
               queries.push(sql);
-              return sql === "SELECT 1" ? { rows: [{ "?column?": 1 }] } : { rows: [{ runs: "tae.runs" }] };
+              return sql === "SELECT 1" ? { rows: [{ "?column?": 1 }] } : { rows: [{ runs: "hurdle.runs" }] };
             },
             release() { released = true; },
           };
@@ -116,10 +116,27 @@ test("Postgres preflight is read-only and reports migration state", async () => 
 
   assert.equal(result.status, "pass");
   assert.equal(selectedConnectionString, "postgresql://secret");
-  assert.deepEqual(queries, ["SELECT 1", "SELECT to_regclass('tae.runs') AS runs"]);
+  assert.deepEqual(queries, ["SELECT 1", "SELECT to_regclass('hurdle.runs') AS runs, to_regclass('tae.runs') AS legacy_runs"]);
   assert.equal(released, true);
   assert.equal(ended, true);
   assert.doesNotMatch(JSON.stringify(result), /postgresql|secret/);
+});
+
+test("Postgres preflight directs legacy stores to setup without changing either schema", async () => {
+  for (const [runs, legacy_runs, status, message] of [
+    [null, "tae.runs", "pass", /legacy schema needs upgrade.*npx hurdle setup --store postgres/],
+    ["hurdle.runs", "tae.runs", "fail", /resolve the schema conflict/],
+    [null, null, "pass", /not initialized.*npx hurdle setup --store postgres/],
+  ]) {
+    const queries = [];
+    const result = await checkPostgresCredential("postgresql://example", { createPool: () => ({
+      connect: async () => ({ query: async sql => { queries.push(sql); return { rows: [{ runs, legacy_runs }] }; }, release() {} }),
+      async end() {},
+    }) });
+    assert.equal(result.status, status);
+    assert.match(result.message, message);
+    assert.ok(queries.every(sql => sql.startsWith("SELECT ")));
+  }
 });
 
 test("Postgres preflight preserves pg 8 strict TLS semantics without its deprecation warning", async () => {

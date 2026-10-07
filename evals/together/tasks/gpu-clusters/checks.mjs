@@ -1,4 +1,4 @@
-import { defineChecks } from "tae";
+import { defineChecks } from "hurdle";
 
 // Discovery-only legacy checks, not the later cluster-creation lifecycle task.
 const successful = (status) => status === 101 || (status >= 200 && status < 400);

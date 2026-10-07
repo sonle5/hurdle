@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { EventEmitter } from "node:events";
 
-import { createFrameworkCli } from "../bin/tae.mjs";
+import { createFrameworkCli } from "../bin/hurdle.mjs";
 import { createClaudeCodeAdapter } from "../lib/agent-adapters/claude-code.mjs";
 import { createCodexAdapter } from "../lib/agent-adapters/codex.mjs";
 import {

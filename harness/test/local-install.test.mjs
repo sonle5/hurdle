@@ -107,7 +107,7 @@ test("the root hurdle command exposes the public CLI", () => {
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^> node harness\/bin\/tae\.mjs --help$/m);
+  assert.match(result.stdout, /^> node harness\/bin\/hurdle\.mjs --help$/m);
   assert.match(result.stdout, /^Hurdle\n\nUsage:\n  hurdle <command> \[options\]/m);
 });
 
@@ -136,12 +136,15 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   for (const path of [
     "LICENSE",
     "examples/copy-message/example.suite.mjs",
+    "harness/bin/hurdle.mjs",
     "harness/bin/tae.mjs",
+    "harness/lib/hurdle-environment.mjs",
     "harness/lib/postgres-setup.mjs",
     "harness/lib/setup-project-files.mjs",
     "harness/lib/setup-output.mjs",
     "harness/lib/setup-credentials.mjs",
     "harness/migrations/postgres/0001_canonical_result_store.sql",
+    "harness/migrations/postgres/0002_hurdle_schema.sql",
     "harness/verify/proxy/agent-node-runtime/package-lock.json",
     "harness/verify/proxy/generic_guardian.py",
     "node_modules/pg/package.json",
@@ -262,7 +265,7 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   const storageSetup = connectionString => spawnSync(process.execPath, [cliPath, "setup", "--store", "postgres", "--json"], {
     cwd: storageProject,
     encoding: "utf8",
-    env: { ...process.env, NO_COLOR: "1", TAE_RESULT_STORE_DATABASE_URL: connectionString },
+    env: { ...process.env, NO_COLOR: "1", HURDLE_RESULT_STORE_DATABASE_URL: connectionString },
     timeout: 20_000,
   });
   const invalidStorage = storageSetup("https://example.test/private-placeholder");
@@ -394,7 +397,7 @@ test("a Local install runs a real controller without E2B and rejects missing E2B
     symlinkSync(join(root, "harness/node_modules", name), join(harness, "node_modules", name));
   }
   const env = { PATH: process.env.PATH, E2B_API_KEY: "test-not-a-real-key", NODE_OPTIONS: `--import=${join(root, "harness/test/helpers/readiness-fetch.mjs")}` };
-  const cli = (...args) => spawnSync(process.execPath, [join(harness, "bin/tae.mjs"), ...args], { cwd, env, encoding: "utf8", timeout: 20_000 });
+  const cli = (...args) => spawnSync(process.execPath, [join(harness, "bin/hurdle.mjs"), ...args], { cwd, env, encoding: "utf8", timeout: 20_000 });
   const initialized = cli("init", "evals");
   assert.equal(initialized.status, 0, initialized.stderr);
   const validated = cli("validate", "evals/example.suite.mjs", "--offline");

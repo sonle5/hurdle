@@ -17,11 +17,11 @@ not an applied branding change. `readiness fail` previews rejection and recovery
 text. Previews make no provider requests, run no agent, and start no server.
 
 To try the draft against your existing quickstart project, run the source CLI
-from that directory:
+from that directory, replacing `/path/to/together-agent-evals` with your checkout:
 
 ```sh
-node /tmp/hurdle-pr10-20261007/harness/bin/tae.mjs validate
-node /tmp/hurdle-pr10-20261007/harness/bin/tae.mjs view
+node /path/to/together-agent-evals/harness/bin/hurdle.mjs validate
+node /path/to/together-agent-evals/harness/bin/hurdle.mjs view
 ```
 
 The CLI uses one line per authentication check, green/red/yellow status
@@ -32,19 +32,20 @@ same store on port 3000.
 ## Prepare the E2B lab
 
 Hurdle has a public `setup` command. For the Together API demo,
-use a new project directory and run the source CLI:
+use a new project directory and run the source CLI from your checkout:
 
 ```sh
-node /tmp/hurdle-pr10-20261007/harness/bin/tae.mjs init --example together-api
-node /tmp/hurdle-pr10-20261007/harness/bin/tae.mjs setup
-node /tmp/hurdle-pr10-20261007/harness/bin/tae.mjs run --view
+node /path/to/together-agent-evals/harness/bin/hurdle.mjs init --example together-api
+node /path/to/together-agent-evals/harness/bin/hurdle.mjs setup --yes
+node /path/to/together-agent-evals/harness/bin/hurdle.mjs run --view
 ```
 
-Run each step separately and continue only after it succeeds. Setup prompts for
-missing keys with hidden input, checks credentials, reuses a ready template or
-asks before building, and saves the default Runtime for later commands. It
-needs an E2B key, Agent credentials, and a Together key for this demo. The
-source commands above use the version in this checkout.
+Run each step separately and continue only after it succeeds. Configure the E2B,
+Agent, and Together credentials in `.env.local` first. Setup checks credentials,
+reuses a ready template or builds one with `--yes`, and saves the default Runtime
+for later commands. Builds may be billed. Setup reports missing credentials
+without prompting by default; use `--json` for automation or `--interactive` for
+hidden terminal prompts. The source commands above use the version in this checkout.
 See [sandbox setup](../../docs/sandbox-setup.md) for options and limits.
 
 The earlier source-only lab helper remains available below.

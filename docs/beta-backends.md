@@ -27,12 +27,16 @@ ANTHROPIC_API_KEY=...
 TOGETHER_API_KEY=...
 E2B_API_KEY=...
 E2B_TEMPLATE=...
-TAE_RESULT_STORE_DATABASE_URL=postgresql://...
+HURDLE_RESULT_STORE_DATABASE_URL=postgresql://...
 ```
 
 The Together Suites need the Anthropic and Together keys. E2B needs
 `E2B_API_KEY` and `E2B_TEMPLATE`. Postgres needs
-`TAE_RESULT_STORE_DATABASE_URL`.
+`HURDLE_RESULT_STORE_DATABASE_URL`. Existing `TAE_RESULT_STORE_DATABASE_URL`
+credentials remain supported; new projects should use the Hurdle name. The
+Hurdle variable takes precedence when present, even if empty; the legacy alias
+applies only when it is absent. For the same variable name, `.env.local` overrides
+the shell.
 
 Install the optional backend packages:
 
@@ -72,11 +76,27 @@ schema once:
 npm run db:migrate
 ```
 
-Hurdle creates tables in the `tae` schema, not `public`. Output artifact bytes
+Hurdle stores tables in the `hurdle` schema. Output artifact bytes
 stay in the local `.hurdle/postgres-artifacts` sidecar.
 
-Migrations are additive and checksum-verified. Do not reset a populated database
-or reuse legacy session tables as canonical Run records.
+Migrations are versioned and checksum-verified. For existing databases, the
+schema migration transactionally renames `tae` to `hurdle`, preserving Run rows,
+captured evidence, and migration history. Fresh databases finish with the
+`hurdle` schema. If both schemas exist, migration refuses without changes;
+it does not merge or drop either schema.
+
+Stop existing run, Viewer, and setup processes, then use the updated Hurdle
+version consistently before migrating. Clients at `0.2.4` or earlier expect
+`tae`; they cannot read `hurdle`, and their setup can recreate the old schema.
+Run setup or `db:migrate` to apply the upgrade; `validate`, evaluation runs, and
+the Viewer do not migrate the database. Legacy environment variables remain
+supported.
+
+The rename preserves schema ownership and grants, and requires schema ownership
+and permission to rename it. Update external SQL and `search_path` settings that
+name `tae` to use `hurdle`; Hurdle's Result Store uses explicit schema-qualified
+queries. Do not reset a populated database or reuse legacy session tables as
+canonical Run records.
 
 ## 4. Verify the setup
 
@@ -88,8 +108,9 @@ Preflight checks only configured services. Anthropic and Together make small
 billable requests. E2B lists account resources without allocating a sandbox.
 Postgres checks the connection and schema without applying migrations.
 
-Values in `.env.local` take precedence over stale values inherited from the
-shell. Evaluation runs use the same precedence.
+For the same variable name, values in `.env.local` take precedence over values
+inherited from the shell. Hurdle names take precedence over legacy aliases as
+described above. Evaluation runs use the same precedence.
 
 ## 5. Run one cell
 
@@ -125,11 +146,11 @@ To verify Postgres directly:
 ```sql
 select table_name
 from information_schema.tables
-where table_schema = 'tae'
+where table_schema = 'hurdle'
 order by table_name;
 
 select id, state, created_at
-from tae.runs
+from hurdle.runs
 order by created_at desc;
 ```
 

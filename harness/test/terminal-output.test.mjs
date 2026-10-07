@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import test from "node:test";
-import { createFrameworkCli } from "../bin/tae.mjs";
+import { createFrameworkCli } from "../bin/hurdle.mjs";
 import { quoteCommandArgument } from "../lib/terminal-output.mjs";
 import { createQuickstartViewerOutput } from "../lib/source-quickstart.mjs";
 

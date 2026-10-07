@@ -19,11 +19,11 @@ const CHUNK_SIZE = 4 * 1024 * 1024;
 async function assertSchema(pool) {
   try {
     const result = await pool.query(
-      "SELECT version FROM tae.schema_migrations WHERE version = 1",
+      "SELECT version FROM hurdle.schema_migrations WHERE version IN (1, 2)",
     );
-    if (result.rowCount !== 1) throw new Error("migration 1 is not applied");
+    if (result.rowCount !== 2) throw new Error("required schema migrations are not applied");
   } catch (error) {
-    const wrapped = new Error("Postgres Result Store schema migration is not applied");
+    const wrapped = new Error("Postgres Result Store schema migration is not applied. Run npx hurdle setup --store postgres to initialize or upgrade the hurdle schema");
     wrapped.cause = error;
     throw wrapped;
   }
@@ -49,7 +49,7 @@ function createReader(pool) {
     assertRunId(runId);
     const result = await pool.query(
       `SELECT record
-       FROM tae.run_revisions
+       FROM hurdle.run_revisions
        WHERE run_id = $1
        ORDER BY revision ASC`,
       [runId],
@@ -68,8 +68,8 @@ function createReader(pool) {
       const result = await pool.query(
         `SELECT r.id, r.current_revision, r.schema_version, r.state,
                 r.target_id, r.created_at, v.record
-         FROM tae.runs AS r
-         JOIN tae.run_revisions AS v
+         FROM hurdle.runs AS r
+         JOIN hurdle.run_revisions AS v
            ON v.run_id = r.id AND v.revision = r.current_revision
          WHERE ($1::text IS NULL OR r.target_id = $1)
          ORDER BY r.created_at DESC, r.id COLLATE "C" DESC
@@ -96,7 +96,7 @@ function createReader(pool) {
       }
       const object = await pool.query(
         `SELECT size_bytes, sha256, chunk_count
-         FROM tae.evidence_objects
+         FROM hurdle.evidence_objects
          WHERE run_id = $1 AND key = $2 AND kind = 'canonical-evidence'`,
         [reference.runId, reference.key],
       );
@@ -110,7 +110,7 @@ function createReader(pool) {
       }
       const chunks = await pool.query(
         `SELECT ordinal, bytes
-         FROM tae.evidence_chunks
+         FROM hurdle.evidence_chunks
          WHERE run_id = $1 AND key = $2 AND kind = 'canonical-evidence'
          ORDER BY ordinal ASC`,
         [reference.runId, reference.key],
@@ -172,7 +172,7 @@ function evidenceReference(runId, input, bytes, availability) {
 async function verifyEvidenceObject(client, kind, reference) {
   const object = await client.query(
     `SELECT size_bytes, sha256, chunk_count
-     FROM tae.evidence_objects
+     FROM hurdle.evidence_objects
      WHERE run_id = $1 AND key = $2 AND kind = $3`,
     [reference.runId, reference.key, kind],
   );
@@ -194,7 +194,7 @@ async function verifyEvidenceObject(client, kind, reference) {
             COALESCE(sum(octet_length(bytes)), 0)::bigint AS size,
             min(ordinal)::integer AS first_ordinal,
             max(ordinal)::integer AS last_ordinal
-     FROM tae.evidence_chunks
+     FROM hurdle.evidence_chunks
      WHERE run_id = $1 AND key = $2 AND kind = 'canonical-evidence'`,
     [reference.runId, reference.key],
   );
@@ -236,7 +236,7 @@ async function putPostgresEvidence(pool, sidecar, runId, input) {
       ? Math.ceil(bytes.byteLength / CHUNK_SIZE)
       : 0;
     const inserted = await client.query(
-      `INSERT INTO tae.evidence_objects
+      `INSERT INTO hurdle.evidence_objects
          (run_id, key, kind, size_bytes, sha256, chunk_count)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT DO NOTHING`,
@@ -245,7 +245,7 @@ async function putPostgresEvidence(pool, sidecar, runId, input) {
     if (inserted.rowCount === 1 && input.kind === "canonical-evidence") {
       for (let offset = 0, ordinal = 0; offset < bytes.byteLength; offset += CHUNK_SIZE, ordinal += 1) {
         await client.query(
-          `INSERT INTO tae.evidence_chunks (run_id, key, kind, ordinal, bytes)
+          `INSERT INTO hurdle.evidence_chunks (run_id, key, kind, ordinal, bytes)
            VALUES ($1, $2, 'canonical-evidence', $3, $4)`,
           [runId, reference.key, ordinal, bytes.subarray(offset, offset + CHUNK_SIZE)],
         );
@@ -254,7 +254,7 @@ async function putPostgresEvidence(pool, sidecar, runId, input) {
     await verifyEvidenceObject(client, input.kind, reference);
     if (input.kind === "canonical-evidence") {
       const chunks = await client.query(
-        `SELECT bytes FROM tae.evidence_chunks
+        `SELECT bytes FROM hurdle.evidence_chunks
          WHERE run_id = $1 AND key = $2 AND kind = 'canonical-evidence'
          ORDER BY ordinal ASC`,
         [runId, reference.key],
@@ -276,7 +276,7 @@ function createWriter(pool, sidecar) {
         return await transaction(pool, async (client) => {
           await client.query("SET CONSTRAINTS ALL DEFERRED");
           await client.query(
-            `INSERT INTO tae.runs
+            `INSERT INTO hurdle.runs
                (id, current_revision, schema_version, state, target_id, created_at)
              VALUES ($1, 0, $2, $3, $4, $5)`,
             [
@@ -288,7 +288,7 @@ function createWriter(pool, sidecar) {
             ],
           );
           const stored = await client.query(
-            `INSERT INTO tae.run_revisions (run_id, revision, record)
+            `INSERT INTO hurdle.run_revisions (run_id, revision, record)
              VALUES ($1, 0, $2::jsonb)
              RETURNING record`,
             [record.id, JSON.stringify(record)],
@@ -316,7 +316,7 @@ function createWriter(pool, sidecar) {
 export async function transitionPostgresRun(pool, expectedRevision, record) {
   return transaction(pool, async (client) => {
     const currentResult = await client.query(
-      `SELECT current_revision FROM tae.runs WHERE id = $1 FOR UPDATE`,
+      `SELECT current_revision FROM hurdle.runs WHERE id = $1 FOR UPDATE`,
       [record.id],
     );
     if (currentResult.rowCount !== 1) throw new Error(`Run '${record.id}' does not exist`);
@@ -326,7 +326,7 @@ export async function transitionPostgresRun(pool, expectedRevision, record) {
     // can recheck an advanced head against its old statement snapshot and return
     // no row after waiting, incorrectly reporting an existing run as missing.
     const revisionResult = await client.query(
-      "SELECT record FROM tae.run_revisions WHERE run_id = $1 AND revision = $2",
+      "SELECT record FROM hurdle.run_revisions WHERE run_id = $1 AND revision = $2",
       [record.id, current.current_revision],
     );
     if (revisionResult.rowCount !== 1) throw new Error("Run head revision is missing");
@@ -334,7 +334,7 @@ export async function transitionPostgresRun(pool, expectedRevision, record) {
     if (record.state === "complete") await verifyRunEvidence(client, record);
     try {
       await client.query(
-        `INSERT INTO tae.run_revisions (run_id, revision, record)
+        `INSERT INTO hurdle.run_revisions (run_id, revision, record)
          VALUES ($1, $2, $3::jsonb)`,
         [record.id, record.revision, JSON.stringify(record)],
       );
@@ -343,7 +343,7 @@ export async function transitionPostgresRun(pool, expectedRevision, record) {
       throw error;
     }
     const advanced = await client.query(
-      `UPDATE tae.runs
+      `UPDATE hurdle.runs
        SET current_revision = $2, schema_version = $3, state = $4,
            target_id = $5, created_at = $6
        WHERE id = $1 AND current_revision = $7

@@ -157,8 +157,8 @@ test("Runtime Profile exposes a fixed Judge capability without reading its crede
 test("Runtime Profile derives Viewer environment from only the selected Result Store", () => {
   const local = resolveRuntimeProfile({ command: "view", cwd: "/workspace" });
   assert.deepEqual(viewerStoreEnvironment(local), {
-    TAE_RESULT_STORE_MODE: "local",
-    TAE_RESULT_STORE_ROOT: resolve("/workspace", ".hurdle/results-v1"),
+    HURDLE_RESULT_STORE_MODE: "local",
+    HURDLE_RESULT_STORE_ROOT: resolve("/workspace", ".hurdle/results-v1"),
   });
 
   const postgres = resolveRuntimeProfile(
@@ -176,8 +176,8 @@ test("Runtime Profile derives Viewer environment from only the selected Result S
     },
   );
   assert.deepEqual(viewerStoreEnvironment(postgres, { DATABASE_URL: "postgres-secret" }), {
-    TAE_RESULT_STORE_MODE: "postgres",
-    TAE_RESULT_STORE_DATABASE_URL: "postgres-secret",
+    HURDLE_RESULT_STORE_MODE: "postgres",
+    HURDLE_RESULT_STORE_DATABASE_URL: "postgres-secret",
   });
   assert.throws(
     () => viewerStoreEnvironment(postgres, {}),

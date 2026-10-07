@@ -162,7 +162,7 @@ try {
       }
     },
     async runCli(argv) {
-      cliMain ??= (await import("./tae.mjs")).main;
+      cliMain ??= (await import("./hurdle.mjs")).main;
       if (argv[0] === "run") {
         const stdout = captureStream();
         const stderr = captureStream();

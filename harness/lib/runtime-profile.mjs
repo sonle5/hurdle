@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { defaultLocalStoreRoot } from "./project-paths.mjs";
+import { canonicalEnvironmentName, hurdleEnvironmentValue } from "./hurdle-environment.mjs";
 
 import {
   ANTHROPIC_JSON_JUDGE_ID,
@@ -383,11 +384,11 @@ export function describeRuntimeJudgeCapability(profile) {
 }
 
 function resolveNamedSecret(name, env) {
-  const value = env?.[name];
+  const value = hurdleEnvironmentValue(env, name);
   if (typeof value !== "string" || !value.trim()) {
     throw new RuntimeProfileError(
       "runtime.secret-missing",
-      `Runtime Profile requires named secret '${name}'.`,
+      `Runtime Profile requires named secret '${canonicalEnvironmentName(name)}'.`,
     );
   }
   return value;
@@ -410,14 +411,14 @@ export function resolveRuntimeSecrets(profile, env = process.env, needs = {}) {
 export function viewerStoreEnvironment(profile, env = process.env) {
   if (profile?.resultStore?.kind === "local") {
     return deepFreeze({
-      TAE_RESULT_STORE_MODE: "local",
-      TAE_RESULT_STORE_ROOT: profile.resultStore.root,
+      HURDLE_RESULT_STORE_MODE: "local",
+      HURDLE_RESULT_STORE_ROOT: profile.resultStore.root,
     });
   }
   if (profile?.resultStore?.kind === "postgres") {
     return deepFreeze({
-      TAE_RESULT_STORE_MODE: "postgres",
-      TAE_RESULT_STORE_DATABASE_URL: resolveNamedSecret(
+      HURDLE_RESULT_STORE_MODE: "postgres",
+      HURDLE_RESULT_STORE_DATABASE_URL: resolveNamedSecret(
         profile.resultStore.databaseUrlEnv,
         env,
       ),

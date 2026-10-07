@@ -1,4 +1,4 @@
-import { defineChecks } from "tae";
+import { defineChecks } from "hurdle";
 
 // Artifact validator copied from frozen legacy 0cf8a821 deterministic-checks.mjs.
 // Shape is not proof that the provider returned these calls or that local tools ran.

@@ -36,7 +36,7 @@ test("E2B capture acquisition requires restricted public traffic", async () => {
       timeoutMs: 180_000,
       secure: true,
       network: { allowPublicTraffic: false },
-      metadata: { "tae-role": "capture" },
+      metadata: { "hurdle-role": "capture" },
     },
   }]);
 });

@@ -1,4 +1,4 @@
-import { defineChecks } from "tae";
+import { defineChecks } from "hurdle";
 
 // API observations adapted from frozen legacy 0cf8a821 deterministic-checks.mjs.
 // These prove traffic only, not saved image contents or semantic task completion.

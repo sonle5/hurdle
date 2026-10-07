@@ -5,10 +5,11 @@ import { join } from "node:path";
 import { parseEnv, stripVTControlCharacters } from "node:util";
 import test from "node:test";
 import pg from "pg";
-import { createFrameworkCli, main } from "../bin/tae.mjs";
+import { createFrameworkCli, main } from "../bin/hurdle.mjs";
 import { createPostgresTestDatabase, postgresTestAdminConnectionString } from "./helpers/postgres-test-database.mjs";
+import { PostgresMigrationError } from "../lib/postgres-migration-error.mjs";
 
-const credentialName = "TAE_RESULT_STORE_DATABASE_URL";
+const credentialName = "HURDLE_RESULT_STORE_DATABASE_URL";
 const secret = "postgresql://example:private-password@example.test/results?sslmode=require";
 
 function fixture(t, { config, legacy = false, env = { [credentialName]: secret } } = {}) {
@@ -36,8 +37,8 @@ function fixture(t, { config, legacy = false, env = { [credentialName]: secret }
 test("Postgres setup needs no Suite or Agent credentials and becomes the discovered default", async t => {
   const f = fixture(t);
   const cli = createFrameworkCli({ ...f.dependencies, launchViewer: async ({ storeEnvironment }) => {
-    assert.equal(storeEnvironment.TAE_RESULT_STORE_MODE, "postgres");
-    assert.equal(storeEnvironment.TAE_RESULT_STORE_DATABASE_URL, secret);
+    assert.equal(storeEnvironment.HURDLE_RESULT_STORE_MODE, "postgres");
+    assert.equal(storeEnvironment.HURDLE_RESULT_STORE_DATABASE_URL, secret);
     return { kind: "stopped" };
   } });
   assert.equal(await cli.main(["setup", "--store", "postgres"], f.io), 0, f.output());
@@ -82,6 +83,38 @@ test("rerunning setup preserves a custom Postgres credential name and artifact r
   assert.equal(await createFrameworkCli(f.dependencies).main(["setup", "--store", "postgres"], f.io), 0, f.output());
   assert.deepEqual(f.runtime(), config);
   assert.deepEqual(f.calls, [["connection", secret], ["migrate", secret]]);
+});
+
+test("legacy Postgres credentials and profiles upgrade their default name without changing storage", async t => {
+  const legacyName = "TAE_RESULT_STORE_DATABASE_URL";
+  const config = { schemaVersion: 1, environment: { kind: "local" }, resultStore: { kind: "postgres", databaseUrlEnv: legacyName, artifactRoot: "../../existing-artifacts" } };
+  for (const environment of [{ [legacyName]: secret }, { [credentialName]: secret }, { [legacyName]: "old-value", [credentialName]: secret }]) {
+    const f = fixture(t, { config, legacy: true, env: environment });
+    assert.equal(await createFrameworkCli(f.dependencies).main(["setup", "--store", "postgres", "--json"], f.io), 0, f.output());
+    assert.deepEqual(f.runtime(), { ...config, resultStore: { ...config.resultStore, databaseUrlEnv: credentialName } });
+    assert.deepEqual(f.calls, [["connection", secret], ["migrate", secret]]);
+    const report = JSON.parse(f.output());
+    assert.deepEqual(report.requiredCredentials, [{ label: "Postgres", anyOf: [credentialName] }]);
+    assert.doesNotMatch(f.output(), /TAE_RESULT_STORE|private-password|old-value/);
+  }
+});
+
+test("a blank canonical database credential blocks legacy fallback before any database work", async t => {
+  const f = fixture(t, { env: { TAE_RESULT_STORE_DATABASE_URL: secret, [credentialName]: "" } });
+  assert.equal(await createFrameworkCli(f.dependencies).main(["setup", "--store", "postgres", "--json"], f.io), 1);
+  const report = JSON.parse(f.output());
+  assert.equal(report.error.code, "setup.credentials-missing");
+  assert.deepEqual(report.missingCredentials, [{ label: "Postgres", anyOf: [credentialName] }]);
+  assert.deepEqual(f.calls, []);
+  assert.equal(existsSync(f.path), false);
+});
+
+test("legacy credentials from .env.local override the same legacy shell key", async t => {
+  const f = fixture(t, { env: { TAE_RESULT_STORE_DATABASE_URL: "old-shell-value" } });
+  writeFileSync(join(f.root, ".env.local"), `TAE_RESULT_STORE_DATABASE_URL=${secret}\n`);
+  assert.equal(await createFrameworkCli(f.dependencies).main(["setup", "--store", "postgres"], f.io), 0, f.output());
+  assert.deepEqual(f.calls, [["connection", secret], ["migrate", secret]]);
+  assert.equal(f.runtime().resultStore.databaseUrlEnv, credentialName);
 });
 
 test("prompted database URLs remain private, and .env.local overrides shell values", async t => {
@@ -147,6 +180,21 @@ test("JSON argument errors and database failures have stable codes and never pro
     }
     assert.doesNotMatch(f.output(), /private-password|example\.test/);
   }
+});
+
+test("schema conflicts give safe setup guidance and leave the project Runtime unchanged", async t => {
+  const config = { schemaVersion: 1, environment: { kind: "local" }, resultStore: { kind: "local", root: "../keep-results" } };
+  const f = fixture(t, { config });
+  const cli = createFrameworkCli({ ...f.dependencies, loadPostgresSetupBackend: async () => ({
+    checkConnection: async () => {},
+    migrate: async () => { throw new PostgresMigrationError("migration.schema-conflict", "Both 'tae' and 'hurdle' Postgres schemas exist. Resolve the schema conflict before retrying."); },
+  }) });
+  assert.equal(await cli.main(["setup", "--store", "postgres", "--json"], f.io), 1);
+  const report = JSON.parse(f.output());
+  assert.equal(report.error.code, "setup.database-migration");
+  assert.match(report.error.message, /Both 'tae' and 'hurdle'.*Resolve the schema conflict/);
+  assert.deepEqual(f.runtime(), config);
+  assert.doesNotMatch(f.output(), /private-password|example\.test/);
 });
 
 test("an unreadable environment file produces a JSON diagnostic before setup starts", async t => {
@@ -219,7 +267,7 @@ test("real storage setup migrates once, preserves database contents, and validat
   const { loadPostgresSetupBackend } = await import("../lib/postgres-setup.mjs");
   const cli = createFrameworkCli({ ...f.dependencies, loadPostgresSetupBackend });
   for (let index = 0; index < 2; index++) assert.equal(await cli.main(["setup", "--store", "postgres"], f.io), 0, f.output());
-  assert.equal((await pool.query("SELECT count(*)::int AS count FROM tae.schema_migrations")).rows[0].count, 1);
+  assert.equal((await pool.query("SELECT count(*)::int AS count FROM hurdle.schema_migrations")).rows[0].count, 2);
   assert.equal((await pool.query("SELECT value FROM public.keep_me")).rows[0].value, "untouched");
   const { initializeSuite } = await import("../lib/starter-suite.mjs");
   assert.equal((await initializeSuite({ destination: join(f.root, "evals") })).ok, true);
@@ -231,7 +279,7 @@ test("real storage setup migrates once, preserves database contents, and validat
       assert.equal(typeof options.resultStore.listRuns, "function");
       return { run: async () => ({ status: "rejected", summary: { plannedCells: 1 }, diagnostics: [{ code: "test.rejection", category: "selection", message: "No Agent runs in this test." }] }) };
     },
-    launchViewer: async ({ storeEnvironment }) => { assert.equal(storeEnvironment.TAE_RESULT_STORE_MODE, "postgres"); return { kind: "stopped" }; },
+    launchViewer: async ({ storeEnvironment }) => { assert.equal(storeEnvironment.HURDLE_RESULT_STORE_MODE, "postgres"); return { kind: "stopped" }; },
   });
   assert.equal(await runner.main(["validate"], f.io), 0, f.output());
   assert.equal(checked.at(-1).resultStore.kind, "postgres");

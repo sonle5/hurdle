@@ -20,7 +20,7 @@ import {
 } from "../lib/v1-evaluator-runtime.mjs";
 import { createCanonicalDashboardProjection } from "../../viewer/lib/canonical-dashboard-projection.mjs";
 
-const cliPath = fileURLToPath(new URL("../bin/tae.mjs", import.meta.url));
+const cliPath = fileURLToPath(new URL("../bin/hurdle.mjs", import.meta.url));
 const testAgentCredential = "TEST-PLACEHOLDER-CLAUDE-CREDENTIAL";
 
 function runCli(cwd, args, env = {}) {

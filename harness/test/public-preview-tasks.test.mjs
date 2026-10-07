@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, wri
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createFrameworkCli } from "../bin/tae.mjs";
+import { createFrameworkCli } from "../bin/hurdle.mjs";
 import { resolveV1Suite } from "../lib/v1-authoring.mjs";
 import { fileURLToPath } from "node:url";
 

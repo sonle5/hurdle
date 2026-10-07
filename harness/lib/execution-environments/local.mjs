@@ -426,7 +426,7 @@ export function createLocalExecutionEnvironment({
     async execute(envelope) {
       return withExecutionCredentialValues(envelope, async (credentialValues) => {
         const { fixtures, outputArtifacts } = envelope;
-        const workspace = await mkdtemp(join(tmpdir(), "tae-local-run-"));
+        const workspace = await mkdtemp(join(tmpdir(), "hurdle-local-run-"));
         await mkdir(workspace, { recursive: true, mode: 0o700 });
         let processResult = null;
         let toolVersions = null;

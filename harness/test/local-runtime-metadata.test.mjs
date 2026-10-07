@@ -91,7 +91,7 @@ for (const scenario of scenarios) {
       const originalWrite = fsPromises.default.writeFile;
       t.mock.method(fsPromises.default, "writeFile", async (...args) => {
         const result = await originalWrite(...args);
-        if (String(args[0]).includes("tae-local-run-") && String(args[0]).endsWith("/fixtures/message.txt")) controller.abort();
+        if (String(args[0]).includes("hurdle-local-run-") && String(args[0]).endsWith("/fixtures/message.txt")) controller.abort();
         return result;
       });
       syncBuiltinESMExports();

@@ -33,7 +33,7 @@ import {
   postgresTestAdminConnectionString,
 } from "./helpers/postgres-test-database.mjs";
 
-const cliPath = fileURLToPath(new URL("../bin/tae.mjs", import.meta.url));
+const cliPath = fileURLToPath(new URL("../bin/hurdle.mjs", import.meta.url));
 const adminConnectionString = postgresTestAdminConnectionString;
 
 function writeTask(root) {

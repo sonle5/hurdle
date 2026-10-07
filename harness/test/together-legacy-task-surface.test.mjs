@@ -5,7 +5,7 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { createFrameworkCli } from "../bin/tae.mjs";
+import { createFrameworkCli } from "../bin/hurdle.mjs";
 import { resolveRuntimeProfile } from "../lib/runtime-profile.mjs";
 import { resolveV1Suite } from "../lib/v1-authoring.mjs";
 
@@ -52,7 +52,7 @@ test("legacy smoke Runtime examples keep E2B fixed while selecting either Result
   });
   assert.deepEqual(postgres.resultStore, {
     kind: "postgres",
-    databaseUrlEnv: "TAE_RESULT_STORE_DATABASE_URL",
+    databaseUrlEnv: "HURDLE_RESULT_STORE_DATABASE_URL",
     artifactRoot: resolve(togetherRoot, "../../.hurdle/legacy-smoke-postgres-artifacts"),
   });
   assert.deepEqual(local.judge, {

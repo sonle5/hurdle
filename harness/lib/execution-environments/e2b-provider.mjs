@@ -616,7 +616,7 @@ export function createE2BProvider({ loadSdk = () => import("e2b") } = {}) {
         ...(role === "capture"
           ? { network: { allowPublicTraffic: false } }
           : {}),
-        metadata: { "tae-role": role },
+        metadata: { "hurdle-role": role },
       });
     },
     async validate(resource, { cpuCount, memoryMiB, signal }) {

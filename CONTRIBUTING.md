@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Together Agent Evals.
+Thanks for helping improve Hurdle — Together Agent Evals.
 
 ## Set up the repository
 

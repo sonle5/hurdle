@@ -7,6 +7,8 @@ import { regularFileContents, atomicWrite, saveCredentials } from "./setup-proje
 import { promptSetup } from "./setup-prompts.mjs";
 import { createSetupOutput } from "./setup-output.mjs";
 import { ensureSetupCredentials } from "./setup-credentials.mjs";
+import { canonicalEnvironmentName, withHurdleEnvironment, RESULT_STORE_DATABASE_URL_ENV } from "./hurdle-environment.mjs";
+import { PostgresMigrationError } from "./postgres-migration-error.mjs";
 import {
   terminalUsesColor, terminalFact, terminalHeader,
   terminalNote, terminalNext, suiteCommand,
@@ -43,13 +45,15 @@ export async function setupPostgresStore({ suite, interactive = false, json = fa
     } : JSON.parse(previous);
     // Retain custom credential names and artifact paths on repeated setup.
     if (config.resultStore?.kind !== "postgres") config.resultStore = {
-      kind: "postgres", databaseUrlEnv: "TAE_RESULT_STORE_DATABASE_URL", artifactRoot: "../postgres-artifacts",
+      kind: "postgres", databaseUrlEnv: RESULT_STORE_DATABASE_URL_ENV, artifactRoot: "../postgres-artifacts",
     };
+    config.resultStore.databaseUrlEnv = canonicalEnvironmentName(config.resultStore.databaseUrlEnv);
     const profile = resolveRuntimeProfile({ cwd: io.cwd, runtimePath }, { readFile: () => JSON.stringify(config) });
     const name = profile.resultStore.databaseUrlEnv;
-    const environment = { ...dependencies.env };
+    let environment = { ...dependencies.env };
     const source = await regularFileContents(join(io.cwd, ".env.local"));
     if (source !== null) Object.assign(environment, parseEnv(source));
+    environment = withHurdleEnvironment(environment);
     // Check files before making any database changes; never follow credential symlinks.
     await regularFileContents(join(io.cwd, ".gitignore"));
     const entered = await ensureSetupCredentials({
@@ -68,7 +72,11 @@ export async function setupPostgresStore({ suite, interactive = false, json = fa
     catch { throw setupError("setup.database-connection", `Could not connect to Postgres. Check ${name}, network access, and TLS settings. Project Runtime was not changed.`); }
     line("pass", "Postgres connection verified.");
     try { await backend.migrate(connectionString); }
-    catch { throw setupError("setup.database-migration", "Postgres schema setup failed. Check permission to create the tae schema and tables, and migration compatibility. Project Runtime was not changed."); }
+    catch (error) {
+      const message = error instanceof PostgresMigrationError ? error.message
+        : "Postgres schema setup failed. Check permission to create or rename the result schema and tables, and migration compatibility.";
+      throw setupError("setup.database-migration", `${message} Project Runtime was not changed.`);
+    }
     line("pass", "Postgres schema ready.");
     await saveCredentials(io.cwd, entered);
     await atomicWrite(runtimeFile, `${JSON.stringify(config, null, 2)}\n`, 0o600);

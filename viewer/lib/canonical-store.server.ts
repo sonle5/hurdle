@@ -1,5 +1,6 @@
 import "server-only";
 
+import { readViewerEnvironment } from "./viewer-environment.mjs";
 import { isAbsolute } from "node:path";
 import { openLocalResultStoreReader } from "@harness/local-result-store";
 import { openPostgresResultStoreReader } from "@harness/postgres-result-store-reader";
@@ -15,15 +16,15 @@ export type CanonicalStoreSource =
 let cachedSource: Promise<CanonicalStoreSource> | undefined;
 
 async function openConfiguredSource(): Promise<CanonicalStoreSource> {
-  const configuredMode = process.env.TAE_RESULT_STORE_MODE?.trim();
-  const root = process.env.TAE_RESULT_STORE_ROOT?.trim();
+  const configuredMode = readViewerEnvironment(process.env, "HURDLE_RESULT_STORE_MODE")?.trim();
+  const root = readViewerEnvironment(process.env, "HURDLE_RESULT_STORE_ROOT")?.trim();
   const mode = configuredMode || (root ? "local" : undefined);
   if (!mode) return { status: "unconfigured" };
   if (mode === "postgres") {
-    const connectionString = process.env.TAE_RESULT_STORE_DATABASE_URL?.trim();
+    const connectionString = readViewerEnvironment(process.env, "HURDLE_RESULT_STORE_DATABASE_URL")?.trim();
     if (!connectionString) {
       throw new TypeError(
-        "TAE_RESULT_STORE_DATABASE_URL is required when TAE_RESULT_STORE_MODE=postgres",
+        "HURDLE_RESULT_STORE_DATABASE_URL is required when HURDLE_RESULT_STORE_MODE=postgres",
       );
     }
     return {
@@ -32,15 +33,15 @@ async function openConfiguredSource(): Promise<CanonicalStoreSource> {
     };
   }
   if (mode !== "local") {
-    throw new TypeError("TAE_RESULT_STORE_MODE must be 'local' or 'postgres'");
+    throw new TypeError("HURDLE_RESULT_STORE_MODE must be 'local' or 'postgres'");
   }
   if (!root) {
     throw new TypeError(
-      "TAE_RESULT_STORE_ROOT is required when TAE_RESULT_STORE_MODE=local",
+      "HURDLE_RESULT_STORE_ROOT is required when HURDLE_RESULT_STORE_MODE=local",
     );
   }
   if (!isAbsolute(root)) {
-    throw new TypeError("TAE_RESULT_STORE_ROOT must be an absolute path");
+    throw new TypeError("HURDLE_RESULT_STORE_ROOT must be an absolute path");
   }
   try {
     return {

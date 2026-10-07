@@ -33,7 +33,7 @@ requires E2B's trusted HTTP capture, so a Native Local runtime cannot score it.
 Configure `E2B_API_KEY`, `TOGETHER_API_KEY`, and Agent credentials in `.env.local`
 or export them before setup. Exported values are not copied into the file.
 Setup adds `.env.local`, `.hurdle/`, and legacy `.tae/` to `.gitignore` when
-configuration succeeds. Existing file values override exports; a blank
+configuration succeeds. For the same variable name, file values override exports; a blank
 assignment overrides a working exported value too. Use `--interactive` explicitly
 for hidden credential prompts and a template-build confirmation in a terminal;
 prompted values are saved with private file permissions after readiness and
@@ -140,13 +140,31 @@ npx hurdle validate
 npx hurdle run --view
 ```
 
-Set `TAE_RESULT_STORE_DATABASE_URL` in `.env.local` or the environment before
-setup. Setup reports the variable name when it is missing; `--interactive`
-explicitly enables hidden input in a terminal. It checks the connection, applies the
-versioned migrations in the `tae` schema, and saves the project default. The
+Set `HURDLE_RESULT_STORE_DATABASE_URL` in `.env.local` or the environment before
+setup. Legacy credentials and unmodified Runtime profiles remain supported.
+Successful Postgres setup updates the built-in `TAE_RESULT_STORE_DATABASE_URL`
+credential name to `HURDLE_RESULT_STORE_DATABASE_URL`; custom names are preserved.
+The Hurdle variable takes precedence whenever present, including an empty value;
+the legacy alias is used only when it is absent. For the same variable name,
+`.env.local` overrides the shell.
+
+Setup reports the variable name when it is missing; `--interactive` explicitly
+enables hidden input in a terminal. It checks the connection, applies the
+versioned migrations for the `hurdle` schema, and saves the project default. The
 database must already exist, and the connection must permit creating the schema
-and its tables. Rerunning setup verifies existing migration checksums and applies
-only missing migrations. No Agent runs or E2B resources are created.
+and its tables. An upgrade requires schema ownership and permission to rename
+it. Rerunning setup verifies existing migration checksums and applies only
+missing migrations. No Agent runs or E2B resources are created.
+
+For an existing database, setup transactionally renames `tae` to `hurdle`,
+preserving Run rows, captured evidence, migration history, ownership, and grants.
+Fresh databases finish with the `hurdle` schema. If both schemas already exist,
+setup refuses without changes instead of merging or dropping either schema.
+Stop existing run, Viewer, and setup processes and use the updated Hurdle version
+consistently before upgrading. Clients at `0.2.4` or earlier expect `tae` and can
+recreate it during setup. Update external SQL and `search_path` settings from
+`tae` to `hurdle`. Legacy environment variables remain supported; `validate`,
+`run`, and the Viewer never apply database migrations.
 
 Storage setup preserves your Local or E2B execution environment, Judge settings,
 and Viewer port. Without a saved Runtime, it configures Local execution. To use

@@ -13,7 +13,7 @@
   },
   "resultStore": {
     "kind": "postgres",
-    "databaseUrlEnv": "TAE_RESULT_STORE_DATABASE_URL",
+    "databaseUrlEnv": "HURDLE_RESULT_STORE_DATABASE_URL",
     "artifactRoot": "../../../.hurdle/legacy-smoke-postgres-artifacts"
   },
   "judge": {

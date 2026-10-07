@@ -1,4 +1,4 @@
-![Hurdle — Together Agent Evals. Test how Claude Code and Codex use your API, SDK, or docs.](https://cdn.jsdelivr.net/npm/hurdle@0.2.1/docs/assets/readme-hero.png)
+![Hurdle. Test how Claude Code and Codex use your API, SDK, or docs.](https://raw.githubusercontent.com/Nutlope/together-agent-evals/main/docs/assets/readme-hero.png)
 
 # Hurdle — Together Agent Evals
 
@@ -57,8 +57,9 @@ npx hurdle run --view
 Setup reads configured credentials; `--yes` accepts template build usage. Builds and runs may be billed.
 See [sandbox setup](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/sandbox-setup.md) for existing templates, limits, and configuration.
 
-To save results in an existing Postgres database, run `npx hurdle setup --store postgres`.
-It checks the configured connection and applies schema migrations, keeping your execution settings.
+To save results in an existing Postgres database, set `HURDLE_RESULT_STORE_DATABASE_URL`
+in `.env.local`, then run `npx hurdle setup --store postgres`.
+It checks the connection and applies migrations to the `hurdle` schema, keeping your execution settings.
 Setup never prompts by default; use `--json` for automation or `--interactive` for terminal prompts.
 
 ## How it works

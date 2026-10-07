@@ -476,10 +476,10 @@ export async function resolveV1Suite({ suitePath }) {
       suiteFile,
     );
   }
-  const generatedRoot = mkdtempSync(join(tmpdir(), "tae-v1-pack-"));
+  const generatedRoot = mkdtempSync(join(tmpdir(), "hurdle-v1-pack-"));
   try {
     writeFileSync(
-      join(generatedRoot, "tae-authoring.mjs"),
+      join(generatedRoot, "hurdle-authoring.mjs"),
       "export const defineSuite = (value) => value; export const defineChecks = (value) => value; export const defineGuard = (value) => value;\n",
     );
     const suiteSource = readRegularText(
@@ -490,7 +490,7 @@ export async function resolveV1Suite({ suitePath }) {
     const generatedSuite = join(generatedRoot, "suite.mjs");
     writeFileSync(
       generatedSuite,
-      rewriteAuthoringImport(suiteSource, "./tae-authoring.mjs", suiteFile),
+      rewriteAuthoringImport(suiteSource, "./hurdle-authoring.mjs", suiteFile),
     );
     let imported;
     try {
@@ -507,7 +507,7 @@ export async function resolveV1Suite({ suitePath }) {
       schemaVersion: 2,
       target: {
         id: validated.api ? "api-target" : "v1-suite",
-        displayName: validated.api ? "API Target" : "TAE v1 Suite",
+        displayName: validated.api ? "API Target" : "Hurdle Suite",
         ...(validated.api ? {
           egress: {
             relevantHosts: [...validated.api.hosts],
@@ -650,7 +650,7 @@ export async function resolveV1Suite({ suitePath }) {
       const generatedChecks = join(generatedRoot, "evaluators", `${taskId}-checks.mjs`);
       writeFileSync(
         generatedChecks,
-        rewriteAuthoringImport(checksSource, "../tae-authoring.mjs", checksFile),
+        rewriteAuthoringImport(checksSource, "../hurdle-authoring.mjs", checksFile),
       );
       const generatedGuard = guardSource === null
         ? null
@@ -658,7 +658,7 @@ export async function resolveV1Suite({ suitePath }) {
       if (generatedGuard !== null) {
         writeFileSync(
           generatedGuard,
-          rewriteAuthoringImport(guardSource, "../tae-authoring.mjs", guardFile),
+          rewriteAuthoringImport(guardSource, "../hurdle-authoring.mjs", guardFile),
         );
       }
       let declarations;
@@ -729,7 +729,7 @@ export async function resolveV1Suite({ suitePath }) {
           ...(generatedGuard === null ? [] : [`evaluators/${taskId}-guard.mjs`]),
           `evaluators/${taskId}.mjs`,
           "evaluators/runtime.mjs",
-          "tae-authoring.mjs",
+          "hurdle-authoring.mjs",
         ].sort();
       }
       definition.tasks[taskId] = {

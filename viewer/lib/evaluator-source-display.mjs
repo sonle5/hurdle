@@ -29,7 +29,7 @@ export function highlightCheckSource(source, path) {
     themes: { light: "github-light", dark: "github-dark" },
     defaultColor: false,
     transformers: [{
-      name: "tae-check-lines",
+      name: "hurdle-check-lines",
       line(node, line) {
         node.properties["data-line"] = line;
       },

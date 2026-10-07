@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseEnv, stripVTControlCharacters } from "node:util";
 import test from "node:test";
-import { createFrameworkCli } from "../bin/tae.mjs";
+import { createFrameworkCli } from "../bin/hurdle.mjs";
 import { createSetupTemplate, inspectSetupTemplate } from "../lib/sandbox-setup.mjs";
 import { checkAgentReadiness } from "../lib/agent-readiness.mjs";
 import { initializeSuite } from "../lib/starter-suite.mjs";
@@ -43,7 +43,7 @@ test("setup builds once, saves a default, and validate/view discover it without 
       assert.deepEqual(ids, ["claude-code"]); assert.equal(key, f.dependencies.env.E2B_API_KEY);
       available = true; builds++; return { templateId: "test-template" };
     } }; },
-    async launchViewer({ storeEnvironment }) { assert.equal(storeEnvironment.TAE_RESULT_STORE_ROOT, join(f.root, ".hurdle/e2b-results-v1")); return { kind: "stopped" }; },
+    async launchViewer({ storeEnvironment }) { assert.equal(storeEnvironment.HURDLE_RESULT_STORE_ROOT, join(f.root, ".hurdle/e2b-results-v1")); return { kind: "stopped" }; },
   });
   assert.equal(await cli.main(["setup", "--yes"], f.io), 0, f.output());
   assert.equal(builds, 1);
@@ -72,7 +72,7 @@ test("setup, validate, and view reuse an existing .tae Runtime and preserve its 
   const stores = [];
   const cli = createFrameworkCli({ ...f.dependencies,
     loadSetupBackend: async () => ({ exists: async () => true, build() { assert.fail("Existing template must be reused"); } }),
-    async launchViewer({ storeEnvironment }) { stores.push(storeEnvironment.TAE_RESULT_STORE_ROOT); return { kind: "stopped" }; },
+    async launchViewer({ storeEnvironment }) { stores.push(storeEnvironment.HURDLE_RESULT_STORE_ROOT); return { kind: "stopped" }; },
   });
   assert.equal(await cli.main(["setup"], f.io), 0, f.output());
   assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), config);

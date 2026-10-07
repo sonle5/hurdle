@@ -26,20 +26,20 @@ test("Viewer launcher starts the source Viewer on loopback with only canonical l
     port: 3100,
     env: {
       DATABASE_URL: "legacy-database-secret",
-      TAE_RESULT_STORE_MODE: "postgres",
-      TAE_RESULT_STORE_ROOT: "/unrelated/writer-store",
-      TAE_RESULT_STORE_DATABASE_URL: "unrelated-database-secret",
-      TAE_RESULT_STORE_SIDECAR: "/unrelated/sidecar",
+      HURDLE_RESULT_STORE_MODE: "postgres",
+      HURDLE_RESULT_STORE_ROOT: "/unrelated/writer-store",
+      HURDLE_RESULT_STORE_DATABASE_URL: "unrelated-database-secret",
+      HURDLE_RESULT_STORE_SIDECAR: "/unrelated/sidecar",
       ANTHROPIC_API_KEY: "must-not-reach-viewer",
       OPENAI_API_KEY: "must-not-reach-viewer",
       TOGETHER_API_KEY: "must-not-reach-viewer",
       HOME: "/Users/operator",
-      TAE_VIEWER_ONBOARDING: "unrelated-context-must-not-reach-viewer",
+      HURDLE_VIEWER_ONBOARDING: "unrelated-context-must-not-reach-viewer",
       PATH: "/bin",
     },
     storeEnvironment: {
-      TAE_RESULT_STORE_MODE: "local",
-      TAE_RESULT_STORE_ROOT: "/canonical/results-v1",
+      HURDLE_RESULT_STORE_MODE: "local",
+      HURDLE_RESULT_STORE_ROOT: "/canonical/results-v1",
     },
     spawn(command, args, options) {
       invocation = { command, args, options };
@@ -58,9 +58,9 @@ test("Viewer launcher starts the source Viewer on loopback with only canonical l
       detached: process.platform !== "win32",
       env: {
         PATH: "/bin",
-        TAE_VIEWER_READ_ONLY: "1",
-        TAE_RESULT_STORE_MODE: "local",
-        TAE_RESULT_STORE_ROOT: "/canonical/results-v1",
+        HURDLE_VIEWER_READ_ONLY: "1",
+        HURDLE_RESULT_STORE_MODE: "local",
+        HURDLE_RESULT_STORE_ROOT: "/canonical/results-v1",
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -83,11 +83,11 @@ test("Viewer forwards only explicit display context while filtering provider sec
   const onboarding = { projectDirectory: "/project", commands: "hurdle validate\nhurdle run", setupCommand: "hurdle setup", runtimeLabel: "E2B sandbox" };
   const completed = launchViewer({
     cwd: "/workspace/source", onboarding,
-    env: { E2B_API_KEY: "secret", TOGETHER_API_KEY: "secret", TAE_VIEWER_ONBOARDING: "inherited-context" },
-    storeEnvironment: { TAE_RESULT_STORE_MODE: "local", TAE_RESULT_STORE_ROOT: "/results" },
+    env: { E2B_API_KEY: "secret", TOGETHER_API_KEY: "secret", HURDLE_VIEWER_ONBOARDING: "inherited-context" },
+    storeEnvironment: { HURDLE_RESULT_STORE_MODE: "local", HURDLE_RESULT_STORE_ROOT: "/results" },
     spawn(command, args, options) { environment = options.env; return child; },
   });
-  assert.deepEqual(JSON.parse(environment.TAE_VIEWER_ONBOARDING), onboarding);
+  assert.deepEqual(JSON.parse(environment.HURDLE_VIEWER_ONBOARDING), onboarding);
   assert.equal(environment.E2B_API_KEY, undefined);
   assert.equal(environment.TOGETHER_API_KEY, undefined);
   child.emit("close", 0, null);
@@ -95,7 +95,7 @@ test("Viewer forwards only explicit display context while filtering provider sec
 });
 
 test("Viewer launcher starts the packaged Viewer without npm or source dependencies", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "tae-packaged-viewer-"));
+  const root = mkdtempSync(join(tmpdir(), "hurdle-packaged-viewer-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const runtimeRoot = join(root, "viewer-runtime");
   const server = join(runtimeRoot, "server.js");
@@ -108,8 +108,8 @@ test("Viewer launcher starts the packaged Viewer without npm or source dependenc
     port: 3101,
     env: { PATH: "/bin", NODE_PATH: "/must-not-leak" },
     storeEnvironment: {
-      TAE_RESULT_STORE_MODE: "local",
-      TAE_RESULT_STORE_ROOT: "/canonical/results-v1",
+      HURDLE_RESULT_STORE_MODE: "local",
+      HURDLE_RESULT_STORE_ROOT: "/canonical/results-v1",
     },
     spawn(command, args, options) {
       invocation = { command, args, options };
@@ -125,9 +125,9 @@ test("Viewer launcher starts the packaged Viewer without npm or source dependenc
       detached: process.platform !== "win32",
       env: {
         PATH: "/bin",
-        TAE_VIEWER_READ_ONLY: "1",
-        TAE_RESULT_STORE_MODE: "local",
-        TAE_RESULT_STORE_ROOT: "/canonical/results-v1",
+        HURDLE_VIEWER_READ_ONLY: "1",
+        HURDLE_RESULT_STORE_MODE: "local",
+        HURDLE_RESULT_STORE_ROOT: "/canonical/results-v1",
         HOSTNAME: "127.0.0.1",
         NODE_PATH: join(runtimeRoot, "runtime_modules"),
         PORT: "3101",
@@ -152,8 +152,8 @@ test("Viewer launcher terminates a Viewer that never becomes ready", async () =>
   const completed = launchViewer({
     cwd: "/workspace/eval-framework",
     storeEnvironment: {
-      TAE_RESULT_STORE_MODE: "local",
-      TAE_RESULT_STORE_ROOT: "/canonical/results-v1",
+      HURDLE_RESULT_STORE_MODE: "local",
+      HURDLE_RESULT_STORE_ROOT: "/canonical/results-v1",
     },
     spawn: () => child,
     readinessTimeoutMs: 1,
@@ -168,8 +168,8 @@ test("Viewer launcher classifies an occupied port without returning raw process 
   const completed = launchViewer({
     cwd: "/workspace/eval-framework",
     storeEnvironment: {
-      TAE_RESULT_STORE_MODE: "local",
-      TAE_RESULT_STORE_ROOT: "/canonical/results-v1",
+      HURDLE_RESULT_STORE_MODE: "local",
+      HURDLE_RESULT_STORE_ROOT: "/canonical/results-v1",
     },
     spawn: () => child,
   });
@@ -196,8 +196,8 @@ test("Viewer launcher clears the startup deadline once the server is ready", asy
   const completed = launchViewer({
     cwd: "/workspace/eval-framework",
     storeEnvironment: {
-      TAE_RESULT_STORE_MODE: "local",
-      TAE_RESULT_STORE_ROOT: "/canonical/results-v1",
+      HURDLE_RESULT_STORE_MODE: "local",
+      HURDLE_RESULT_STORE_ROOT: "/canonical/results-v1",
     },
     spawn: () => child,
     readinessTimeoutMs: 1,
@@ -217,8 +217,8 @@ test("Viewer launcher continuously drains output without retaining post-ready lo
   const completed = launchViewer({
     cwd: "/workspace/eval-framework",
     storeEnvironment: {
-      TAE_RESULT_STORE_MODE: "local",
-      TAE_RESULT_STORE_ROOT: "/canonical/results-v1",
+      HURDLE_RESULT_STORE_MODE: "local",
+      HURDLE_RESULT_STORE_ROOT: "/canonical/results-v1",
     },
     spawn: () => child,
   });
@@ -244,8 +244,8 @@ test("Viewer launcher maps controller termination to a typed foreground interrup
   const completed = launchViewer({
     cwd: "/workspace/eval-framework",
     storeEnvironment: {
-      TAE_RESULT_STORE_MODE: "postgres",
-      TAE_RESULT_STORE_DATABASE_URL: "postgresql://canonical-reader",
+      HURDLE_RESULT_STORE_MODE: "postgres",
+      HURDLE_RESULT_STORE_DATABASE_URL: "postgresql://canonical-reader",
     },
     spawn: () => child,
     processTarget,
@@ -269,9 +269,9 @@ test("Viewer launcher rejects a Store selection that carries a writer-side sidec
     () => launchViewer({
       cwd: "/workspace/eval-framework",
       storeEnvironment: {
-        TAE_RESULT_STORE_MODE: "local",
-        TAE_RESULT_STORE_ROOT: "/canonical/results-v1",
-        TAE_RESULT_STORE_SIDECAR: "/canonical/sidecar",
+        HURDLE_RESULT_STORE_MODE: "local",
+        HURDLE_RESULT_STORE_ROOT: "/canonical/results-v1",
+        HURDLE_RESULT_STORE_SIDECAR: "/canonical/sidecar",
       },
       spawn: () => childProcess(),
     }),
@@ -289,7 +289,7 @@ test("Viewer startup timeout escalates when the process ignores SIGTERM", { time
   };
   const outcome = await launchViewer({
     cwd: "/workspace/eval-framework",
-    storeEnvironment: { TAE_RESULT_STORE_MODE: "local", TAE_RESULT_STORE_ROOT: "/results" },
+    storeEnvironment: { HURDLE_RESULT_STORE_MODE: "local", HURDLE_RESULT_STORE_ROOT: "/results" },
     spawn: () => child, readinessTimeoutMs: 1, shutdownGraceMs: 5, shutdownTimeoutMs: 30,
   });
   assert.equal(outcome.kind, "failed");
@@ -301,7 +301,7 @@ test("Viewer interruption is bounded even when no close event arrives", { timeou
   const processTarget = new EventEmitter();
   const completed = launchViewer({
     cwd: "/workspace/eval-framework",
-    storeEnvironment: { TAE_RESULT_STORE_MODE: "local", TAE_RESULT_STORE_ROOT: "/results" },
+    storeEnvironment: { HURDLE_RESULT_STORE_MODE: "local", HURDLE_RESULT_STORE_ROOT: "/results" },
     spawn: () => child, processTarget, shutdownGraceMs: 5, shutdownTimeoutMs: 30,
   });
   processTarget.emit("SIGINT");
@@ -316,7 +316,7 @@ for (const wrapperExits of [false, true]) {
   test(`Viewer disposes a real TERM-resistant descendant when ${wrapperExits ? "its wrapper exits" : "interrupted"}`, {
     skip: process.platform === "win32", timeout: 10_000,
   }, async (t) => {
-    const root = mkdtempSync(join(tmpdir(), "tae-viewer-process-tree-"));
+    const root = mkdtempSync(join(tmpdir(), "hurdle-viewer-process-tree-"));
     const heartbeat = join(root, "heartbeat");
     const controller = new EventEmitter();
     let child;
@@ -351,7 +351,7 @@ for (const wrapperExits of [false, true]) {
     `;
     const outcome = await launchViewer({
       cwd: root,
-      storeEnvironment: { TAE_RESULT_STORE_MODE: "local", TAE_RESULT_STORE_ROOT: join(root, "results") },
+      storeEnvironment: { HURDLE_RESULT_STORE_MODE: "local", HURDLE_RESULT_STORE_ROOT: join(root, "results") },
       processTarget: controller, readinessTimeoutMs: 3000, shutdownGraceMs: 50, shutdownTimeoutMs: 1500,
       spawn(_command, _args, options) {
         child = nodeSpawn(process.execPath, ["-e", wrapperSource], options);

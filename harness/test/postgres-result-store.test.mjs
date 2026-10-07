@@ -70,7 +70,7 @@ async function seedFixture(pool, history) {
     await client.query("BEGIN");
     await client.query("SET CONSTRAINTS ALL DEFERRED");
     await client.query(
-      `INSERT INTO tae.runs (id, current_revision, schema_version, state, target_id, created_at)
+      `INSERT INTO hurdle.runs (id, current_revision, schema_version, state, target_id, created_at)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [
         head.id,
@@ -83,20 +83,20 @@ async function seedFixture(pool, history) {
     );
     for (const record of history) {
       await client.query(
-        "INSERT INTO tae.run_revisions (run_id, revision, record) VALUES ($1, $2, $3::jsonb)",
+        "INSERT INTO hurdle.run_revisions (run_id, revision, record) VALUES ($1, $2, $3::jsonb)",
         [record.id, record.revision, JSON.stringify(record)],
       );
     }
     for (const reference of canonicalReferences(head)) {
       const bytes = Buffer.from(fixture.blobs[reference.key], "base64");
       await client.query(
-        `INSERT INTO tae.evidence_objects
+        `INSERT INTO hurdle.evidence_objects
            (run_id, key, kind, size_bytes, sha256, chunk_count)
          VALUES ($1, $2, 'canonical-evidence', $3, $4, 1)`,
         [reference.runId, reference.key, bytes.byteLength, reference.sha256],
       );
       await client.query(
-        `INSERT INTO tae.evidence_chunks (run_id, key, kind, ordinal, bytes)
+        `INSERT INTO hurdle.evidence_chunks (run_id, key, kind, ordinal, bytes)
          VALUES ($1, $2, 'canonical-evidence', 0, $3)`,
         [reference.runId, reference.key, bytes],
       );
@@ -104,7 +104,7 @@ async function seedFixture(pool, history) {
     for (const artifact of head.state === "complete" ? head.evidence.artifacts : []) {
       if (!artifact.content) continue;
       await client.query(
-        `INSERT INTO tae.evidence_objects
+        `INSERT INTO hurdle.evidence_objects
            (run_id, key, kind, size_bytes, sha256, chunk_count)
          VALUES ($1, $2, 'output-artifact', $3, $4, 0)`,
         [
@@ -226,7 +226,7 @@ test("Local and Postgres readers return identical Run Record v3 history without 
   const database = await createPostgresTestDatabase();
   const { connectionString } = database;
   const pool = new Pool({ connectionString, max: 2 });
-  const root = mkdtempSync(join(tmpdir(), "tae-v3-reader-parity-"));
+  const root = mkdtempSync(join(tmpdir(), "hurdle-v3-reader-parity-"));
   let postgresStore;
   t.after(async () => {
     await closePostgresResultStore(postgresStore);
@@ -268,7 +268,7 @@ test("the Postgres reader performs no migration when canonical tables are absent
     openPostgresResultStoreReader({ connectionString }),
     /migration|schema/i,
   );
-  const result = await pool.query("SELECT to_regnamespace('tae') AS schema");
+  const result = await pool.query("SELECT to_regnamespace('hurdle') AS schema");
   assert.equal(result.rows[0].schema, null);
 });
 
@@ -277,7 +277,7 @@ test("the Run Engine writes canonical evidence to Postgres and Output Artifact b
 }, async (t) => {
   const database = await createPostgresTestDatabase();
   const { connectionString } = database;
-  const root = mkdtempSync(join(tmpdir(), "tae-postgres-run-"));
+  const root = mkdtempSync(join(tmpdir(), "hurdle-postgres-run-"));
   const artifactRoot = join(root, "nested", "sidecar", "artifacts-v1");
   const pool = new Pool({ connectionString, max: 2 });
   let store;
@@ -407,13 +407,13 @@ test("the Run Engine writes canonical evidence to Postgres and Output Artifact b
   );
   assert.equal(
     Number((await pool.query(
-      "SELECT count(*) AS count FROM tae.evidence_chunks WHERE run_id = $1 AND key = $2",
+      "SELECT count(*) AS count FROM hurdle.evidence_chunks WHERE run_id = $1 AND key = $2",
       [record.id, artifact.key],
     )).rows[0].count),
     0,
   );
   assert.ok(Number((await pool.query(
-    "SELECT count(*) AS count FROM tae.evidence_chunks WHERE run_id = $1",
+    "SELECT count(*) AS count FROM hurdle.evidence_chunks WHERE run_id = $1",
     [record.id],
   )).rows[0].count) > 0);
   assert.equal(
@@ -434,7 +434,7 @@ test("binary artifact records keep Local and Postgres semantics while artifact b
 }, async (t) => {
   const database = await createPostgresTestDatabase();
   const { connectionString } = database;
-  const root = mkdtempSync(join(tmpdir(), "tae-postgres-artifact-parity-"));
+  const root = mkdtempSync(join(tmpdir(), "hurdle-postgres-artifact-parity-"));
   const artifactRoot = join(root, "postgres-artifacts");
   const pool = new Pool({ connectionString, max: 2 });
   let postgresStore;
@@ -516,7 +516,7 @@ test("binary artifact records keep Local and Postgres semantics while artifact b
   for (const artifact of captured) {
     assert.equal(
       Number((await pool.query(
-        "SELECT count(*) AS count FROM tae.evidence_chunks WHERE run_id = $1 AND key = $2",
+        "SELECT count(*) AS count FROM hurdle.evidence_chunks WHERE run_id = $1 AND key = $2",
         [postgresRecord.id, artifact.content.key],
       )).rows[0].count),
       0,
@@ -562,13 +562,13 @@ test("concurrent Postgres transitions allow exactly one expected-revision winner
   assert.equal(rejected.reason.code, "RUN_REVISION_CONFLICT", rejected.reason.message);
   assert.deepEqual(
     (await pool.query(
-      "SELECT revision FROM tae.run_revisions WHERE run_id = $1 ORDER BY revision",
+      "SELECT revision FROM hurdle.run_revisions WHERE run_id = $1 ORDER BY revision",
       [terminal.id],
     )).rows.map(({ revision }) => revision),
     [0, 1, 2],
   );
   assert.equal(
-    (await pool.query("SELECT current_revision FROM tae.runs WHERE id = $1", [terminal.id]))
+    (await pool.query("SELECT current_revision FROM hurdle.runs WHERE id = $1", [terminal.id]))
       .rows[0].current_revision,
     2,
   );
@@ -590,7 +590,7 @@ test("a Postgres transition waiting on a concurrent advance reports a revision c
   let pending;
   try {
     await owner.query("BEGIN");
-    await owner.query("SELECT id FROM tae.runs WHERE id = $1 FOR UPDATE", [queued.id]);
+    await owner.query("SELECT id FROM hurdle.runs WHERE id = $1 FOR UPDATE", [queued.id]);
     pending = transitionPostgresRun(pool, 0, running).then(
       () => ({ succeeded: true }),
       error => ({ error }),
@@ -605,10 +605,10 @@ test("a Postgres transition waiting on a concurrent advance reports a revision c
     }
     assert.equal(waiting, true, "the contender must be blocked on the owned row lock");
     await owner.query(
-      "INSERT INTO tae.run_revisions (run_id, revision, record) VALUES ($1, $2, $3::jsonb)",
+      "INSERT INTO hurdle.run_revisions (run_id, revision, record) VALUES ($1, $2, $3::jsonb)",
       [running.id, running.revision, JSON.stringify(running)],
     );
-    await owner.query("UPDATE tae.runs SET current_revision = $2, state = $3 WHERE id = $1",
+    await owner.query("UPDATE hurdle.runs SET current_revision = $2, state = $3 WHERE id = $1",
       [running.id, running.revision, running.state]);
     await owner.query("COMMIT");
     const outcome = await pending;
@@ -727,13 +727,13 @@ test("Postgres refuses a terminal record whose evidence chunks have a gap", {
     availability: "available",
   };
   await pool.query(
-    `INSERT INTO tae.evidence_objects
+    `INSERT INTO hurdle.evidence_objects
        (run_id, key, kind, size_bytes, sha256, chunk_count)
      VALUES ($1, $2, 'canonical-evidence', $3, $4, 1)`,
     [terminal.id, key, bytes.byteLength, digest],
   );
   await pool.query(
-    `INSERT INTO tae.evidence_chunks (run_id, key, kind, ordinal, bytes)
+    `INSERT INTO hurdle.evidence_chunks (run_id, key, kind, ordinal, bytes)
      VALUES ($1, $2, 'canonical-evidence', 1, $3)`,
     [terminal.id, key, bytes],
   );
@@ -743,7 +743,7 @@ test("Postgres refuses a terminal record whose evidence chunks have a gap", {
     /evidence is incomplete/,
   );
   assert.equal(
-    (await pool.query("SELECT current_revision FROM tae.runs WHERE id = $1", [terminal.id]))
+    (await pool.query("SELECT current_revision FROM hurdle.runs WHERE id = $1", [terminal.id]))
       .rows[0].current_revision,
     1,
   );

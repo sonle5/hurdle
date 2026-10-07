@@ -1643,7 +1643,7 @@ export function createRunEngineWithWriter({
           },
         });
       }
-      const pinRoot = await mkdtemp(join(tmpdir(), "tae-run-definition-"));
+      const pinRoot = await mkdtemp(join(tmpdir(), "hurdle-run-definition-"));
       try {
         const preparedCells = [];
         const preparationDiagnostics = [];

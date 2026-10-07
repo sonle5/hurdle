@@ -13,7 +13,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { stripVTControlCharacters } from "node:util";
 
-import { createFrameworkCli } from "../bin/tae.mjs";
+import { createFrameworkCli } from "../bin/hurdle.mjs";
 import { createE2BExecutionEnvironment } from "../lib/execution-environments/e2b.mjs";
 import { reportExecutionProgress } from "../lib/execution-progress.mjs";
 import { resolveV1Suite } from "../lib/v1-authoring.mjs";
@@ -543,8 +543,8 @@ test("hurdle run --view opens the recorded Local store and preserves a non-pass"
   assert.equal(exit, 1);
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].storeEnvironment, {
-    TAE_RESULT_STORE_MODE: "local",
-    TAE_RESULT_STORE_ROOT: join(root, "results"),
+    HURDLE_RESULT_STORE_MODE: "local",
+    HURDLE_RESULT_STORE_ROOT: join(root, "results"),
   });
   assert.equal(calls[0].onboarding.projectDirectory, root);
   assert.match(calls[0].onboarding.commands, /hurdle validate --environment local --store results/);
@@ -635,8 +635,8 @@ test("hurdle view launches the canonical local source on loopback", async (t) =>
   assert.equal(exit, 0);
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].storeEnvironment, {
-    TAE_RESULT_STORE_MODE: "local",
-    TAE_RESULT_STORE_ROOT: join(root, ".hurdle", "results-v1"),
+    HURDLE_RESULT_STORE_MODE: "local",
+    HURDLE_RESULT_STORE_ROOT: join(root, ".hurdle", "results-v1"),
   });
   assert.equal(calls[0].port, 3000);
   assert.match(streams.read().stdout, /http:\/\/127\.0\.0\.1:3000/);
@@ -724,8 +724,8 @@ test("hurdle view can open a canonical Local Result Store named directly", async
 
   assert.equal(exit, 0);
   assert.deepEqual(calls[0].storeEnvironment, {
-    TAE_RESULT_STORE_MODE: "local",
-    TAE_RESULT_STORE_ROOT: join(root, "pack", ".hurdle", "results-v1"),
+    HURDLE_RESULT_STORE_MODE: "local",
+    HURDLE_RESULT_STORE_ROOT: join(root, "pack", ".hurdle", "results-v1"),
   });
 });
 

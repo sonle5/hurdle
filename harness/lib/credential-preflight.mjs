@@ -1,4 +1,5 @@
 import { normalizePostgresConnectionString } from "./postgres-connection-string.mjs";
+import { hurdleEnvironmentValue, RESULT_STORE_DATABASE_URL_ENV } from "./hurdle-environment.mjs";
 
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const TOGETHER_EMBEDDINGS_URL = "https://api.together.xyz/v1/embeddings";
@@ -82,7 +83,7 @@ export async function checkTogetherCredential(apiKey, { fetch = globalThis.fetch
   try {
     const embeddingsResponse = await postJson(fetch, TOGETHER_EMBEDDINGS_URL, {
       headers: { authorization: `Bearer ${apiKey}` },
-      body: { model: TOGETHER_EMBEDDING_MODEL, input: ["TAE preflight"] },
+      body: { model: TOGETHER_EMBEDDING_MODEL, input: ["Hurdle preflight"] },
     });
     const embeddingsBody = await boundedJson(embeddingsResponse);
     if (!embeddingsResponse.ok) {
@@ -137,7 +138,7 @@ export async function checkE2bCredential(apiKey, { loadE2b } = {}) {
 
 export async function checkPostgresCredential(connectionString, { createPool } = {}) {
   if (!connectionString?.trim()) {
-    return result("Postgres", "skip", "TAE_RESULT_STORE_DATABASE_URL is not set");
+    return result("Postgres", "skip", `${RESULT_STORE_DATABASE_URL_ENV} is not set`);
   }
   let pool;
   let client;
@@ -150,10 +151,14 @@ export async function checkPostgresCredential(connectionString, { createPool } =
     pool = createPool(selectedConnectionString);
     client = await pool.connect();
     await client.query("SELECT 1");
-    const schema = await client.query("SELECT to_regclass('tae.runs') AS runs");
-    return schema.rows?.[0]?.runs
-      ? result("Postgres", "pass", "connection succeeded; tae schema is ready")
-      : result("Postgres", "pass", "connection succeeded; tae schema is not initialized");
+    const schema = await client.query("SELECT to_regclass('hurdle.runs') AS runs, to_regclass('tae.runs') AS legacy_runs");
+    if (schema.rows?.[0]?.runs && schema.rows?.[0]?.legacy_runs) {
+      return result("Postgres", "fail", "connection succeeded; both tae and hurdle schemas contain results; resolve the schema conflict before setup");
+    }
+    if (schema.rows?.[0]?.runs) return result("Postgres", "pass", "connection succeeded; hurdle schema is present");
+    return result("Postgres", "pass", schema.rows?.[0]?.legacy_runs
+      ? "connection succeeded; legacy schema needs upgrade; run npx hurdle setup --store postgres"
+      : "connection succeeded; hurdle schema is not initialized; run npx hurdle setup --store postgres");
   } catch (error) {
     if (error?.code === "28P01" || error?.code === "28000") {
       return result("Postgres", "fail", "credential rejected");
@@ -172,6 +177,6 @@ export async function runCredentialPreflight(environment, dependencies = {}) {
     checkAnthropicCredential(environment.ANTHROPIC_API_KEY, dependencies),
     checkTogetherCredential(environment.TOGETHER_API_KEY, dependencies),
     checkE2bCredential(environment.E2B_API_KEY, dependencies),
-    checkPostgresCredential(environment.TAE_RESULT_STORE_DATABASE_URL, dependencies),
+    checkPostgresCredential(hurdleEnvironmentValue(environment, RESULT_STORE_DATABASE_URL_ENV), dependencies),
   ]);
 }

@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { RESULT_STORE_DATABASE_URL_ENV } from "./hurdle-environment.mjs";
 
 const MODES = new Set(["e2b", "postgres", "e2b-postgres"]);
 
@@ -28,7 +29,7 @@ function localStore() {
 function postgresStore() {
   return {
     kind: "postgres",
-    databaseUrlEnv: "TAE_RESULT_STORE_DATABASE_URL",
+    databaseUrlEnv: RESULT_STORE_DATABASE_URL_ENV,
     artifactRoot: "../postgres-artifacts",
   };
 }

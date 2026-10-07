@@ -36,7 +36,7 @@ function editStarter(cwd, { agents = [{ runner: "claude-code", model: "test-mode
   }
 }
 
-const cliPath = fileURLToPath(new URL("../bin/tae.mjs", import.meta.url));
+const cliPath = fileURLToPath(new URL("../bin/hurdle.mjs", import.meta.url));
 
 function runCli(cwd, args, env = {}) {
   return spawnSync(process.execPath, [cliPath, ...args], {

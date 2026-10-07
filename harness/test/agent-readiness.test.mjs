@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { checkAgentReadiness, probeAgentCli } from "../lib/agent-readiness.mjs";
-import { createFrameworkCli } from "../bin/tae.mjs";
+import { createFrameworkCli } from "../bin/hurdle.mjs";
 import { createClaudeCodeAdapter } from "../lib/agent-adapters/claude-code.mjs";
 import { resolveV1Suite } from "../lib/v1-authoring.mjs";
 

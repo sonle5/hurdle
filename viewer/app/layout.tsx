@@ -25,7 +25,13 @@ const THEME_SCRIPT = `
       if (cleanupFrame !== null) window.cancelAnimationFrame(cleanupFrame);
       root.classList.add('theme-changing');
       void root.offsetHeight;
-      var stored = localStorage.getItem('tae-theme');
+      var stored = localStorage.getItem('hurdle-theme');
+      if (stored === null) {
+        stored = localStorage.getItem('tae-theme');
+        if (stored !== null) {
+          try { localStorage.setItem('hurdle-theme', stored); } catch (_) {}
+        }
+      }
       var choice = stored === 'light' || stored === 'dark' || stored === 'system'
         ? stored
         : 'system';

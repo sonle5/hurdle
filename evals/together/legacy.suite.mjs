@@ -1,4 +1,4 @@
-import { defineSuite } from "tae";
+import { defineSuite } from "hurdle";
 
 export default defineSuite({
   api: {

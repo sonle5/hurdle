@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { main as cli } from "../bin/tae.mjs";
+import { main as cli } from "../bin/hurdle.mjs";
 import { initializeSuite } from "../lib/starter-suite.mjs";
 import { createRuntimeConfig } from "../lib/runtime-init.mjs";
 import { loadProjectEnvironment } from "../lib/project-environment.mjs";
