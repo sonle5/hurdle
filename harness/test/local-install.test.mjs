@@ -292,8 +292,10 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
 
   let stdout = "";
   let stderr = "";
-  const child = spawn("npx", [
-    "--offline", "hurdle",
+  // Control the persistent CLI directly: signalling only npm's PID leaves
+  // its child alive on Linux. npx installation and readiness are checked above.
+  const child = spawn(process.execPath, [
+    cliPath,
     "run",
     "--runtime",
     "runtime.json",
