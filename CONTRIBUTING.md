@@ -48,3 +48,25 @@ evidence and any security or compatibility tradeoffs. Keep `main` releasable;
 accepted pull requests are squash-merged.
 
 Security reports should follow [SECURITY.md](SECURITY.md), not a public issue.
+
+## Publish the npm package
+
+The root `README.md` is the single README for GitHub and npm; do not maintain a
+separate npm copy. Use absolute public URLs for its images and repository links.
+The packed-install test verifies that the package includes this exact README.
+
+npm refreshes the package-page README only when a new version is published, so
+README fixes also require a patch release. See
+[npm's README guidance](https://docs.npmjs.com/about-package-readme-files/).
+After the bill-free checks and build pass, bump the root package version and
+publish the verified archive from the repository root:
+
+```sh
+npm version patch --no-git-tag-version
+npm pack
+npm publish ./hurdle-<version>.tgz
+```
+
+Replace `<version>` with the version in `package.json`. Commit both
+`package.json` and `package-lock.json` with the README change. Verify the public
+package page, image, and fresh `npx hurdle@latest` installation after publishing.

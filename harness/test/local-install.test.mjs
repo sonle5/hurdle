@@ -130,7 +130,7 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
     metadataStart === -1 ? packed.stdout : packed.stdout.slice(metadataStart + 1),
   );
   assert.equal(packageMetadata.name, "hurdle");
-  assert.equal(packageMetadata.version, "0.2.1");
+  assert.equal(packageMetadata.version, read("package.json").version);
   const packagedPaths = new Set(packageMetadata.files.map(({ path }) => path));
   for (const path of [
     "LICENSE",
@@ -174,6 +174,11 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   });
   assert.equal(installed.status, 0, `${installed.stderr}\n${installed.stdout}`);
   const installedPackage = JSON.parse(readFileSync(join(consumerRoot, "node_modules", "hurdle", "package.json"), "utf8"));
+  assert.equal(
+    readFileSync(join(consumerRoot, "node_modules", "hurdle", "README.md"), "utf8"),
+    readFileSync(join(root, "README.md"), "utf8"),
+    "GitHub and npm must use the same root README",
+  );
   assert.equal(installedPackage.license, "MIT");
   assert.notEqual(installedPackage.private, true);
   assert.equal(installedPackage.publishConfig.tag, "latest");
@@ -237,6 +242,12 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   ].join("\n"));
   chmodSync(fakeClaude, 0o755);
 
+  const codexInitialized = cli("init", "codex-evals", "--agent", "codex");
+  assert.equal(codexInitialized.status, 0, codexInitialized.stderr);
+  assert.match(readFileSync(join(consumerRoot, "codex-evals/example.suite.mjs"), "utf8"), /runner: "codex"/);
+  const codexValidated = cli("validate", "codex-evals/example.suite.mjs", "--offline");
+  assert.equal(codexValidated.status, 0, codexValidated.stderr);
+
   const port = await availablePort();
   writeFileSync(join(consumerRoot, "runtime.json"), `${JSON.stringify({
     schemaVersion: 1,
@@ -264,10 +275,25 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
     assert.equal(existsSync(join(consumerRoot, "results")), false);
   }
 
+  const ready = spawnSync("npx", ["--offline", "hurdle", "validate"], {
+    cwd: consumerRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ANTHROPIC_API_KEY: "test-only-key",
+      NODE_OPTIONS: `--import=${join(root, "harness/test/helpers/readiness-fetch.mjs")}`,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      npm_config_cache: join(temporaryRoot, "empty-npm-cache"),
+    },
+    timeout: 20_000,
+  });
+  assert.equal(ready.status, 0, ready.stderr + ready.stdout);
+  assert.equal(existsSync(join(consumerRoot, ".tae/results-v1")), false);
+
   let stdout = "";
   let stderr = "";
-  const child = spawn(process.execPath, [
-    cliPath,
+  const child = spawn("npx", [
+    "--offline", "hurdle",
     "run",
     "--runtime",
     "runtime.json",
