@@ -3,10 +3,13 @@
 Hurdle runs locally and saves results to `.hurdle/results-v1` by default. Follow this
 guide only when you need isolated E2B execution, Postgres storage, or both.
 
-For guided E2B setup, use `npx hurdle setup` in your evaluation project. It
-configures credentials, reuses or builds a template, and saves a Runtime used by
-subsequent commands. See [sandbox setup](./sandbox-setup.md). The manual steps
-below support custom Runtime files and Postgres.
+For E2B setup, use `npx hurdle setup --yes` in your evaluation project. It
+reads configured credentials, reuses or builds a template, and saves a Runtime used by
+subsequent commands. For storage setup, run `npx hurdle setup --store postgres`
+with an existing database URL. It checks the connection, applies the schema, and
+saves storage settings while preserving Local or E2B execution. See
+[sandbox and storage setup](./sandbox-setup.md). The manual steps below support
+custom Runtime files when working from a repository checkout.
 
 | Runtime | Execution | Result store |
 | --- | --- | --- |

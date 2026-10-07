@@ -38,7 +38,7 @@ test("init, validation, setup, and help share terminal styling without ANSI in r
     assert.equal((text.match(/^Hurdle$/gm) ?? []).length, 4);
     assert.match(text, /✓ Evaluation created/);
     assert.match(text, /! Readiness not checked/);
-    assert.match(text, /✗ .*E2B_API_KEY is missing/);
+    assert.match(text, /✗ hurdle \[setup\.credentials-missing\] Missing credentials: E2B_API_KEY/);
     assert.match(text, new RegExp(`Next      npx hurdle setup ${name}/example.suite.mjs`));
     assert.equal(existsSync(join(root, ".hurdle")), false);
     if (isTTY && !noColor) {

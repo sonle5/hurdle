@@ -139,7 +139,7 @@ test("hidden prompted credentials are saved privately without changing existing 
       return `private-${name}`;
     },
   });
-  assert.equal(await cli.main(["setup", "--yes"], f.io), 0, f.output());
+  assert.equal(await cli.main(["setup", "--yes", "--interactive"], f.io), 0, f.output());
   const path = join(f.root, ".env.local");
   const saved = parseEnv(readFileSync(path, "utf8"));
   assert.equal(saved.KEEP_ME, "yes");
@@ -148,6 +148,67 @@ test("hidden prompted credentials are saved privately without changing existing 
   assert.match(readFileSync(join(f.root, ".gitignore"), "utf8"), /\/\.env\.local\n\/\.hurdle\//);
   assert.equal(prompts.filter(p => p.secret).length, 3);
   assert.doesNotMatch(f.output(), /private-E2B|private-ANTHROPIC|private-TOGETHER/);
+});
+
+test("default setup never prompts on a TTY and JSON lists all missing credential alternatives", async t => {
+  const human = await fixture(t, "together-api");
+  human.io.stdin = { isTTY: true }; human.io.stdout.isTTY = true;
+  let prompts = 0;
+  const humanCli = createFrameworkCli({ ...human.dependencies, env: {}, promptSetup() { prompts++; return "private-value"; } });
+  assert.equal(await humanCli.main(["setup"], human.io), 1);
+  assert.equal(prompts, 0);
+  assert.match(human.output(), /setup.credentials-missing/);
+  assert.match(human.output(), /E2B_API_KEY.*ANTHROPIC_API_KEY.*TOGETHER_API_KEY/);
+  const f = await fixture(t, "together-api");
+  f.io.stdin = { isTTY: true }; f.io.stdout.isTTY = true; f.io.stderr.isTTY = true;
+  const cli = createFrameworkCli({ ...f.dependencies, env: {}, promptSetup() { assert.fail("Default setup must never prompt"); } });
+  assert.equal(await cli.main(["setup", "--json"], f.io), 1);
+  const report = JSON.parse(f.output());
+  assert.equal(report.ok, false);
+  assert.equal(report.exitCode, 1);
+  assert.equal(report.error.code, "setup.credentials-missing");
+  assert.deepEqual(report.missingCredentials.map(group => group.anyOf), [
+    ["E2B_API_KEY"], ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"], ["TOGETHER_API_KEY"],
+  ]);
+  assert.deepEqual(f.calls, []);
+  assert.equal(existsSync(join(f.root, ".env.local")), false);
+  assert.equal(existsSync(join(f.root, ".hurdle/runtime/default.json")), false);
+});
+
+test("JSON setup requires explicit build usage acceptance and emits one result without progress", async t => {
+  const f = await fixture(t);
+  const cli = createFrameworkCli({ ...f.dependencies, promptSetup() { assert.fail("Noninteractive setup must never prompt"); } });
+  assert.equal(await cli.main(["setup", "--json"], f.io), 1);
+  const stopped = JSON.parse(f.output());
+  assert.equal(stopped.error.code, "setup.build-required");
+  assert.deepEqual(stopped.nextCommands, ["npx hurdle setup --yes --json"]);
+  assert.equal(f.calls.some(([kind]) => kind === "build"), false);
+  assert.equal(existsSync(join(f.root, ".gitignore")), false);
+  const g = await fixture(t);
+  g.io.stdout.isTTY = true; g.io.stderr.isTTY = true;
+  assert.equal(await createFrameworkCli(g.dependencies).main(["setup", "--json", "--yes"], g.io), 0);
+  const configured = JSON.parse(g.output());
+  assert.equal(configured.ok, true);
+  assert.equal(configured.executionEnvironment, "e2b");
+  assert.equal(configured.resultStore, "local");
+  assert.equal(configured.runtimePath, ".hurdle/runtime/default.json");
+  assert.equal(g.calls.filter(([kind]) => kind === "build").length, 1);
+  assert.doesNotMatch(g.output(), /test-e2b-secret|test-agent-secret|test-target-secret/);
+});
+
+test("JSON reports rejected readiness and unavailable templates without raw backend errors", async t => {
+  for (const scenario of ["readiness", "provider"]) {
+    const f = await fixture(t);
+    const cli = createFrameworkCli({ ...f.dependencies,
+      ...(scenario === "readiness"
+        ? { checkAgentReadiness: async () => ({ ok: false, checks: [{ code: "auth.rejected", status: "fail", message: "Credential rejected." }] }) }
+        : { loadSetupBackend: async () => ({ exists: async () => { throw Error("test-e2b-secret"); } }) }),
+    });
+    assert.equal(await cli.main(["setup", "--json"], f.io), 1);
+    const report = JSON.parse(f.output());
+    assert.equal(report.error.code, scenario === "readiness" ? "setup.not-ready" : "setup.template-unavailable");
+    assert.doesNotMatch(f.output(), /test-e2b-secret/);
+  }
 });
 
 test("setup refuses credential symlinks and suppresses provider exception details", async t => {

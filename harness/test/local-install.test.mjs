@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { createPostgresTestDatabase, postgresTestAdminConnectionString } from "./helpers/postgres-test-database.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const read = path => JSON.parse(readFileSync(join(root, path), "utf8"));
@@ -136,6 +137,10 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
     "LICENSE",
     "examples/copy-message/example.suite.mjs",
     "harness/bin/tae.mjs",
+    "harness/lib/postgres-setup.mjs",
+    "harness/lib/setup-project-files.mjs",
+    "harness/lib/setup-output.mjs",
+    "harness/lib/setup-credentials.mjs",
     "harness/migrations/postgres/0001_canonical_result_store.sql",
     "harness/verify/proxy/agent-node-runtime/package-lock.json",
     "harness/verify/proxy/generic_guardian.py",
@@ -251,6 +256,34 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   const setupHelp = cli("help", "setup");
   assert.equal(setupHelp.status, 0, setupHelp.stderr);
   assert.match(setupHelp.stdout, /hurdle setup/);
+  assert.match(setupHelp.stdout, /--store postgres/);
+  const storageProject = join(temporaryRoot, "postgres-project");
+  mkdirSync(storageProject);
+  const storageSetup = connectionString => spawnSync(process.execPath, [cliPath, "setup", "--store", "postgres", "--json"], {
+    cwd: storageProject,
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1", TAE_RESULT_STORE_DATABASE_URL: connectionString },
+    timeout: 20_000,
+  });
+  const invalidStorage = storageSetup("https://example.test/private-placeholder");
+  assert.equal(invalidStorage.status, 1, invalidStorage.stderr);
+  assert.equal(JSON.parse(invalidStorage.stdout).error.code, "setup.database-url");
+  assert.doesNotMatch(invalidStorage.stdout, /private-placeholder/);
+  if (postgresTestAdminConnectionString) {
+    const database = await createPostgresTestDatabase();
+    try {
+      for (let index = 0; index < 2; index++) {
+        const configured = storageSetup(database.connectionString);
+        assert.equal(configured.status, 0, `${configured.stderr}\n${configured.stdout}`);
+        assert.equal(JSON.parse(configured.stdout).ok, true);
+        assert.equal(JSON.parse(configured.stdout).resultStore, "postgres");
+        assert.doesNotMatch(configured.stdout, /postgresql:\/\//);
+      }
+      const saved = JSON.parse(readFileSync(join(storageProject, ".hurdle/runtime/default.json"), "utf8"));
+      assert.equal(saved.resultStore.kind, "postgres");
+      assert.equal(saved.environment.kind, "local");
+    } finally { await database.cleanup(); }
+  }
   const togetherInitialized = cli("init", "together-evals", "--example", "together-api");
   assert.equal(togetherInitialized.status, 0, togetherInitialized.stderr);
   const togetherValidated = cli("validate", "together-evals/example.suite.mjs", "--offline");

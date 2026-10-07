@@ -35,6 +35,8 @@ import {
 import { initializeSuite } from "../lib/starter-suite.mjs";
 import { checkAgentReadiness } from "../lib/agent-readiness.mjs";
 import { projectRuntimePath, setupSandbox } from "../lib/sandbox-setup.mjs";
+import { setupPostgresStore } from "../lib/postgres-setup.mjs";
+import { createSetupOutput } from "../lib/setup-output.mjs";
 import { createViewerOnboarding } from "../lib/viewer-onboarding.mjs";
 import {
   terminalUsesColor, paintTerminal as paintRunOutput, terminalFact as runFact,
@@ -156,7 +158,7 @@ const HELP_TEXT = Object.freeze({
     "",
     "Commands:",
     "  init [directory]   Create a starter evaluation",
-    "  setup [suite]      Configure the project sandbox (E2B)",
+    "  setup [suite]      Configure sandbox or result storage",
     "  validate [suite]   Validate a Suite and check Agent readiness",
     "  run [suite]        Run a Suite",
     "  view               Start the Results Viewer",
@@ -185,15 +187,22 @@ const HELP_TEXT = Object.freeze({
     "Usage:",
     "  hurdle setup [suite] [options]",
     "",
-    "Configure the current project's sandbox. E2B is the default provider.",
-    "Prompts for missing credentials, reuses or builds a template, and checks readiness.",
+    "Configure the project sandbox (E2B) or connect an existing Postgres database.",
+    "Sandbox setup checks credentials and reuses or builds an E2B template.",
     "Saves .hurdle/runtime/default.json for validate, run, and view. No Agent runs.",
     "Template builds use your E2B account and may be billed.",
+    "--store postgres checks the connection and applies the tae schema migrations.",
+    "Storage setup preserves execution settings and creates no database.",
+    "Configure sandbox and storage in separate commands.",
+    "Reads .env.local or environment credentials; reports missing values without prompting.",
     "",
     "Options:",
+    "  --store postgres   Configure Postgres storage without changing execution",
     "  --sandbox e2b      Select the sandbox provider",
     "  --template NAME    Reuse an existing template (must include the Suite's Agent CLIs)",
-    "  --yes              Accept template build usage without a confirmation prompt",
+    "  --yes              Accept E2B template build usage",
+    "  --json             Emit one JSON result, including missing credential names",
+    "  --interactive      Prompt for missing credentials and template build approval",
     "  -h, --help         Show this help",
   ].join("\n"),
   validate: [
@@ -569,18 +578,32 @@ async function runCliMain(argv, io, dependencies) {
   }
 
   if (command === "setup") {
-    const options = { suite: defaultSuiteArgument(io.cwd), sandbox: "e2b", template: undefined, yes: false };
+    const options = { suite: defaultSuiteArgument(io.cwd), sandbox: "e2b", template: undefined, yes: false, interactive: false, json: args.includes("--json") };
+    const setupArgumentError = message => options.json
+      ? createSetupOutput(io, { json: true }).finish(2, { code: "argument-error", message })
+      : argumentError(message, io).exitCode;
     const seen = new Set();
     for (let index = 0; index < args.length; index++) {
       const arg = args[index];
-      if (arg === "--yes" && !seen.has(arg)) { options.yes = true; seen.add(arg); }
-      else if (["--sandbox", "--template"].includes(arg) && !seen.has(arg) && args[index + 1] && !args[index + 1].startsWith("-")) {
+      if (["--yes", "--json", "--interactive"].includes(arg) && !seen.has(arg)) { options[arg.slice(2)] = true; seen.add(arg); }
+      else if (["--sandbox", "--template", "--store"].includes(arg) && !seen.has(arg) && args[index + 1] && !args[index + 1].startsWith("-")) {
         seen.add(arg); options[arg.slice(2)] = args[++index];
       } else if (!arg.startsWith("-") && !seen.has("suite")) { options.suite = arg; seen.add("suite"); }
-      else return argumentError("Use setup [suite] [--sandbox e2b] [--template NAME] [--yes].", io).exitCode;
+      else return setupArgumentError("Use setup [suite] [--store postgres | --sandbox e2b] [--template NAME] [--yes] [--json | --interactive].");
     }
-    if (options.sandbox !== "e2b") return argumentError("Only the E2B sandbox provider is supported currently.", io).exitCode;
-    if (options.template && !/^[A-Za-z0-9][A-Za-z0-9_./:-]*$/.test(options.template)) return argumentError("Use an E2B template ID or name, optionally with a tag.", io).exitCode;
+    if (options.json && options.interactive) return setupArgumentError("Use --json for noninteractive setup or --interactive for terminal prompts, not both.");
+    if (options.interactive && (!(io.stdin ?? process.stdin).isTTY || !io.stdout.isTTY)) {
+      return setupArgumentError("--interactive requires a terminal. Configure credentials in .env.local or the environment instead.");
+    }
+    if (options.sandbox !== "e2b") return setupArgumentError("Only the E2B sandbox provider is supported currently.");
+    if (options.template && !/^[A-Za-z0-9][A-Za-z0-9_./:-]*$/.test(options.template)) return setupArgumentError("Use an E2B template ID or name, optionally with a tag.");
+    if (options.store !== undefined) {
+      if (options.store !== "postgres") return setupArgumentError("Use --store postgres to configure database storage.");
+      if (seen.has("--sandbox") || seen.has("--template")) {
+        return setupArgumentError("Configure the sandbox with setup first, then run setup --store postgres.");
+      }
+      return setupPostgresStore(options, io, dependencies);
+    }
     return setupSandbox(options, io, dependencies);
   }
 
@@ -1092,7 +1115,16 @@ export async function main(argv, io = {
   stdout: process.stdout,
   stderr: process.stderr,
 }) {
-  const { environment, source } = loadProjectEnvironment(io.cwd);
+  let configured;
+  try { configured = loadProjectEnvironment(io.cwd); }
+  catch (error) {
+    if (argv[0] !== "setup") throw error;
+    return createSetupOutput(io, { json: argv.includes("--json") }).finish(1, {
+      code: "setup.environment-unavailable",
+      message: "Could not read .env.local. Use a readable regular file, then rerun setup.",
+    });
+  }
+  const { environment, source } = configured;
   return createFrameworkCli({ env: environment, environmentSource: source }).main(argv, io);
 }
 

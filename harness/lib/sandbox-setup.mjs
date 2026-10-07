@@ -1,17 +1,18 @@
 import { existsSync } from "node:fs";
-import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { createRuntimeConfig } from "./runtime-init.mjs";
 import { resolveRuntimeProfile, describeRuntimeJudgeCapability } from "./runtime-profile.mjs";
 import { resolveAuthoritySelections } from "./authority-profile.mjs";
 import { createTerminalProgress } from "./terminal-progress.mjs";
 import { promptSetup } from "./setup-prompts.mjs";
+import { createSetupOutput } from "./setup-output.mjs";
+import { ensureSetupCredentials } from "./setup-credentials.mjs";
+import { regularFileContents, atomicWrite, saveCredentials } from "./setup-project-files.mjs";
 import { normalizeE2BSettings } from "./execution-environments/e2b.mjs";
 import { DEFAULT_PROJECT_RUNTIME, projectRuntimePath } from "./project-paths.mjs";
 import {
-  terminalUsesColor, terminalFact, terminalHeader, terminalStatus,
+  terminalUsesColor, terminalFact, terminalHeader,
   terminalNote, terminalNext, suiteCommand,
 } from "./terminal-output.mjs";
 
@@ -21,7 +22,7 @@ export const SETUP_AGENT_PACKAGES = Object.freeze({
   codex: "@openai/codex@0.141.0",
 });
 function setupError(code, message) { return Object.assign(new Error(message), { code }); }
-const nonblank = value => typeof value === "string" && value.trim().length > 0;
+
 
 export function createSetupTemplate(Template, agents) {
   const packages = [...new Set(agents)].sort().map(id => {
@@ -67,47 +68,12 @@ export async function loadSetupBackend() {
   };
 }
 
-async function regularFileContents(path) {
-  try {
-    const stat = await lstat(path);
-    if (!stat.isFile() || stat.isSymbolicLink()) throw setupError("setup.file", "Setup needs regular .env.local, .gitignore, and Runtime files; symbolic links are not supported.");
-    return await readFile(path, "utf8");
-  } catch (error) { if (error.code === "ENOENT") return null; throw error; }
-}
-
-async function atomicWrite(path, text, mode) {
-  await mkdir(dirname(path), { recursive: true });
-  const temp = `${path}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temp, text, { mode, flag: "wx" });
-    await rename(temp, path);
-  } finally { await rm(temp, { force: true }); }
-}
-
-async function saveCredentials(cwd, values) {
-  const ignore = join(cwd, ".gitignore");
-  const ignored = await regularFileContents(ignore) ?? "";
-  // Append last so an earlier negation cannot accidentally expose credentials.
-  const protectedPaths = "/.env.local\n/.hurdle/\n/.tae/";
-  if (ignored.trimEnd().split("\n").slice(-3).join("\n") !== protectedPaths) {
-    await atomicWrite(ignore, `${ignored}${ignored.endsWith("\n") || !ignored ? "" : "\n"}${protectedPaths}\n`, 0o644);
-  }
-  if (!Object.keys(values).length) return;
-  const path = join(cwd, ".env.local");
-  const existing = await regularFileContents(path) ?? "";
-  const lines = Object.entries(values).map(([name, value]) => {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || !/^[\x21-\x7e]+$/.test(value)) throw setupError("setup.credential", "Enter a nonblank credential without spaces or line breaks.");
-    return `${name}=${JSON.stringify(value)}`;
-  });
-  // Preserve comments and existing credentials; the env parser uses the last
-  // assignment when replacing an empty value entered during earlier setup.
-  await atomicWrite(path, `${existing}${existing.endsWith("\n") || !existing ? "" : "\n"}${lines.join("\n")}\n`, 0o600);
-}
-
-export async function setupSandbox({ suite, template, yes = false }, io, dependencies) {
+export async function setupSandbox({ suite, template, yes = false, interactive = false, json = false }, io, dependencies) {
+  const output = createSetupOutput(io, { json, target: "e2b" });
+  io = output.io;
   const useColor = terminalUsesColor(io.stdout);
   const fact = (label, value) => terminalFact(label, value, { useColor });
-  const line = (status, text) => io.stdout.write(terminalStatus(status, text, io.stdout));
+  const line = (status, text, code = null) => output.check(status, text, code);
   const prompt = dependencies.promptSetup ?? promptSetup;
   io.stdout.write(terminalHeader(io.stdout) + fact("Sandbox", "E2B") + "\n");
   let authored;
@@ -146,34 +112,21 @@ export async function setupSandbox({ suite, template, yes = false }, io, depende
     if (!authority.ok) throw setupError("setup.authority", authority.diagnostics.map(d => d.message).join(" "));
     const judgeRequired = Object.values(authority.value.byTaskId).some(a => a.judge?.availability === "required");
     const env = { ...dependencies.env };
-    const entered = {};
     // A project-local blank assignment must not fall back to an exported key.
     const source = await regularFileContents(join(io.cwd, ".env.local"));
     if (source !== null) Object.assign(env, parseEnv(source));
-    const ensure = async (names, label) => {
-      if (names.some(name => nonblank(env[name]))) return;
-      let name = names[0];
-      if (names.length > 1 && (io.stdin ?? process.stdin).isTTY && io.stdout.isTTY) {
-        const choice = await prompt({ message: `  ${label} credential (${names.join(" / ")}) [${name}]: ` }, io);
-        if (choice === null) throw setupError("setup.cancelled", "Setup cancelled; no template build or evaluation started.");
-        if (choice.trim()) name = choice.trim();
-        if (!names.includes(name)) throw setupError("setup.credential", `Choose ${names.join(" or ")} and rerun setup.`);
-      }
-      const value = await prompt({ message: `  ${name} (hidden): `, secret: true }, io);
-      if (value === null) {
-        if ((io.stdin ?? process.stdin).isTTY && io.stdout.isTTY) throw setupError("setup.cancelled", "Setup cancelled; no template build or evaluation started.");
-        throw setupError("setup.credentials-missing", `${names.join(" or ")} is missing. Add it to ${join(io.cwd, ".env.local")} or export it, then rerun npx hurdle setup. .env.local overrides exported values.`);
-      }
-      if (!/^[\x21-\x7e]+$/.test(value)) throw setupError("setup.credential", "Enter a nonblank credential without spaces or line breaks.");
-      env[name] = entered[name] = value;
-    };
-    await ensure([profile.environment.apiKeyEnv], "E2B");
-    for (const id of ids) await ensure(id === "codex" ? ["CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "OPENAI_API_KEY"] : ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"], id === "codex" ? "Codex" : "Claude Code");
-    for (const name of taskCredentials) await ensure([name], "Task");
-    if (judgeRequired) await ensure([profile.judge.credentialEnv], "Judge");
-    if (profile.resultStore.kind === "postgres") await ensure([profile.resultStore.databaseUrlEnv], "Postgres");
+    await regularFileContents(join(io.cwd, ".gitignore"));
+    const requirements = [
+      { label: "E2B", anyOf: [profile.environment.apiKeyEnv] },
+      ...ids.map(id => ({ label: id === "codex" ? "Codex" : "Claude Code", anyOf: id === "codex"
+        ? ["CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "OPENAI_API_KEY"] : ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"] })),
+      ...taskCredentials.map(name => ({ label: "Task", anyOf: [name] })),
+      ...(judgeRequired ? [{ label: "Judge", anyOf: [profile.judge.credentialEnv] }] : []),
+      ...(profile.resultStore.kind === "postgres" ? [{ label: "Postgres", anyOf: [profile.resultStore.databaseUrlEnv] }] : []),
+    ];
+    const entered = await ensureSetupCredentials({ requirements, environment: env, interactive, prompt, io, report: output.result });
     const readiness = await dependencies.checkAgentReadiness({ agentSelections: authored.defaults.agentSelections, runtimeProfile: profile, runtimeEnv: env, requiredCredentials: taskCredentials, judgeCredentialName: judgeRequired ? profile.judge.credentialEnv : null });
-    for (const check of readiness.checks) line(check.status, check.message);
+    for (const check of readiness.checks) line(check.status, check.message, check.code ?? null);
     if (!readiness.ok) throw setupError("setup.not-ready", "Resolve the credential errors above and rerun npx hurdle setup. No template build or evaluation started.");
     const backend = await (dependencies.loadSetupBackend ?? loadSetupBackend)();
     let available;
@@ -193,16 +146,21 @@ export async function setupSandbox({ suite, template, yes = false }, io, depende
       try { normalizeE2BSettings(config.environment.settings); }
       catch { throw setupError("setup.template-capacity", "Template capacity is not supported by the E2B Runtime. Choose a template with at least 512 MB of memory."); }
     }
-    await saveCredentials(io.cwd, entered);
     if (!available) {
       const capacity = { cpuCount: settings.cpuCount, memoryMB: settings.memoryMiB };
       io.stdout.write("\n" + fact("Template", name)
         + fact("Build", `${capacity.cpuCount} CPUs · ${capacity.memoryMB} MB · ${ids.join(" + ")}`)
         + fact("Usage", "Template build may be billed") + "\n");
       if (!yes) {
+        if (!interactive) {
+          output.result.nextCommands = [`${suiteCommand("setup", suite)} --yes${json ? " --json" : ""}`];
+          throw setupError("setup.build-required", "Template build required. Rerun setup --yes to accept E2B build usage, or use --interactive to review it. No template was built and Project Runtime was not changed.");
+        }
         const answer = await prompt({ message: "  Build this template? [y/N]: " }, io);
         if (!answer || !["y", "yes"].includes(answer.trim().toLowerCase())) throw setupError("setup.build-required", "Template build not started. Rerun setup to confirm, or use --yes to accept build usage without a prompt.");
       }
+      // Verify credential/ignore-file writes before starting a paid build.
+      await saveCredentials(io.cwd, entered);
       const progress = io.stderr.isTTY ? createTerminalProgress({ stream: io.stderr }) : null;
       progress?.start("Building E2B template");
       if (!progress) io.stdout.write(terminalNote("Building E2B template…", io.stdout));
@@ -212,15 +170,17 @@ export async function setupSandbox({ suite, template, yes = false }, io, depende
       line("pass", "E2B template built.");
     } else line("pass", `E2B template available · ${name}`);
     // Keep existing stores, Judge settings, and user limits when reusing setup.
+    if (available) await saveCredentials(io.cwd, entered);
     await atomicWrite(runtimeFile, `${JSON.stringify(config, null, 2)}\n`, 0o600);
     line("pass", "Project sandbox configured.");
     io.stdout.write("\n" + fact("Runtime", runtimePath) + fact("Suite", suite)
       + "\n" + terminalNote("Model access, remote tools, and billing are checked during execution.", io.stdout)
       + terminalNext([suiteCommand("run", suite, { view: true })], io.stdout));
-    return 0;
+    Object.assign(output.result, { runtimePath, executionEnvironment: "e2b", resultStore: config.resultStore.kind,
+      nextCommands: [suiteCommand("run", suite, { view: true })] });
+    return output.finish(0);
   } catch (error) {
     const known = error.code?.startsWith("setup.") || error.code?.startsWith("runtime.") || error.code === "backend-not-installed";
-    line("fail", known ? error.message : "Setup could not complete. Check your project files, credentials, and E2B account, then retry.");
-    return 1;
+    return output.finish(1, { code: known ? error.code : "setup.failed", message: known ? error.message : "Setup could not complete. Check your project files, credentials, and E2B account, then retry." });
   } finally { authored?.dispose(); }
 }

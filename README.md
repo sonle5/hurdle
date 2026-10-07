@@ -50,12 +50,16 @@ To try Together API activity in an E2B sandbox, start in a new project directory
 
 ```sh
 npx hurdle init --example together-api
-npx hurdle setup
+npx hurdle setup --yes
 npx hurdle run --view
 ```
 
-Setup guides credentials and template creation; builds and runs may be billed.
+Setup reads configured credentials; `--yes` accepts template build usage. Builds and runs may be billed.
 See [sandbox setup](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/sandbox-setup.md) for existing templates, limits, and configuration.
+
+To save results in an existing Postgres database, run `npx hurdle setup --store postgres`.
+It checks the configured connection and applies schema migrations, keeping your execution settings.
+Setup never prompts by default; use `--json` for automation or `--interactive` for terminal prompts.
 
 ## How it works
 
