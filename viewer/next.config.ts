@@ -2,7 +2,20 @@ import type { NextConfig } from "next";
 import path from "node:path";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
+  outputFileTracingRoot: path.join(__dirname, ".."),
   experimental: { externalDir: true },
+  webpack(config) {
+    config.resolve.alias["@harness/local-result-store"] = path.join(
+      __dirname,
+      "../harness/lib/local-result-store-reader.mjs",
+    );
+    config.resolve.alias["@harness/postgres-result-store-reader"] = path.join(
+      __dirname,
+      "../harness/postgres-result-store-reader.mjs",
+    );
+    return config;
+  },
   turbopack: {
     root: path.join(__dirname, ".."),
     resolveAlias: {

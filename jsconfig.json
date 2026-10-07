@@ -3,6 +3,7 @@
     "baseUrl": ".",
     "noEmit": true,
     "paths": {
+      "hurdle": ["harness"],
       "tae": ["harness"]
     }
   },

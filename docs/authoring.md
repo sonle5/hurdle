@@ -1,19 +1,54 @@
 # Authoring evaluations
 
-Create a starter evaluation from the repository root:
+Create a starter evaluation from your project directory:
 
 ```sh
-npm run setup
-npm run tae -- init my-evals
+npx hurdle init
 ```
+
+The starter uses Claude Code by default. Use `npx hurdle init --agent codex`
+to create a Codex starter instead.
 
 An evaluation has two parts: a **Suite** selects what to run, and each **Task**
 defines a prompt and its checks.
 
+Before your first run, install the selected agent CLI and configure credentials
+in `.env.local` (these values override your shell). Hurdle uses isolated agent
+configuration; an interactive CLI login alone is not inherited.
+
+- Claude Code: `ANTHROPIC_API_KEY`, or `CLAUDE_CODE_OAUTH_TOKEN` generated with
+  `claude setup-token`. A nonblank API key takes precedence over the OAuth token.
+- Codex: `CODEX_ACCESS_TOKEN`, then `CODEX_API_KEY`, then `OPENAI_API_KEY`.
+
+Keep `.env.local` out of version control, then check readiness:
+
+```sh
+npx hurdle validate
+npx hurdle run --view
+```
+
+`validate` checks definitions, installed local agent executables, required task
+and Runtime credentials, and API-key authentication through read-only provider
+endpoints. It never runs an Agent or Judge, creates an E2B sandbox, or requests
+model inference. Subscription-token validity and remote agent installation are
+reported as unverified; these checks do not prove model access or billing
+readiness. `run` repeats the same checks before opening a result store or
+launching an agent. A rejected credential stops the command with recovery steps.
+
+Use the same `--runtime FILE` and agent/model filters as your run to check the
+configuration you intend to execute. For definition-only CI or offline work:
+
+```sh
+npx hurdle validate --offline
+```
+
+Offline validation does not establish runtime readiness and does not bypass the
+checks performed by `run`.
+
 ## 1. Define a Suite
 
 ```js
-import { defineSuite } from "tae";
+import { defineSuite } from "hurdle";
 
 export default defineSuite({
   tasks: ["./tasks/copy-message"],
@@ -56,7 +91,7 @@ Task must prevent a request. Symlinks and overlapping staged paths are rejected.
 ## 3. Write deterministic checks
 
 ```js
-import { defineChecks } from "tae";
+import { defineChecks } from "hurdle";
 
 export default defineChecks((run) => {
   run.expect.completed();
@@ -99,7 +134,7 @@ Put preventive policy in `guard.mjs`, separate from the checks that inspect the
 completed run:
 
 ```js
-import { defineGuard } from "tae";
+import { defineGuard } from "hurdle";
 
 export default defineGuard((guard) => {
   guard.block.request({
@@ -111,7 +146,7 @@ export default defineGuard((guard) => {
 ```
 
 During an E2B run, the Guardian returns a synthetic `403` before it substitutes
-the real API credential or contacts the target. TAE automatically records a
+the real API credential or contacts the target. Hurdle automatically records a
 deterministic check for every guard: it passes when the Agent never tries the
 request and fails when the Guardian blocks an attempt. The blocked attempt is
 retained as trusted, payload-free request evidence.
@@ -151,7 +186,7 @@ Results stay distinct:
 ## 5. Run, inspect, and compare
 
 ```sh
-npm run tae -- run my-evals/example.suite.mjs --view
+npx hurdle run --view
 ```
 
 Use `--task`, `--condition`, `--agent`, or `--model` to narrow selections already
@@ -160,8 +195,8 @@ defined by the Suite. These flags do not add new Suite entries.
 Label runs that you want to compare:
 
 ```sh
-npm run tae -- run my-evals/example.suite.mjs --experiment-version before
-npm run tae -- run my-evals/example.suite.mjs --experiment-version after
+npx hurdle run --experiment-version before
+npx hurdle run --experiment-version after
 ```
 
 Open **Compare** in the Viewer and select the two labels. Runs are compared only

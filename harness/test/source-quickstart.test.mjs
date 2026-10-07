@@ -120,7 +120,7 @@ test("quickstart projects one actionable reason without internal run bookkeeping
 });
 
 test("quickstart keeps a safe fallback when no projected reason is available", () => {
-  assert.deepEqual(projectQuickstartRunIssue("tae [run-failed] Internal detail"), {
+  assert.deepEqual(projectQuickstartRunIssue("hurdle [run-failed] Internal detail"), {
     task: "copy-message",
     reason: "The starter evaluation did not complete. Open its Transcript in the Viewer for details.",
   });

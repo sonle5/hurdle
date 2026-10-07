@@ -38,7 +38,7 @@ export default async function Home({
             Run an evaluation to create it, then reload this page.
           </p>
           <pre className="mt-6 overflow-x-auto rounded-xl border border-rule bg-surface p-4 text-left text-xs leading-6 text-foreground">
-            <code>npm run tae -- run examples/copy-message/example.suite.mjs</code>
+            <code>npx hurdle run</code>
           </pre>
         </div>
       </CanonicalShell>

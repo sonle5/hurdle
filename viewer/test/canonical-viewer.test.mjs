@@ -146,7 +146,7 @@ test("the Viewer context bar omits the share-link control", () => {
   );
 });
 
-test("the top-left TAE brand has no hover tooltip", () => {
+test("the top-left Hurdle brand has no hover tooltip", () => {
   const leftRail = source("../components/shell/LeftRail.tsx");
 
   assert.doesNotMatch(leftRail, /Tooltip|TAGLINE/);
@@ -241,7 +241,7 @@ test("a canonical Local Result Store that has no runs renders an actionable empt
   const home = source("../app/page.tsx");
   assert.match(home, /canonicalSource\.status === "empty"/);
   assert.match(home, /This Result Store is empty/);
-  assert.match(home, /npm run tae -- run examples\/copy-message\/example\.suite\.mjs/);
+  assert.match(home, /npx hurdle run/);
 });
 
 test("the session highlights use a roomy two-by-two layout inside the narrow detail column", () => {

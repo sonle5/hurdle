@@ -1,4 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 const READY_PATTERN = /\bready\s+in\b/i;
 const READY_TIMEOUT_MS = 30_000;
@@ -68,23 +70,28 @@ function canonicalStoreEnvironment(value) {
   return Object.fromEntries(keys.map((key) => [key, value[key]]));
 }
 
-function viewerEnvironment(env, storeEnvironment) {
+function viewerEnvironment(env, storeEnvironment, runtimeEnvironment = {}) {
   const selected = canonicalStoreEnvironment(storeEnvironment);
   const viewerEnv = {};
   for (const [key, value] of Object.entries(env ?? {})) {
     if (VIEWER_PROCESS_ENV_KEYS.has(key)) viewerEnv[key] = value;
   }
-  return { ...viewerEnv, TAE_VIEWER_READ_ONLY: "1", ...selected };
+  return {
+    ...viewerEnv,
+    TAE_VIEWER_READ_ONLY: "1",
+    ...selected,
+    ...runtimeEnvironment,
+  };
 }
 
-function launchOptions({ cwd, port, env, storeEnvironment }) {
+function launchOptions({ cwd, port, env, storeEnvironment, runtimeEnvironment }) {
   if (!nonblank(cwd) || !Number.isSafeInteger(port) || port < 1 || port > 65_535) {
     throw new TypeError("Viewer launcher options are invalid");
   }
   return {
     cwd,
     detached: process.platform !== "win32",
-    env: viewerEnvironment(env, storeEnvironment),
+    env: viewerEnvironment(env, storeEnvironment, runtimeEnvironment),
     stdio: ["ignore", "pipe", "pipe"],
   };
 }
@@ -112,15 +119,31 @@ function ownedViewerGroupExists(child) {
   catch (error) { return error?.code !== "ESRCH"; }
 }
 
-function viewerInvocation({ port }) {
+function viewerInvocation({ cwd, port }) {
+  const runtimeRoot = join(cwd, "viewer-runtime");
+  const packagedServer = join(runtimeRoot, "server.js");
+  if (existsSync(packagedServer)) {
+    return {
+      command: process.execPath,
+      args: [packagedServer],
+      cwd: runtimeRoot,
+      environment: {
+        HOSTNAME: "127.0.0.1",
+        NODE_PATH: join(runtimeRoot, "runtime_modules"),
+        PORT: String(port),
+      },
+    };
+  }
   return {
     command: "npm",
     args: ["--prefix", "viewer", "run", "dev", "--", "--hostname", "127.0.0.1", "--port", String(port)],
+    cwd,
+    environment: {},
   };
 }
 
 /**
- * Runs the first-party Viewer in the foreground from its source checkout. The caller owns display of the ready URL; this
+ * Runs the first-party Viewer in the foreground. The caller owns display of the ready URL; this
  * boundary never opens a browser or reads Result Stores.
  */
 export function launchViewer({
@@ -143,8 +166,14 @@ export function launchViewer({
   }
   if (![shutdownGraceMs, shutdownTimeoutMs].every(value => Number.isSafeInteger(value) && value > 0)
       || shutdownTimeoutMs <= shutdownGraceMs) throw new TypeError("Viewer shutdown deadlines are invalid");
-  const options = launchOptions({ cwd, port, env, storeEnvironment });
-  const invocation = viewerInvocation({ port });
+  const invocation = viewerInvocation({ cwd, port });
+  const options = launchOptions({
+    cwd: invocation.cwd,
+    port,
+    env,
+    storeEnvironment,
+    runtimeEnvironment: invocation.environment,
+  });
   const url = `http://127.0.0.1:${port}`;
   let child;
   try {

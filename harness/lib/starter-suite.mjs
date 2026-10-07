@@ -1,4 +1,4 @@
-import { copyFile, lstat, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
+import { copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveV1Suite } from "./v1-authoring.mjs";
@@ -37,9 +37,12 @@ function initDiagnostic(code, destination, message) {
   };
 }
 
-export async function initializeSuite({ destination } = {}) {
+export async function initializeSuite({ destination, agent = "claude-code" } = {}) {
   if (!isAbsolute(destination ?? "")) {
     throw new TypeError("destination must be an absolute path");
+  }
+  if (!["claude-code", "codex"].includes(agent)) {
+    return initDiagnostic("init.agent-invalid", destination, "Choose claude-code or codex for the starter Agent.");
   }
 
   if (await pathExists(destination)) {
@@ -86,6 +89,11 @@ export async function initializeSuite({ destination } = {}) {
         fileURLToPath(new URL(relativePath, starterTemplateRoot)),
         outputPath,
       );
+    }
+    if (agent === "codex") {
+      const suitePath = join(temporaryRoot, "example.suite.mjs");
+      const source = await readFile(suitePath, "utf8");
+      await writeFile(suitePath, source.replace('runner: "claude-code"', 'runner: "codex"'));
     }
 
     const resolved = await resolveV1Suite({

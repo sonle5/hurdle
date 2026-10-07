@@ -153,7 +153,7 @@ export function LeftRail({
         <div className="w-full border-b border-rule">
           <div className="flex h-12 w-full items-center justify-center">
             <Link href="/" className="font-mono text-sm font-semibold text-foreground">
-              tae
+              hurdle
             </Link>
           </div>
         </div>
@@ -177,7 +177,7 @@ export function LeftRail({
         <div className="flex h-12 items-center justify-between px-3">
           <Link href="/" className="inline-flex items-center gap-1.5 font-mono text-sm font-semibold text-foreground">
             <Activity className="h-3.5 w-3.5 text-fg-muted" strokeWidth={2.25} />
-            tae
+            hurdle
           </Link>
           <button
             onClick={() => onCollapsedChange(true)}

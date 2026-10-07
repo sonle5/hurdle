@@ -12,6 +12,7 @@
     }
   },
   "bin": {
+    "hurdle": "./bin/tae.mjs",
     "tae": "./bin/tae.mjs"
   },
   "scripts": {

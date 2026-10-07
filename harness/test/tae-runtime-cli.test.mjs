@@ -75,7 +75,7 @@ function completedResult() {
   };
 }
 
-test("tae run displays live cell progress in terminals and stable lines in logs", async (t) => {
+test("hurdle run displays live cell progress in terminals and stable lines in logs", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });
   const root = mkdtempSync(join(tmpdir(), "tae-cli-progress-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -85,6 +85,7 @@ test("tae run displays live cell progress in terminals and stable lines in logs"
     const output = () => stripVTControlCharacters(streams.read().stderr + streams.read().stdout);
     const events = [];
     const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
       env: {},
       processTarget: new EventEmitter(),
       async openLocalResultStore() { return {}; },
@@ -152,13 +153,14 @@ test("tae run displays live cell progress in terminals and stable lines in logs"
   }
 });
 
-test("tae run stops its startup spinner when the Result Store cannot open", async (t) => {
+test("hurdle run stops its startup spinner when the Result Store cannot open", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });
   const root = mkdtempSync(join(tmpdir(), "tae-store-progress-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeJudgePack(root, "unused", "code");
   const streams = ttyIo(root);
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: {},
     async openLocalResultStore() { throw new Error("private-store-error"); },
   });
@@ -184,6 +186,7 @@ test("E2B template placeholders are rejected before execution or Judge requests"
     }));
     let executions = 0, judgeCalls = 0;
     const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
       env: { E2B_API_KEY: "test-e2b-key", ANTHROPIC_API_KEY: "test-judge-key" },
       processTarget: new EventEmitter(),
       assertRuntimeDependencies() {},
@@ -204,7 +207,7 @@ test("E2B template placeholders are rejected before execution or Judge requests"
   }
 });
 
-test("tae run preflights authority before resolving secrets or opening Postgres", async (t) => {
+test("hurdle run preflights authority before resolving secrets or opening Postgres", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-runtime-mismatch-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeJudgePack(root, "required-model");
@@ -235,6 +238,7 @@ test("tae run preflights authority before resolving secrets or opening Postgres"
     },
   });
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env,
     async openPostgresResultStore() { storeOpened = true; throw new Error("must not open"); },
   });
@@ -253,7 +257,7 @@ test("tae run preflights authority before resolving secrets or opening Postgres"
   assert.match(streams.read().stderr, /authority\.judge-capability-mismatch/);
 });
 
-test("tae run composes Postgres sidecar and the required Judge after preflight", async (t) => {
+test("hurdle run composes Postgres sidecar and the required Judge after preflight", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-runtime-postgres-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeJudgePack(root);
@@ -277,6 +281,7 @@ test("tae run composes Postgres sidecar and the required Judge after preflight",
   const store = Object.freeze({ kind: "fake-store" });
   const judge = Object.freeze({ id: "anthropic-json-v1", model: "judge-model" });
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: {
       TEST_DATABASE_URL: "postgresql://secret-database",
       TEST_JUDGE_KEY: "secret-judge-key",
@@ -347,6 +352,7 @@ test("a configured but disabled Judge does not read credentials or create a prov
   });
   const environment = Object.freeze({ kind: "controlled-e2b" });
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env,
     executionProgressObserver,
     assertRuntimeDependencies() {},
@@ -383,7 +389,7 @@ test("a configured but disabled Judge does not read credentials or create a prov
   assert.equal(providerCreated, false);
 });
 
-test("tae run reports a Postgres close failure without exposing its connection", async (t) => {
+test("hurdle run reports a Postgres close failure without exposing its connection", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-runtime-close-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeJudgePack(root);
@@ -402,6 +408,7 @@ test("tae run reports a Postgres close failure without exposing its connection",
     },
   })}\n`);
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: {
       TEST_DATABASE_URL: "postgresql://close-secret",
       TEST_JUDGE_KEY: "judge-secret",
@@ -418,12 +425,12 @@ test("tae run reports a Postgres close failure without exposing its connection",
   assert.equal(exit, 1);
   assert.equal(
     streams.read().stderr,
-    "tae [store-close-failed] The configured Result Store could not be closed cleanly.\n",
+    "hurdle [store-close-failed] The configured Result Store could not be closed cleanly.\n",
   );
   assert.doesNotMatch(`${streams.read().stdout}\n${streams.read().stderr}`, /close-secret/);
 });
 
-test("tae run forwards Local termination through cleanup and closes Postgres", async (t) => {
+test("hurdle run forwards Local termination through cleanup and closes Postgres", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });
   const root = mkdtempSync(join(tmpdir(), "tae-runtime-local-signal-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -443,6 +450,7 @@ test("tae run forwards Local termination through cleanup and closes Postgres", a
   let closeCount = 0;
   let receivedSignal = null;
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: { TEST_DATABASE_URL: "postgresql://signal-secret" },
     processTarget,
     async openPostgresResultStore() { return store; },
@@ -491,7 +499,7 @@ test("tae run forwards Local termination through cleanup and closes Postgres", a
   assert.deepEqual(streams.read(), stopped, "no spinner survives interruption");
 });
 
-test("tae run --view opens the recorded Local store and preserves a non-pass", async (t) => {
+test("hurdle run --view opens the recorded Local store and preserves a non-pass", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-run-view-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const initStreams = io(root);
@@ -510,6 +518,7 @@ test("tae run --view opens the recorded Local store and preserves a non-pass", a
     verdictReasons: [{ code: "environment.acquire-failed", summary: "E2B execution failed before evidence capture." }],
   }];
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: {},
     async openLocalResultStore() { return Object.freeze({}); },
     createRunEngine() {
@@ -544,13 +553,14 @@ test("tae run --view opens the recorded Local store and preserves a non-pass", a
   assert.match(streams.read().stdout, /Viewer: http:\/\/127\.0\.0\.1:3000/);
 });
 
-test("tae run --view does not open a Viewer for a rejected matrix", async (t) => {
+test("hurdle run --view does not open a Viewer for a rejected matrix", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-run-view-rejected-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const initStreams = io(root);
   assert.equal(await createFrameworkCli().main(["init"], initStreams), 0);
   let viewerLaunches = 0;
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: {},
     async openLocalResultStore() { return Object.freeze({}); },
     createRunEngine() {
@@ -587,7 +597,7 @@ test("tae run --view does not open a Viewer for a rejected matrix", async (t) =>
   assert.doesNotMatch(streams.read().stdout, /Viewer:/);
 });
 
-test("tae run accepts --view only once", async () => {
+test("hurdle run accepts --view only once", async () => {
   const streams = io("/workspace");
 
   const exit = await createFrameworkCli().main([
@@ -599,15 +609,16 @@ test("tae run accepts --view only once", async () => {
   assert.equal(exit, 2);
   assert.equal(
     streams.read().stderr,
-    "tae [argument-error] Option '--view' may only be supplied once.\n",
+    "hurdle [argument-error] Option '--view' may only be supplied once.\n",
   );
 });
 
-test("tae view launches the canonical local source on loopback", async (t) => {
+test("hurdle view launches the canonical local source on loopback", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-view-cli-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const calls = [];
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: {},
     async launchViewer(input) {
       calls.push(input);
@@ -628,10 +639,11 @@ test("tae view launches the canonical local source on loopback", async (t) => {
   assert.match(streams.read().stdout, /http:\/\/127\.0\.0\.1:3000/);
 });
 
-test("tae view shows one live readiness status in an interactive terminal", async (t) => {
+test("hurdle view shows one live readiness status in an interactive terminal", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-view-progress-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: {},
     async launchViewer(input) {
       input.onReady("http://127.0.0.1:3000");
@@ -651,8 +663,9 @@ test("tae view shows one live readiness status in an interactive terminal", asyn
   );
 });
 
-test("tae view reports unconfirmed shutdown without claiming success", async () => {
+test("hurdle view reports unconfirmed shutdown without claiming success", async () => {
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: {},
     async launchViewer() {
       return { kind: "failed", exitCode: 1, reason: "disposal-unconfirmed" };
@@ -661,13 +674,14 @@ test("tae view reports unconfirmed shutdown without claiming success", async () 
   const streams = io(process.cwd());
   assert.equal(await cli.main(["view"], streams), 1);
   assert.equal(streams.read().stderr,
-    "tae [viewer-disposal-unconfirmed] Viewer shutdown could not be confirmed. Check for a surviving Viewer process before restarting.\n");
+    "hurdle [viewer-disposal-unconfirmed] Viewer shutdown could not be confirmed. Check for a surviving Viewer process before restarting.\n");
 });
 
-test("tae view explains how to recover when its port is already occupied", async (t) => {
+test("hurdle view explains how to recover when its port is already occupied", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-view-port-in-use-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: {},
     async launchViewer() {
       return { kind: "failed", exitCode: 1, reason: "port-in-use" };
@@ -684,11 +698,12 @@ test("tae view explains how to recover when its port is already occupied", async
   assert.doesNotMatch(streams.read().stderr, /secret-output/);
 });
 
-test("tae view can open a canonical Local Result Store named directly", async (t) => {
+test("hurdle view can open a canonical Local Result Store named directly", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-view-store-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const calls = [];
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: {},
     async launchViewer(input) {
       calls.push(input);
@@ -726,6 +741,7 @@ test("constructor failures close Postgres and dispose the compiled Suite without
     let generatedRoot;
     let closed = 0;
     const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
       processTarget,
       env: { TEST_DB: "postgresql://sensitive", TEST_JUDGE: "sensitive-judge" },
       async resolveV1Suite(options) {

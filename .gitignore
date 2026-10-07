@@ -27,6 +27,7 @@ checkpoints/
 # Viewer runtime data is generated locally.
 viewer/data/*
 !viewer/data/.gitkeep
+viewer-runtime/
 
 # IDE configs
 viewer/.codex/

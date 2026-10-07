@@ -27,7 +27,7 @@ function runCli(cwd, args, env = {}) {
   return spawnSync(process.execPath, [cliPath, ...args], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env: { ...process.env, NODE_OPTIONS: `--import=${fileURLToPath(new URL("./helpers/readiness-fetch.mjs", import.meta.url))}`, ...env },
   });
 }
 
@@ -45,7 +45,7 @@ test("a code-authored Suite runs two independent Local repeats through the canon
   writeFileSync(
     join(taskRoot, "checks.mjs"),
     [
-      'import { defineChecks } from "tae";',
+      'import { defineChecks } from "hurdle";',
       "",
       "export default defineChecks((run) => {",
       "  run.check({",
@@ -62,7 +62,7 @@ test("a code-authored Suite runs two independent Local repeats through the canon
   writeFileSync(
     join(root, "general.suite.mjs"),
     [
-      'import { defineSuite } from "tae";',
+      'import { defineSuite } from "hurdle";',
       "",
       "export default defineSuite({",
       '  tasks: ["./tasks/copy-message"],',
@@ -87,6 +87,7 @@ test("a code-authored Suite runs two independent Local repeats through the canon
     fakeClaude,
     [
       "#!/usr/bin/env node",
+      'if (process.argv.includes("--version")) { console.log("test-agent"); process.exit(0); }',
       'const { readFileSync } = require("node:fs");',
       'const reply = readFileSync("fixtures/message.txt", "utf8").trimEnd();',
       'process.stdout.write(`${JSON.stringify({ type: "system", subtype: "init", session_id: `session-${process.pid}` })}\\n`);',
@@ -96,7 +97,7 @@ test("a code-authored Suite runs two independent Local repeats through the canon
   );
   chmodSync(fakeClaude, 0o755);
 
-  const validation = runCli(root, ["validate", "general.suite.mjs"]);
+  const validation = runCli(root, ["validate", "general.suite.mjs", "--offline"]);
   assert.equal(validation.status, 0, validation.stderr);
   assert.match(validation.stdout, /^Valid Suite: general\.suite\.mjs$/m);
   assert.match(validation.stdout, /^Tasks: 1  Conditions: 1$/m);
@@ -240,6 +241,7 @@ test("a Task workspace preserves legacy fixture paths at the Agent workspace roo
   const fakeClaude = join(binRoot, "claude");
   writeFileSync(fakeClaude, [
     "#!/usr/bin/env node",
+      'if (process.argv.includes("--version")) { console.log("test-agent"); process.exit(0); }',
     'const { readFileSync } = require("node:fs");',
     'const reply = readFileSync("harness/fixtures/message.txt", "utf8").trimEnd();',
     'process.stdout.write(`${JSON.stringify({ type: "system", subtype: "init", session_id: `session-${process.pid}` })}\\n`);',
@@ -300,6 +302,7 @@ test("a Local API Task can require completion while observing unavailable HTTP e
   const fakeClaude = join(binRoot, "claude");
   writeFileSync(fakeClaude, [
     "#!/usr/bin/env node",
+      'if (process.argv.includes("--version")) { console.log("test-agent"); process.exit(0); }',
     'const present = process.env.TOGETHER_API_KEY === "TEST-LOCAL-TARGET-CREDENTIAL";',
     'process.stdout.write(`${JSON.stringify({ type: "system", subtype: "init", session_id: `session-${process.pid}` })}\\n`);',
     'process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", session_id: `session-${process.pid}`, model: "test-model", result: present ? "credential-present" : "credential-missing" })}\\n`);',
@@ -350,14 +353,14 @@ test("request blockers compile to E2B-only policy and fail on a blocked attempt"
   mkdirSync(taskRoot, { recursive: true });
   writeFileSync(join(taskRoot, "prompt.md"), "Explain how to create a cluster without creating one.\n");
   writeFileSync(join(taskRoot, "checks.mjs"), [
-    'import { defineChecks } from "tae";',
+    'import { defineChecks } from "hurdle";',
     "export default defineChecks((run) => {",
     "  run.expect.completed();",
     "});",
     "",
   ].join("\n"));
   writeFileSync(join(taskRoot, "guard.mjs"), [
-    'import { defineGuard } from "tae";',
+    'import { defineGuard } from "hurdle";',
     "export default defineGuard((guard) => {",
     "  guard.block.request({",
     '    id: "no-reservation",',
@@ -368,7 +371,7 @@ test("request blockers compile to E2B-only policy and fail on a blocked attempt"
     "",
   ].join("\n"));
   writeFileSync(join(root, "safe.suite.mjs"), [
-    'import { defineSuite } from "tae";',
+    'import { defineSuite } from "hurdle";',
     "export default defineSuite({",
     '  api: { authorizationCredential: "TOGETHER_API_KEY", hosts: ["api.together.xyz"] },',
     '  tasks: ["./tasks/safe-cluster-advice"],',
@@ -499,6 +502,7 @@ test("failed and unavailable checks remain distinct and do not stop later repeat
   const fakeClaude = join(binRoot, "claude");
   writeFileSync(fakeClaude, [
     "#!/usr/bin/env node",
+      'if (process.argv.includes("--version")) { console.log("test-agent"); process.exit(0); }',
     'process.stdout.write(`${JSON.stringify({ type: "system", subtype: "init", session_id: `session-${process.pid}` })}\\n`);',
     'process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", session_id: `session-${process.pid}`, model: "test-model", result: "done" })}\\n`);',
     "",
@@ -575,7 +579,7 @@ test("v1 rejects the removed task.json configuration surface", (t) => {
     "",
   ].join("\n"));
 
-  const result = runCli(root, ["validate", "general.suite.mjs"]);
+  const result = runCli(root, ["validate", "general.suite.mjs", "--offline"]);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /task\.json is not supported by the v1 facade/);
 });
@@ -607,7 +611,7 @@ test("v1 rejects duplicate completion checks during validation", (t) => {
     "",
   ].join("\n"));
 
-  const result = runCli(root, ["validate", "general.suite.mjs"]);
+  const result = runCli(root, ["validate", "general.suite.mjs", "--offline"]);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /\[task\.checks-invalid\]/);
 });
@@ -641,7 +645,7 @@ test("v1 rejects fixture and workspace paths that target the same Agent file", (
     "",
   ].join("\n"));
 
-  const result = runCli(root, ["validate", "general.suite.mjs"]);
+  const result = runCli(root, ["validate", "general.suite.mjs", "--offline"]);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /\[task\.fixture-collision\]/);
 });

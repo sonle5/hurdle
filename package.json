@@ -1,11 +1,72 @@
 {
-  "private": true,
+  "name": "hurdle",
+  "version": "0.2.1",
+  "description": "Run and inspect evidence-backed evaluations for coding agents.",
+  "type": "module",
+  "bin": {
+    "hurdle": "./harness/bin/tae.mjs",
+    "tae": "./harness/bin/tae.mjs"
+  },
+  "types": "./harness/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./harness/types/index.d.ts",
+      "import": "./harness/index.mjs",
+      "default": "./harness/index.mjs"
+    }
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    ".env.example",
+    "docs/authoring.md",
+    "docs/beta-backends.md",
+    "docs/assets/readme-hero.png",
+    "examples/copy-message",
+    "harness/bin",
+    "harness/index.mjs",
+    "harness/lib",
+    "harness/local-result-store-reader.mjs",
+    "harness/migrations",
+    "harness/postgres-result-store-reader.mjs",
+    "harness/types",
+    "harness/verify/proxy/agent-node-runtime/package.json",
+    "harness/verify/proxy/agent-node-runtime/package-lock.json",
+    "harness/verify/proxy/generic_guardian.py",
+    "harness/verify/proxy/guardian-node-runtime/package.json",
+    "harness/verify/proxy/guardian-node-runtime/package-lock.json",
+    "harness/verify/proxy/guardian-requirements.lock",
+    "harness/verify/proxy/node_proxy_bootstrap.cjs",
+    "harness/verify/proxy/python_proxy_bootstrap.py",
+    "harness/verify/proxy/tcp_ws_bridge.cjs",
+    "viewer/launcher.mjs",
+    "viewer-runtime"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nutlope/together-agent-evals.git"
+  },
+  "homepage": "https://github.com/Nutlope/together-agent-evals#readme",
+  "bugs": {
+    "url": "https://github.com/Nutlope/together-agent-evals/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "tag": "latest"
+  },
   "scripts": {
-    "setup": "npm --prefix harness install --omit=optional && npm --prefix viewer install",
+    "setup": "npm install --omit=optional && npm --prefix harness install --omit=optional && npm --prefix viewer install",
     "setup:backends": "npm --prefix harness install --include=optional",
-    "setup:ci": "npm --prefix harness ci --include=optional && npm --prefix viewer ci",
+    "setup:ci": "npm ci --omit=optional && npm --prefix harness ci --include=optional && npm --prefix viewer ci",
     "test": "npm --prefix harness test && npm --prefix viewer test",
     "tae": "node harness/bin/tae.mjs",
+    "hurdle": "node harness/bin/tae.mjs",
     "preflight": "node harness/bin/preflight.mjs",
     "runtime:init": "node harness/bin/init-runtime.mjs",
     "db:migrate": "node harness/bin/migrate-postgres-result-store.mjs",
@@ -15,6 +76,21 @@
     "hybrid": "node harness/bin/tae.mjs run evals/together/hybrid.suite.mjs --runtime evals/together/runtime/local-judge.json --experiment-version together-hybrid --view",
     "chat-app": "node harness/bin/tae.mjs run evals/together/chat-app.suite.mjs --runtime evals/together/runtime/local-judge.json",
     "view": "node harness/bin/tae.mjs view",
-    "build": "npm --prefix viewer run build"
-  }
+    "build:viewer": "npm --prefix viewer run build",
+    "stage:viewer": "node scripts/stage-viewer-runtime.mjs",
+    "build": "npm run build:viewer && npm run stage:viewer",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "pg": "^8.23.0"
+  },
+  "bundleDependencies": [
+    "pg"
+  ],
+  "optionalDependencies": {
+    "e2b": "^2.38.2",
+    "https-proxy-agent": "7.0.6",
+    "ws": "8.21.1"
+  },
+  "license": "MIT"
 }

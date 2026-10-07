@@ -215,7 +215,7 @@ try {
 } catch (error) {
   progress.stop();
   process.stderr.write(
-    "tae [quickstart-failed] The source quickstart could not be completed.\n",
+    "hurdle [quickstart-failed] The source quickstart could not be completed.\n",
   );
   if (error instanceof Error && error.message) {
     process.stderr.write(`${error.message}\n`);

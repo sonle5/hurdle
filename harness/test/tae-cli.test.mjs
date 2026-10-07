@@ -8,7 +8,6 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,11 +42,11 @@ function runCli(cwd, args, env = {}) {
   return spawnSync(process.execPath, [cliPath, ...args], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env: { ...process.env, NODE_OPTIONS: `--import=${fileURLToPath(new URL("./helpers/readiness-fetch.mjs", import.meta.url))}`, ...env },
   });
 }
 
-test("tae exposes global and per-command help without executing a command", (t) => {
+test("hurdle exposes global and per-command help without executing a command", (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "tae-cli-help-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
 
@@ -55,7 +54,7 @@ test("tae exposes global and per-command help without executing a command", (t) 
     const result = runCli(cwd, args);
     assert.equal(result.status, 0);
     assert.equal(result.stderr, "");
-    assert.match(result.stdout, /^TAE\n\nUsage:\n  tae <command> \[options\]/);
+    assert.match(result.stdout, /^Hurdle\n\nUsage:\n  hurdle <command> \[options\]/);
     for (const command of ["init", "validate", "run", "view"]) {
       assert.match(result.stdout, new RegExp(`^  ${command}\\b`, "m"));
     }
@@ -63,10 +62,10 @@ test("tae exposes global and per-command help without executing a command", (t) 
 
   const commandHelp = new Map();
   for (const [command, expected] of [
-    ["init", /tae init \[directory\]/],
-    ["validate", /tae validate \[suite\]/],
-    ["run", /tae run \[suite\] \[options\]/],
-    ["view", /tae view \[--runtime FILE \| --store DIR\]/],
+    ["init", /hurdle init \[directory\]/],
+    ["validate", /hurdle validate \[suite\]/],
+    ["run", /hurdle run \[suite\] \[options\]/],
+    ["view", /hurdle view \[--runtime FILE \| --store DIR\]/],
   ]) {
     const direct = runCli(cwd, [command, "--help"]);
     const topic = runCli(cwd, ["help", command]);
@@ -109,7 +108,7 @@ test("tae exposes global and per-command help without executing a command", (t) 
   assert.equal(existsSync(join(cwd, "evals")), false);
 });
 
-test("tae init and tae validate complete the credential-free Starter Pack workflow", (t) => {
+test("hurdle init and offline validation work without credentials", (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "tae-cli-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
 
@@ -117,10 +116,13 @@ test("tae init and tae validate complete the credential-free Starter Pack workfl
   assert.equal(initialized.status, 0);
   assert.equal(initialized.stderr, "");
   assert.match(initialized.stdout, /^Created evaluation: evals\n/);
-  assert.match(initialized.stdout, /Next:\n  npm run tae -- validate evals\/example\.suite\.mjs\n/);
+  assert.match(
+    initialized.stdout,
+    /Next:\n  npx hurdle validate\n  npx hurdle run --view\n/,
+  );
   assert.doesNotMatch(initialized.stdout, /sha256:/);
 
-  const validated = runCli(cwd, ["validate"]);
+  const validated = runCli(cwd, ["validate", "--offline"]);
   assert.equal(validated.status, 0);
   assert.equal(validated.stderr, "");
   assert.match(validated.stdout, /^Valid Suite: evals\/example.suite.mjs\n/);
@@ -128,25 +130,7 @@ test("tae init and tae validate complete the credential-free Starter Pack workfl
   assert.doesNotMatch(validated.stdout, /sha256:/);
 });
 
-test("the npm-installed tae symlink invokes the CLI", (t) => {
-  const cwd = mkdtempSync(join(tmpdir(), "tae-cli-installed-"));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
-  const binDirectory = join(cwd, "node_modules", ".bin");
-  const installedCli = join(binDirectory, "tae");
-  mkdirSync(binDirectory, { recursive: true });
-  symlinkSync(cliPath, installedCli);
-
-  const result = spawnSync(process.execPath, [installedCli, "init"], {
-    cwd,
-    encoding: "utf8",
-  });
-
-  assert.equal(result.status, 0);
-  assert.equal(result.stderr, "");
-  assert.match(result.stdout, /^Created evaluation: evals\n/);
-});
-
-test("tae validate reports a missing Suite as an ordinary validation failure", (t) => {
+test("hurdle validate reports a missing Suite as an ordinary validation failure", (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "tae-cli-missing-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
 
@@ -160,7 +144,7 @@ test("tae validate reports a missing Suite as an ordinary validation failure", (
   );
 });
 
-test("tae run composes Claude Code and local execution into the canonical store", async (t) => {
+test("hurdle run composes Claude Code and local execution into the canonical store", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "tae-cli-run-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
 
@@ -177,9 +161,11 @@ test("tae run composes Claude Code and local execution into the canonical store"
     [
       "#!/usr/bin/env node",
       'const { readFileSync, writeFileSync } = require("node:fs");',
+      'if (process.argv.includes("--version")) { console.log("test-agent"); process.exit(0); }',
       'const prompt = readFileSync(0, "utf8");',
       'const authSecret = process.env.ANTHROPIC_API_KEY ?? process.env.CLAUDE_CODE_OAUTH_TOKEN ?? null;',
-      'writeFileSync("answer.txt", readFileSync("fixtures/message.txt"));',
+      'if (process.argv.includes("--version")) { console.log("test-agent"); process.exit(0); }',
+    'writeFileSync("answer.txt", readFileSync("fixtures/message.txt"));',
       'writeFileSync("secret.txt", authSecret);',
       'process.stdout.write(`${JSON.stringify({ type: "system", subtype: "init", session_id: "cli-session" })}\\n`);',
       'process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", session_id: "cli-session", model: "test-model", args: process.argv.slice(2), prompt, auth_secret: authSecret, unrelated_secret: process.env.UNRELATED_SECRET ?? null })}\\n`);',
@@ -272,7 +258,7 @@ test("tae run composes Claude Code and local execution into the canonical store"
   );
 });
 
-test("tae run composes Codex and maps CI auth into redacted canonical evidence", async (t) => {
+test("hurdle run composes Codex and maps CI auth into redacted canonical evidence", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "tae-cli-codex-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   assert.equal(runCli(cwd, ["init"]).status, 0);
@@ -285,8 +271,10 @@ test("tae run composes Codex and maps CI auth into redacted canonical evidence",
   writeFileSync(fakeCodex, [
     "#!/usr/bin/env node",
     'const { readFileSync, writeFileSync } = require("node:fs");',
-    'const prompt = readFileSync(0, "utf8");',
+    'if (process.argv.includes("--version")) { console.log("test-agent"); process.exit(0); }',
+      'const prompt = readFileSync(0, "utf8");',
     'const authSecret = process.env.CODEX_ACCESS_TOKEN ?? process.env.CODEX_API_KEY ?? null;',
+    'if (process.argv.includes("--version")) { console.log("test-agent"); process.exit(0); }',
     'writeFileSync("answer.txt", readFileSync("fixtures/message.txt"));',
     'writeFileSync("secret.txt", authSecret);',
     'process.stdout.write(`${JSON.stringify({ type: "thread.started", thread_id: "codex-cli-session" })}\\n`);',
@@ -500,7 +488,7 @@ test("Claude Code requires explicit auth for isolated execution", () => {
   );
 });
 
-test("tae run expands the configured matrix and filters narrow it", async (t) => {
+test("hurdle run expands the configured matrix and filters narrow it", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "tae-cli-matrix-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   assert.equal(runCli(cwd, ["init"]).status, 0);
@@ -513,6 +501,7 @@ test("tae run expands the configured matrix and filters narrow it", async (t) =>
   writeFileSync(fakeClaude, [
     "#!/usr/bin/env node",
     'const { readFileSync, writeFileSync } = require("node:fs");',
+    'if (process.argv.includes("--version")) { console.log("test-agent"); process.exit(0); }',
     'writeFileSync("answer.txt", readFileSync("fixtures/message.txt"));',
     'process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", session_id: "matrix-session", model: "test-model" })}\\n`);',
     "",
@@ -522,6 +511,7 @@ test("tae run expands the configured matrix and filters narrow it", async (t) =>
   writeFileSync(fakeCodex, [
     "#!/usr/bin/env node",
     'const { readFileSync, writeFileSync } = require("node:fs");',
+    'if (process.argv.includes("--version")) { console.log("test-agent"); process.exit(0); }',
     'writeFileSync("answer.txt", readFileSync("fixtures/message.txt"));',
     'process.stdout.write(`${JSON.stringify({ type: "thread.started", thread_id: "matrix-codex-session" })}\\n`);',
     'process.stdout.write(`${JSON.stringify({ type: "turn.completed", usage: {} })}\\n`);',
@@ -569,7 +559,7 @@ test("tae run expands the configured matrix and filters narrow it", async (t) =>
   assert.match(narrowed.stdout, /^  Plan\s+1 run · 1 task · 1 condition$/m);
 });
 
-test("tae run reports unknown matrix filters as argument errors", (t) => {
+test("hurdle run reports unknown matrix filters as argument errors", (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "tae-cli-selection-error-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   assert.equal(runCli(cwd, ["init"]).status, 0);
@@ -586,12 +576,12 @@ test("tae run reports unknown matrix filters as argument errors", (t) => {
     ]);
     assert.equal(result.status, 2);
     assert.equal(result.stdout, "");
-    assert.equal(result.stderr, `tae [argument-error] ${expected}\n`);
+    assert.equal(result.stderr, `hurdle [argument-error] ${expected}\n`);
     assert.doesNotMatch(result.stderr, /internal-error/);
   }
 });
 
-test("tae run rejects E2B without its operational key before opening a store", (t) => {
+test("hurdle run rejects E2B without its operational key before opening a store", (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "tae-cli-e2b-key-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   assert.equal(runCli(cwd, ["init"]).status, 0);
@@ -610,12 +600,12 @@ test("tae run rejects E2B without its operational key before opening a store", (
   assert.equal(result.stdout, "");
   assert.equal(
     result.stderr,
-    "tae [argument-error] --environment e2b requires E2B_API_KEY.\n",
+    "hurdle [argument-error] --environment e2b requires E2B_API_KEY.\n",
   );
   assert.equal(existsSync(store), false);
 });
 
-test("tae run rejects ambiguous or duplicate matrix selectors", (t) => {
+test("hurdle run rejects ambiguous or duplicate matrix selectors", (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "tae-cli-selector-errors-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   assert.equal(runCli(cwd, ["init"]).status, 0);
@@ -670,6 +660,6 @@ test("tae run rejects ambiguous or duplicate matrix selectors", (t) => {
     const result = runCli(cwd, ["run", manifest, ...args]);
     assert.equal(result.status, 2);
     assert.equal(result.stdout, "");
-    assert.equal(result.stderr, `tae [argument-error] ${expected}\n`);
+    assert.equal(result.stderr, `hurdle [argument-error] ${expected}\n`);
   }
 });

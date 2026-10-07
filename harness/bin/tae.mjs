@@ -33,6 +33,7 @@ import {
   resolveV1Suite,
 } from "../lib/v1-authoring.mjs";
 import { initializeSuite } from "../lib/starter-suite.mjs";
+import { checkAgentReadiness } from "../lib/agent-readiness.mjs";
 
 const FIRST_PARTY_AGENT_ADAPTERS = Object.freeze({
   "claude-code": createClaudeCodeAdapter,
@@ -112,6 +113,8 @@ async function launchFirstPartyViewer(options) {
 
 const PRODUCTION_DEPENDENCIES = Object.freeze({
   env: process.env,
+  environmentSource: "provided environment",
+  checkAgentReadiness,
   processTarget: process,
   viewerCwd: fileURLToPath(new URL("../../", import.meta.url)),
   initializeSuite,
@@ -153,44 +156,50 @@ function printDiagnostics(diagnostics, io) {
 
 const HELP_TEXT = Object.freeze({
   main: [
-    "TAE",
+    "Hurdle",
     "",
     "Usage:",
-    "  tae <command> [options]",
+    "  hurdle <command> [options]",
     "",
     "Commands:",
     "  init [directory]   Create a starter evaluation",
-    "  validate [suite]   Validate a Suite without running it",
+    "  validate [suite]   Validate a Suite and check Agent readiness",
     "  run [suite]        Run a Suite",
     "  view               Start the Results Viewer",
     "  help [command]     Show help for a command",
     "",
-    "Run `tae help <command>` for command options.",
+    "Run `hurdle help <command>` for command options.",
   ].join("\n"),
   init: [
     "Usage:",
-    "  tae init [directory]",
+    "  hurdle init [directory] [--agent claude-code|codex]",
     "",
     "Create a starter evaluation. The default directory is `evals`.",
     "The destination must not already exist.",
     "",
     "Options:",
+    "  --agent ID         Choose Claude Code (default) or Codex",
     "  -h, --help         Show this help",
   ].join("\n"),
   validate: [
     "Usage:",
-    "  tae validate [suite]",
+    "  hurdle validate [suite] [options]",
     "",
-    "Validate a .suite.mjs Suite without running an Agent.",
+    "Validate a .suite.mjs Suite and check runtime/authentication readiness.",
+    "Uses read-only provider requests; never runs an Agent or Judge.",
     "The default Suite is `evals/example.suite.mjs` when it exists,",
     "otherwise `example.suite.mjs`.",
     "",
     "Options:",
+    "  --offline          Check Suite definitions only; no readiness checks",
+    "  --runtime FILE     Check the Runtime Profile used by run",
+    "  --agent ID         Check one Agent selected by the Suite",
+    "  --model MODEL      Filter Suite model selections",
     "  -h, --help         Show this help",
   ].join("\n"),
   run: [
     "Usage:",
-    "  tae run [suite] [options]",
+    "  hurdle run [suite] [options]",
     "",
     "Run a .suite.mjs Suite. The default is `evals/example.suite.mjs` when",
     "it exists, otherwise `example.suite.mjs`.",
@@ -218,7 +227,7 @@ const HELP_TEXT = Object.freeze({
   ].join("\n"),
   view: [
     "Usage:",
-    "  tae view [--runtime FILE | --store DIR]",
+    "  hurdle view [--runtime FILE | --store DIR]",
     "",
     "Start the Results Viewer for the default or selected Result Store.",
     "",
@@ -239,12 +248,12 @@ function hasHelpFlag(args) {
 }
 
 function usage(io) {
-  io.stderr.write("Usage: tae <init [directory] | validate [suite] | run [suite] [options] [--view] | view [--runtime FILE | --store DIR]>\n");
+  io.stderr.write("Usage: hurdle <init [directory] | validate [suite] | run [suite] [options] [--view] | view [--runtime FILE | --store DIR]>\n");
   return 2;
 }
 
 function argumentError(message, io) {
-  io.stderr.write(`tae [argument-error] ${message}\n`);
+  io.stderr.write(`hurdle [argument-error] ${message}\n`);
   return { ok: false, exitCode: 2 };
 }
 
@@ -254,7 +263,7 @@ function defaultSuiteArgument(cwd) {
     : "example.suite.mjs";
 }
 
-function parseRunArguments(args, io) {
+function parseRunArguments(args, io, { validation = false } = {}) {
   const values = {
     suite: defaultSuiteArgument(io.cwd),
     taskIds: [],
@@ -269,6 +278,7 @@ function parseRunArguments(args, io) {
     store: null,
     runtime: null,
     viewAfterRun: false,
+    offline: false,
     explicitTopology: new Set(),
   };
   let suiteSeen = false;
@@ -292,7 +302,12 @@ function parseRunArguments(args, io) {
       suiteSeen = true;
       continue;
     }
-    if (token === "--view") {
+    if (validation && token === "--offline") {
+      if (values.offline) return argumentError("Option '--offline' may only be supplied once.", io);
+      values.offline = true;
+      continue;
+    }
+    if (token === "--view" && !validation) {
       if (seenScalarFields.has("viewAfterRun")) {
         return argumentError("Option '--view' may only be supplied once.", io);
       }
@@ -301,7 +316,7 @@ function parseRunArguments(args, io) {
       continue;
     }
     const field = flags.get(token);
-    if (!field) return argumentError(`Unknown run option '${token}'.`, io);
+    if (!field) return argumentError(`Unknown ${validation ? "validate" : "run"} option '${token}'.`, io);
     const value = args[index + 1];
     if (!value || value.startsWith("-")) {
       return argumentError(`Option '${token}' requires a value.`, io);
@@ -399,7 +414,7 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies) {
     storeEnvironment = viewerStoreEnvironment(runtimeProfile, dependencies.env);
   } catch (error) {
     if (!(error instanceof RuntimeProfileError)) throw error;
-    io.stderr.write(`tae [${error.code}] ${error.message}\n`);
+    io.stderr.write(`hurdle [${error.code}] ${error.message}\n`);
     return 2;
   }
   let readyPrinted = false;
@@ -435,23 +450,23 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies) {
   }
   progress?.fail(readyPrinted ? "Results Viewer stopped unexpectedly" : "Results Viewer failed to start");
   if (outcome.reason === "disposal-unconfirmed") {
-    io.stderr.write("tae [viewer-disposal-unconfirmed] Viewer shutdown could not be confirmed. Check for a surviving Viewer process before restarting.\n");
+    io.stderr.write("hurdle [viewer-disposal-unconfirmed] Viewer shutdown could not be confirmed. Check for a surviving Viewer process before restarting.\n");
     return 1;
   }
   if (outcome.reason === "port-in-use") {
     io.stderr.write(
-      `tae [viewer-port-in-use] Port ${runtimeProfile.viewer.port} is already in use.\n`
+      `hurdle [viewer-port-in-use] Port ${runtimeProfile.viewer.port} is already in use.\n`
       + `Open http://127.0.0.1:${runtimeProfile.viewer.port} if the Viewer is already running, `
       + "or stop that process and run this command again.\n",
     );
   } else if (outcome.reason === "viewer-lock-held") {
     io.stderr.write(
-      "tae [viewer-lock-held] Another Viewer development server appears to be running from this checkout.\n"
+      "hurdle [viewer-lock-held] Another Viewer development server appears to be running from this checkout.\n"
       + "Stop that Viewer and run this command again. If no Viewer is running, remove the stale viewer/.next/dev/lock file.\n",
     );
   } else {
     io.stderr.write(
-      "tae [viewer-failed] The Results Viewer could not be started. "
+      "hurdle [viewer-failed] The Results Viewer could not be started. "
       + "Run `npm --prefix viewer run dev` to inspect the startup error.\n",
     );
   }
@@ -479,58 +494,47 @@ async function runCliMain(argv, io, dependencies) {
   }
 
   if (command === "init") {
-    if (args.length > 1 || args[0]?.startsWith("-")) return usage(io);
-    const destination = resolve(io.cwd, args[0] ?? "evals");
-    const result = await dependencies.initializeSuite({ destination });
+    let directory = "evals", agent = "claude-code", directorySeen = false, agentSeen = false;
+    for (let index = 0; index < args.length; index++) {
+      if (args[index] === "--agent" && !agentSeen) {
+        agent = args[++index];
+        agentSeen = true;
+        if (!["claude-code", "codex"].includes(agent)) return argumentError("--agent must be claude-code or codex.", io).exitCode;
+      } else if (!args[index].startsWith("-") && !directorySeen) {
+        directory = args[index];
+        directorySeen = true;
+      } else {
+        return argumentError("Use init [directory] [--agent claude-code|codex].", io).exitCode;
+      }
+    }
+    const destination = resolve(io.cwd, directory);
+    const result = await dependencies.initializeSuite({ destination, agent });
     if (!result.ok) {
       printDiagnostics(result.diagnostics, io);
       return 1;
     }
-    const evalName = args[0] ?? "evals";
+    const evalName = directory;
     io.stdout.write(`Created evaluation: ${evalName}\n`);
     io.stdout.write(`Suite: ${evalName}/example.suite.mjs\n`);
+    io.stdout.write(`\nThe starter asks ${AGENT_LABELS[agent]} to copy a fixture into answer.txt.\nHurdle checks the exact contents and opens the results with --view.\n`);
+    io.stdout.write(agent === "codex"
+      ? "Requires Codex on PATH and CODEX_ACCESS_TOKEN, CODEX_API_KEY, or OPENAI_API_KEY.\n"
+      : "Requires Claude Code on PATH and a valid ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN.\n");
+    io.stdout.write("Configure credentials in .env.local; your interactive login is not inherited.\n");
+    const suiteArgument = evalName === "evals"
+      ? ""
+      : ` ${JSON.stringify(`${evalName}/example.suite.mjs`)}`;
     io.stdout.write(
       `\nNext:\n`
-      + `  npm run tae -- validate ${evalName}/example.suite.mjs\n`
-      + `  npm run tae -- run ${evalName}/example.suite.mjs --view\n`,
+      + `  npx hurdle validate${suiteArgument}\n`
+      + `  npx hurdle run${suiteArgument} --view\n`,
     );
     return 0;
   }
 
-  if (command === "validate") {
-    if (args.length > 1 || args[0]?.startsWith("-")) return usage(io);
-    const suiteArgument = args[0] ?? defaultSuiteArgument(io.cwd);
-    if (/\.suite\.mjs$/.test(suiteArgument)) {
-      let suite;
-      try {
-        suite = await dependencies.resolveV1Suite({
-          suitePath: resolve(io.cwd, suiteArgument),
-        });
-      } catch (error) {
-        if (!(error instanceof V1AuthoringError)) throw error;
-        printDiagnostics([error], io);
-        return 1;
-      }
-      try {
-        if (!suite.ok) {
-          printDiagnostics(suite.diagnostics, io);
-          return 1;
-        }
-        io.stdout.write(`Valid Suite: ${suiteArgument}\n`);
-        io.stdout.write(
-          `Tasks: ${Object.keys(suite.value.definition.tasks).length}  `
-          + `Conditions: ${Object.keys(suite.value.definition.conditions).length}\n`,
-        );
-        return 0;
-      } finally {
-        suite.dispose();
-      }
-    }
-    return argumentError("Select a .suite.mjs Suite.", io).exitCode;
-  }
-
-  if (command === "run") {
-    const parsed = parseRunArguments(args, io);
+  if (command === "run" || command === "validate") {
+    const validation = command === "validate";
+    const parsed = parseRunArguments(args, io, { validation });
     if (!parsed.ok) return parsed.exitCode;
     const options = parsed.values;
     const suiteSelected = /\.suite\.mjs$/.test(options.suite);
@@ -593,6 +597,15 @@ async function runCliMain(argv, io, dependencies) {
       options.taskIds.length > 0 ? options.taskIds : undefined,
       "Task",
     );
+    if (validation) {
+      io.stdout.write(`Valid Suite: ${options.suite}\n`);
+      io.stdout.write(`Tasks: ${selectedTaskIds.length}  Conditions: ${options.conditionIds.length || Object.keys(resolvedPlan.value.definition.conditions).length}\n`);
+      if (options.offline) {
+        io.stdout.write("Readiness: not checked (--offline). Run `npx hurdle validate` before an evaluation.\n");
+        disposeAuthoredSuite();
+        return 0;
+      }
+    }
     let runtimeProfile;
     try {
       if (options.runtime !== null) {
@@ -623,7 +636,7 @@ async function runCliMain(argv, io, dependencies) {
       }
     } catch (error) {
       if (!(error instanceof RuntimeProfileError)) throw error;
-      io.stderr.write(`tae [${error.code}] ${error.message}\n`);
+      io.stderr.write(`hurdle [${error.code}] ${error.message}\n`);
       disposeAuthoredSuite();
       return 2;
     }
@@ -641,10 +654,10 @@ async function runCliMain(argv, io, dependencies) {
         * selectedConditionCount
         * options.agentSelections.length;
       io.stderr.write(
-        `tae [matrix-rejected] ${plannedCells} selected cells could not be executed.\n`,
+        `hurdle [matrix-rejected] ${plannedCells} selected cells could not be executed.\n`,
       );
       for (const diagnostic of authoritySelection.diagnostics.slice(0, 10)) {
-        io.stderr.write(`tae [${diagnostic.code}] ${diagnostic.message}\n`);
+        io.stderr.write(`hurdle [${diagnostic.code}] ${diagnostic.message}\n`);
       }
       const exitCode = authoritySelection.diagnostics.every(
         ({ category }) => category === "selection",
@@ -677,7 +690,7 @@ async function runCliMain(argv, io, dependencies) {
       dependencies.assertRuntimeDependencies(runtimeProfile);
     } catch (error) {
       if (!(error instanceof RuntimeProfileError || error instanceof BackendDependencyError)) throw error;
-      io.stderr.write(`tae [${error.code}] ${error.message}\n`);
+      io.stderr.write(`hurdle [${error.code}] ${error.message}\n`);
       disposeAuthoredSuite();
       return 2;
     }
@@ -692,6 +705,35 @@ async function runCliMain(argv, io, dependencies) {
           ?? { kind: "environment" }
       ).kind === "environment");
     }));
+    io.stdout.write(`\nReadiness (${dependencies.environmentSource})\n`);
+    let readiness;
+    try {
+      readiness = await dependencies.checkAgentReadiness({
+        agentSelections: options.agentSelections,
+        runtimeProfile,
+        runtimeEnv: dependencies.env,
+        requiredCredentials: [...selectedCredentialNames],
+        judgeCredentialName: authorityNeedsJudge ? runtimeProfile.judge.credentialEnv : null,
+      });
+    } catch {
+      io.stderr.write("hurdle [readiness-unavailable] Readiness checks could not complete. No evaluation started; check your setup and retry.\n");
+      disposeAuthoredSuite();
+      return 1;
+    }
+    for (const check of readiness.checks) {
+      const symbol = { pass: "✓", fail: "✗", warning: "!" }[check.status];
+      io.stdout.write(`${symbol} ${check.message}\n`);
+    }
+    if (!readiness.ok) {
+      io.stderr.write("hurdle [not-ready] Resolve the setup errors above and run `npx hurdle validate` again. No evaluation started.\n");
+      disposeAuthoredSuite();
+      return 1;
+    }
+    if (validation) {
+      io.stdout.write("Readiness checks passed. Model access, billing, and task success are checked during execution.\n");
+      disposeAuthoredSuite();
+      return 0;
+    }
     if (authoredSuite) {
       const selectedConditionCount = options.conditionIds.length > 0
         ? options.conditionIds.length
@@ -722,7 +764,7 @@ async function runCliMain(argv, io, dependencies) {
         (taskId) => authoritySelection.value.byTaskId[taskId],
       );
       io.stdout.write(
-        `\n${paintRunOutput("TAE", "cyan", useColor)}\n\n`
+        `\n${paintRunOutput("Hurdle", "cyan", useColor)}\n\n`
         + runFact("Plan", plan, { useColor })
         + runFact("Agent", agents, { useColor })
         + runFact("Runtime", runtime, { useColor })
@@ -751,7 +793,7 @@ async function runCliMain(argv, io, dependencies) {
         : await dependencies.openLocalResultStore({ root: runtimeProfile.resultStore.root });
     } catch {
       progress.stop();
-      io.stderr.write("tae [store-unavailable] The configured Result Store could not be opened.\n");
+      io.stderr.write("hurdle [store-unavailable] The configured Result Store could not be opened.\n");
       disposeAuthoredSuite();
       return 1;
     }
@@ -856,20 +898,20 @@ async function runCliMain(argv, io, dependencies) {
     }
     if (storeCloseFailed) {
       io.stderr.write(
-        "tae [store-close-failed] The configured Result Store could not be closed cleanly.\n",
+        "hurdle [store-close-failed] The configured Result Store could not be closed cleanly.\n",
       );
       return 1;
     }
     if (executionFailed) {
-      io.stderr.write("tae [run-failed] Evaluation setup or execution failed; resources were closed.\n");
+      io.stderr.write("hurdle [run-failed] Evaluation setup or execution failed; resources were closed.\n");
       return 1;
     }
     if (result.status === "rejected") {
       io.stderr.write(
-        `tae [matrix-rejected] ${result.summary.plannedCells} selected cells could not be executed.\n`,
+        `hurdle [matrix-rejected] ${result.summary.plannedCells} selected cells could not be executed.\n`,
       );
       for (const diagnostic of result.diagnostics.slice(0, 10)) {
-        io.stderr.write(`tae [${diagnostic.code}] ${diagnostic.message}\n`);
+        io.stderr.write(`hurdle [${diagnostic.code}] ${diagnostic.message}\n`);
       }
       return result.diagnostics.every(({ category }) => category === "selection") ? 2 : 1;
     }
@@ -948,7 +990,7 @@ async function runCliMain(argv, io, dependencies) {
       }
     } catch (error) {
       if (!(error instanceof RuntimeProfileError)) throw error;
-      io.stderr.write(`tae [${error.code}] ${error.message}\n`);
+      io.stderr.write(`hurdle [${error.code}] ${error.message}\n`);
       return 2;
     }
     return serveResolvedViewer(runtimeProfile, io, dependencies);
@@ -984,8 +1026,8 @@ export async function main(argv, io = {
   stdout: process.stdout,
   stderr: process.stderr,
 }) {
-  const { environment } = loadProjectEnvironment(io.cwd);
-  return createFrameworkCli({ env: environment }).main(argv, io);
+  const { environment, source } = loadProjectEnvironment(io.cwd);
+  return createFrameworkCli({ env: environment, environmentSource: source }).main(argv, io);
 }
 
 if (
@@ -996,7 +1038,7 @@ if (
     process.exitCode = await main(process.argv.slice(2));
   } catch {
     process.stderr.write(
-      "tae [internal-error] An unexpected internal error occurred.\n",
+      "hurdle [internal-error] An unexpected internal error occurred.\n",
     );
     process.exitCode = 70;
   }

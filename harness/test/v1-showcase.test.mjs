@@ -384,6 +384,7 @@ test("the CLI previews the showcase denominator and billable services before exe
   const stderr = { write(value) { events.push(["stderr", value]); } };
   const processTarget = new EventEmitter();
   const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: { TEST_JUDGE_KEY: "TEST-PLACEHOLDER-JUDGE-CREDENTIAL" },
     processTarget,
     async openLocalResultStore() { events.push(["store"]); return Object.freeze({}); },

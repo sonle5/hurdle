@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +20,66 @@ import test from "node:test";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const read = path => JSON.parse(readFileSync(join(root, path), "utf8"));
+
+function availablePort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve(address.port);
+      });
+    });
+  });
+}
+
+function waitForOutput(child, pattern, readOutput, timeoutMs = 30_000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanUp();
+      reject(new Error(`Timed out waiting for ${pattern}:\n${readOutput()}`));
+    }, timeoutMs);
+    const inspect = () => {
+      if (!pattern.test(readOutput())) return;
+      cleanUp();
+      resolve();
+    };
+    const onClose = (code, signal) => {
+      cleanUp();
+      reject(new Error(`CLI closed before ${pattern} (code ${code}, signal ${signal}):\n${readOutput()}`));
+    };
+    const cleanUp = () => {
+      clearTimeout(timer);
+      child.stdout?.off("data", inspect);
+      child.stderr?.off("data", inspect);
+      child.off("close", onClose);
+    };
+    child.stdout?.on("data", inspect);
+    child.stderr?.on("data", inspect);
+    child.once("close", onClose);
+    inspect();
+  });
+}
+
+function waitForClose(child, timeoutMs = 10_000) {
+  return new Promise((resolve, reject) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve([child.exitCode, child.signalCode]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      child.off("close", onClose);
+      reject(new Error("Timed out waiting for the installed CLI to stop"));
+    }, timeoutMs);
+    const onClose = (code, signal) => {
+      clearTimeout(timer);
+      resolve([code, signal]);
+    };
+    child.once("close", onClose);
+  });
+}
 
 test("Local setup skips beta SDKs and the unused harness TypeScript install; CI keeps backend coverage", () => {
   const harness = read("harness/package.json");
@@ -26,16 +98,215 @@ test("Local setup skips beta SDKs and the unused harness TypeScript install; CI 
   assert.match(quickstart, /prefix === "harness".*"--omit=optional"/);
 });
 
-test("the root tae command exposes the public CLI", () => {
-  const result = spawnSync("npm", ["run", "tae", "--", "--help"], {
+test("the root hurdle command exposes the public CLI", () => {
+  const result = spawnSync("npm", ["run", "hurdle", "--", "--help"], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NO_COLOR: "1" },
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^> tae\n> node harness\/bin\/tae\.mjs --help\n/m);
-  assert.match(result.stdout, /^TAE\n\nUsage:\n  tae <command> \[options\]/m);
+  assert.match(result.stdout, /^> node harness\/bin\/tae\.mjs --help$/m);
+  assert.match(result.stdout, /^Hurdle\n\nUsage:\n  hurdle <command> \[options\]/m);
+});
+
+test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, async (t) => {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "tae-package-install-"));
+  const packRoot = join(temporaryRoot, "pack");
+  const consumerRoot = join(temporaryRoot, "consumer");
+  mkdirSync(packRoot);
+  mkdirSync(consumerRoot);
+  t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
+
+  const packed = spawnSync("npm", ["pack", "--json", "--pack-destination", packRoot], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1" },
+    timeout: 90_000,
+  });
+  assert.equal(packed.status, 0, `${packed.stderr}\n${packed.stdout}`);
+  const metadataStart = packed.stdout.lastIndexOf("\n[");
+  const [packageMetadata] = JSON.parse(
+    metadataStart === -1 ? packed.stdout : packed.stdout.slice(metadataStart + 1),
+  );
+  assert.equal(packageMetadata.name, "hurdle");
+  assert.equal(packageMetadata.version, "0.2.1");
+  const packagedPaths = new Set(packageMetadata.files.map(({ path }) => path));
+  for (const path of [
+    "LICENSE",
+    "examples/copy-message/example.suite.mjs",
+    "harness/bin/tae.mjs",
+    "harness/migrations/postgres/0001_canonical_result_store.sql",
+    "harness/verify/proxy/agent-node-runtime/package-lock.json",
+    "harness/verify/proxy/generic_guardian.py",
+    "node_modules/pg/package.json",
+    "viewer/launcher.mjs",
+    "viewer-runtime/server.js",
+    "viewer-runtime/THIRD_PARTY_NOTICES.txt",
+  ]) assert.equal(packagedPaths.has(path), true, `missing package runtime file: ${path}`);
+  for (const path of packagedPaths) {
+    assert.equal(path.endsWith(".node"), false, `native package payload: ${path}`);
+    assert.equal(path.includes("__pycache__"), false, `Python cache payload: ${path}`);
+    assert.equal(path.endsWith(".env.local"), false, `private environment payload: ${path}`);
+  }
+  const archives = readdirSync(packRoot).filter((name) => name.endsWith(".tgz"));
+  assert.equal(archives.length, 1, `Expected one package archive, found: ${archives.join(", ")}`);
+
+  writeFileSync(join(consumerRoot, "package.json"), `${JSON.stringify({ private: true })}\n`);
+  const installed = spawnSync("npm", [
+    "install",
+    "--offline",
+    "--ignore-scripts",
+    "--omit=optional",
+    "--no-audit",
+    "--no-fund",
+    "--package-lock=false",
+    join(packRoot, archives[0]),
+  ], {
+    cwd: consumerRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NO_COLOR: "1",
+      npm_config_cache: join(temporaryRoot, "empty-npm-cache"),
+    },
+    timeout: 30_000,
+  });
+  assert.equal(installed.status, 0, `${installed.stderr}\n${installed.stdout}`);
+  const installedPackage = JSON.parse(readFileSync(join(consumerRoot, "node_modules", "hurdle", "package.json"), "utf8"));
+  assert.equal(installedPackage.license, "MIT");
+  assert.notEqual(installedPackage.private, true);
+  assert.equal(installedPackage.publishConfig.tag, "latest");
+  const notices = readFileSync(join(consumerRoot, "node_modules", "hurdle", "viewer-runtime", "THIRD_PARTY_NOTICES.txt"), "utf8");
+  for (const name of ["next", "react", "react-dom", "geist"]) {
+    assert.ok(notices.includes(`## ${name}@`), `missing bundled dependency notices: ${name}`);
+  }
+
+  const cliPath = join(consumerRoot, "node_modules", ".bin", "hurdle");
+  assert.equal(existsSync(cliPath), true, "the package must install its hurdle executable");
+  const legacyCliPath = join(consumerRoot, "node_modules", ".bin", "tae");
+  assert.equal(existsSync(legacyCliPath), true, "the package keeps its legacy tae executable");
+  const imported = spawnSync(process.execPath, ["--input-type=module", "-e", [
+    'import assert from "node:assert/strict";',
+    'import { defineSuite, defineChecks, defineGuard } from "hurdle";',
+    'const suite = { tasks: ["./tasks/copy-message"] };',
+    'const checks = () => {};',
+    'const guard = () => {};',
+    'assert.equal(defineSuite(suite), suite);',
+    'assert.equal(defineChecks(checks), checks);',
+    'assert.equal(defineGuard(guard), guard);',
+  ].join("\n")], {
+    cwd: consumerRoot,
+    encoding: "utf8",
+  });
+  assert.equal(imported.status, 0, imported.stderr);
+  const executed = spawnSync("npx", ["--offline", "hurdle", "--help"], {
+    cwd: consumerRoot,
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1", npm_config_cache: join(temporaryRoot, "empty-npm-cache") },
+    timeout: 20_000,
+  });
+  assert.equal(executed.status, 0, executed.stderr);
+  assert.match(executed.stdout, /^Hurdle\n\nUsage:\n  hurdle <command>/);
+  const cli = (...args) => spawnSync(process.execPath, [cliPath, ...args], {
+    cwd: consumerRoot,
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1" },
+    timeout: 20_000,
+  });
+
+  const initialized = cli("init");
+  assert.equal(initialized.status, 0, initialized.stderr);
+  assert.match(initialized.stdout, /^Created evaluation: evals$/m);
+  assert.match(initialized.stdout, /npx hurdle validate\n  npx hurdle run --view/);
+  const validated = cli("validate", "--offline");
+  assert.equal(validated.status, 0, validated.stderr);
+  assert.match(validated.stdout, /^Valid Suite: evals\/example\.suite\.mjs$/m);
+
+  const fakeBin = join(consumerRoot, "fake-bin");
+  mkdirSync(fakeBin);
+  const fakeClaude = join(fakeBin, "claude");
+  writeFileSync(fakeClaude, [
+    "#!/usr/bin/env node",
+    'const { readFileSync, writeFileSync } = require("node:fs");',
+    'if (process.argv.includes("--version")) { console.log("test-agent"); process.exit(0); }',
+    'readFileSync(0, "utf8");',
+    'writeFileSync("answer.txt", readFileSync("fixtures/message.txt"));',
+    'console.log(JSON.stringify({ type: "system", subtype: "init", session_id: "package-smoke" }));',
+    'console.log(JSON.stringify({ type: "result", subtype: "success", session_id: "package-smoke", model: "test-model" }));',
+  ].join("\n"));
+  chmodSync(fakeClaude, 0o755);
+
+  const port = await availablePort();
+  writeFileSync(join(consumerRoot, "runtime.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    environment: { kind: "local", settings: {} },
+    resultStore: { kind: "local", root: "./results" },
+    viewer: { port },
+  }, null, 2)}\n`);
+
+  const rejectedEnv = {
+    ...process.env,
+    ANTHROPIC_API_KEY: "test-only-rejected-key",
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    NODE_OPTIONS: `--import=${join(root, "harness/test/helpers/readiness-fetch.mjs")}`,
+    HURDLE_TEST_AUTH_REJECT: "1",
+  };
+  for (const command of [["validate"], ["run", "--view"]]) {
+    const rejected = spawnSync(process.execPath, [cliPath, ...command], {
+      cwd: consumerRoot, env: rejectedEnv, encoding: "utf8", timeout: 10_000,
+    });
+    assert.equal(rejected.status, 1, rejected.stderr + rejected.stdout);
+    assert.match(rejected.stdout, /rejected ANTHROPIC_API_KEY/);
+    assert.match(rejected.stderr, /No evaluation started/);
+    assert.doesNotMatch(rejected.stdout + rejected.stderr, /test-only-rejected-key|Viewer ready/);
+    assert.equal(existsSync(join(consumerRoot, ".tae/results-v1")), false);
+    assert.equal(existsSync(join(consumerRoot, "results")), false);
+  }
+
+  let stdout = "";
+  let stderr = "";
+  const child = spawn(process.execPath, [
+    cliPath,
+    "run",
+    "--runtime",
+    "runtime.json",
+    "--view",
+  ], {
+    cwd: consumerRoot,
+    env: {
+      ...process.env,
+      ANTHROPIC_API_KEY: "test-only-key",
+      NODE_OPTIONS: `--import=${join(root, "harness/test/helpers/readiness-fetch.mjs")}`,
+      NO_COLOR: "1",
+      PATH: `${fakeBin}:${process.env.PATH}`,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const output = () => `${stdout}\n${stderr}`;
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGINT");
+      await waitForClose(child).catch(() => child.kill("SIGKILL"));
+    }
+  });
+
+  await waitForOutput(child, new RegExp(`Viewer: http://127\\.0\\.0\\.1:${port}`), output);
+  assert.match(stdout, /^  Result\s+Passed$/m);
+  assert.match(stdout, /^  Runs\s+1 passed$/m);
+  const response = await fetch(`http://127.0.0.1:${port}`);
+  assert.equal(response.status, 200);
+  await response.body?.cancel();
+
+  child.kill("SIGINT");
+  const [exitCode, signal] = await waitForClose(child);
+  assert.equal(signal, null);
+  assert.equal(exitCode, 130, output());
+  assert.doesNotMatch(output(), /viewer-disposal-unconfirmed|internal-error/);
 });
 
 test("a Local install runs a real controller without E2B and rejects missing E2B before opening a store", (t) => {
@@ -52,11 +323,11 @@ test("a Local install runs a real controller without E2B and rejects missing E2B
   for (const name of Object.keys(read("harness/package.json").dependencies)) {
     symlinkSync(join(root, "harness/node_modules", name), join(harness, "node_modules", name));
   }
-  const env = { PATH: process.env.PATH, E2B_API_KEY: "test-not-a-real-key" };
+  const env = { PATH: process.env.PATH, E2B_API_KEY: "test-not-a-real-key", NODE_OPTIONS: `--import=${join(root, "harness/test/helpers/readiness-fetch.mjs")}` };
   const cli = (...args) => spawnSync(process.execPath, [join(harness, "bin/tae.mjs"), ...args], { cwd, env, encoding: "utf8", timeout: 20_000 });
   const initialized = cli("init", "evals");
   assert.equal(initialized.status, 0, initialized.stderr);
-  const validated = cli("validate", "evals/example.suite.mjs");
+  const validated = cli("validate", "evals/example.suite.mjs", "--offline");
   assert.equal(validated.status, 0, validated.stderr);
   const remote = cli("run", "evals/example.suite.mjs", "--environment", "e2b");
   assert.equal(remote.status, 2, remote.stderr);

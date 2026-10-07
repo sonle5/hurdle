@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -25,14 +25,33 @@ test("init produces the same Suite format used by quickstart and user tasks", as
   assert.equal(suite.ok, true, JSON.stringify(suite.diagnostics));
   assert.deepEqual(suite.defaults.taskIds, ["copy-message"]);
   assert.equal(suite.value.definition.tasks["copy-message"].evaluation.authority.defaultProfileId, "v1-code");
-  assert.equal(await cli(["validate"], output(join(root, "evals"))), 0);
+  assert.equal(await cli(["validate", "--offline"], output(join(root, "evals"))), 0);
   assert.equal(await cli(["init"], io), 1, "existing files must not be overwritten");
   const readme = readFileSync(join(root, "evals", "README.md"), "utf8");
-  assert.match(readme, /npm run tae --/);
+  assert.match(readme, /npx hurdle run --view/);
   assert.doesNotMatch(readme, /Two repeats execute twice/);
   renameSync(join(root, "evals/tasks/copy-message/checks.mjs"), join(root, "evals/tasks/copy-message/checks.ts"));
   await assert.rejects(resolveV1Suite({ suitePath }), { code: "task.checks-invalid" });
 });
+
+for (const specifier of ["tae", "@nutlope/tae"]) {
+  test(`existing Suites and checks using ${specifier} remain valid`, async (t) => {
+    const root = mkdtempSync(join(tmpdir(), "hurdle-authoring-compat-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const io = output(root);
+    assert.equal(await createFrameworkCli().main(["init"], io), 0, io.read());
+    const suitePath = join(root, "evals", "example.suite.mjs");
+    for (const path of [suitePath, join(root, "evals", "tasks", "copy-message", "checks.mjs")]) {
+      const source = readFileSync(path, "utf8");
+      assert.match(source, /from "hurdle"/);
+      writeFileSync(path, source.replaceAll('from "hurdle"', `from "${specifier}"`));
+    }
+    const suite = await resolveV1Suite({ suitePath });
+    t.after(() => suite.dispose());
+    assert.equal(suite.ok, true, JSON.stringify(suite.diagnostics));
+    assert.deepEqual(suite.defaults.taskIds, ["copy-message"]);
+  });
+}
 
 test("public CLI rejects authored manifests and authority/retry override flags before effects", async () => {
   let effects = 0;

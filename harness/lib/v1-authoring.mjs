@@ -170,13 +170,17 @@ function assertClosedKeys(value, allowed, label, file) {
   }
 }
 
-function rewriteTaeImport(source, runtimeSpecifier, file) {
+function rewriteAuthoringImport(source, runtimeSpecifier, file) {
   const rewritten = source.replace(
-    /(from\s+)(["'])tae\2/g,
+    /(from\s+)(["'])(?:hurdle|@nutlope\/tae|tae)\2/g,
     `$1${JSON.stringify(runtimeSpecifier)}`,
   );
   if (rewritten === source) {
-    fail("authoring.import-missing", `${basename(file)} must import its define helper from 'tae'.`, file);
+    fail(
+      "authoring.import-missing",
+      `${basename(file)} must import its define helper from 'hurdle'.`,
+      file,
+    );
   }
   const imports = [...rewritten.matchAll(/(?:from\s+|import\s*)(["'])([^"']+)\1/g)]
     .map((match) => match[2]);
@@ -486,7 +490,7 @@ export async function resolveV1Suite({ suitePath }) {
     const generatedSuite = join(generatedRoot, "suite.mjs");
     writeFileSync(
       generatedSuite,
-      rewriteTaeImport(suiteSource, "./tae-authoring.mjs", suiteFile),
+      rewriteAuthoringImport(suiteSource, "./tae-authoring.mjs", suiteFile),
     );
     let imported;
     try {
@@ -646,7 +650,7 @@ export async function resolveV1Suite({ suitePath }) {
       const generatedChecks = join(generatedRoot, "evaluators", `${taskId}-checks.mjs`);
       writeFileSync(
         generatedChecks,
-        rewriteTaeImport(checksSource, "../tae-authoring.mjs", checksFile),
+        rewriteAuthoringImport(checksSource, "../tae-authoring.mjs", checksFile),
       );
       const generatedGuard = guardSource === null
         ? null
@@ -654,7 +658,7 @@ export async function resolveV1Suite({ suitePath }) {
       if (generatedGuard !== null) {
         writeFileSync(
           generatedGuard,
-          rewriteTaeImport(guardSource, "../tae-authoring.mjs", guardFile),
+          rewriteAuthoringImport(guardSource, "../tae-authoring.mjs", guardFile),
         );
       }
       let declarations;

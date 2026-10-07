@@ -1,4 +1,4 @@
-import { defineChecks } from "tae";
+import { defineChecks } from "hurdle";
 
 export default defineChecks((run) => {
   run.expect.completed();

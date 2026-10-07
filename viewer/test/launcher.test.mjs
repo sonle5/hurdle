@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { spawn as nodeSpawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -74,6 +74,53 @@ test("Viewer launcher starts the source Viewer on loopback with only canonical l
     exitCode: 0,
     url: "http://127.0.0.1:3100",
   });
+});
+
+test("Viewer launcher starts the packaged Viewer without npm or source dependencies", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-packaged-viewer-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const runtimeRoot = join(root, "viewer-runtime");
+  const server = join(runtimeRoot, "server.js");
+  mkdirSync(join(runtimeRoot, "runtime_modules"), { recursive: true });
+  writeFileSync(server, "// packaged Viewer fixture\n");
+  const child = childProcess();
+  let invocation = null;
+  const completed = launchViewer({
+    cwd: root,
+    port: 3101,
+    env: { PATH: "/bin", NODE_PATH: "/must-not-leak" },
+    storeEnvironment: {
+      TAE_RESULT_STORE_MODE: "local",
+      TAE_RESULT_STORE_ROOT: "/canonical/results-v1",
+    },
+    spawn(command, args, options) {
+      invocation = { command, args, options };
+      return child;
+    },
+  });
+
+  assert.deepEqual(invocation, {
+    command: process.execPath,
+    args: [server],
+    options: {
+      cwd: runtimeRoot,
+      detached: process.platform !== "win32",
+      env: {
+        PATH: "/bin",
+        TAE_VIEWER_READ_ONLY: "1",
+        TAE_RESULT_STORE_MODE: "local",
+        TAE_RESULT_STORE_ROOT: "/canonical/results-v1",
+        HOSTNAME: "127.0.0.1",
+        NODE_PATH: join(runtimeRoot, "runtime_modules"),
+        PORT: "3101",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  });
+
+  child.stdout.emit("data", Buffer.from("Ready in 1ms\n"));
+  child.emit("close", 0, null);
+  assert.equal((await completed).kind, "stopped");
 });
 
 test("Viewer launcher terminates a Viewer that never becomes ready", async () => {

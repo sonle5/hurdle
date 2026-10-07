@@ -1,0 +1,127 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { checkE2bCredential, checkPostgresCredential } from "./credential-preflight.mjs";
+
+const nonblank = value => typeof value === "string" && value.trim().length > 0;
+const result = (status, code, message) => ({ status, code, message });
+const CLAUDE_RECOVERY = "Set a valid ANTHROPIC_API_KEY in .env.local, or unset it and set CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`. Hurdle uses isolated credentials rather than your interactive login.";
+const CODEX_RECOVERY = "Set CODEX_ACCESS_TOKEN, CODEX_API_KEY, or OPENAI_API_KEY in .env.local. Hurdle does not inherit your interactive Codex login.";
+
+// Probe only the executable, without credentials, project settings, or an Agent
+// prompt. Bound both process lifetime and captured output; never display it.
+export async function probeAgentCli(command, env) {
+  const root = await mkdtemp(join(tmpdir(), "hurdle-readiness-"));
+  try {
+    return await new Promise(resolve => {
+      execFile(command, ["--version"], {
+        cwd: root,
+        env: { PATH: env.PATH ?? "", HOME: root, ...(process.platform === "win32" ? { SystemRoot: env.SystemRoot } : {}) },
+        timeout: 5_000,
+        killSignal: "SIGKILL",
+        maxBuffer: 16_384,
+        windowsHide: true,
+      }, error => resolve(!error));
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function checkApiKey(provider, name, key, fetch) {
+  const anthropic = provider === "Anthropic";
+  const recovery = anthropic ? CLAUDE_RECOVERY : CODEX_RECOVERY;
+  try {
+    const response = await fetch(anthropic
+      ? "https://api.anthropic.com/v1/models?limit=1"
+      : "https://api.openai.com/v1/models", {
+      method: "GET",
+      headers: anthropic
+        ? { "x-api-key": key, "anthropic-version": "2023-06-01" }
+        : { authorization: `Bearer ${key}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(5_000),
+    });
+    // Provider bodies can contain sensitive data. Status alone is sufficient
+    // for this authentication check; do not read, retain, or echo the body.
+    await response.body?.cancel();
+    if (response.status === 200) {
+      return result("pass", "auth.verified", `${provider} accepted ${name} (read-only authentication check).`);
+    }
+    if (response.status === 401) {
+      return result("fail", "auth.rejected", `${provider} rejected ${name} (HTTP 401). ${recovery}`);
+    }
+    if (response.status === 403) {
+      return result("fail", "auth.forbidden", `${provider} denied the model-list check (HTTP 403); authentication readiness could not be verified. Check the credential's permissions. ${recovery}`);
+    }
+    return result("fail", "auth.unavailable", `${provider} authentication check failed (HTTP ${response.status}). No evaluation started; try again after checking provider availability.`);
+  } catch {
+    return result("fail", "auth.unavailable", `${provider} authentication could not be checked within 5 seconds. Check your network and retry; no evaluation started.`);
+  }
+}
+
+export async function checkAgentReadiness({
+  agentSelections, runtimeProfile, runtimeEnv, requiredCredentials = [],
+  judgeCredentialName = null,
+}, {
+  fetch = globalThis.fetch, probeCli = probeAgentCli,
+  checkE2b = checkE2bCredential, checkPostgres = checkPostgresCredential,
+} = {}) {
+  const checks = [];
+  const verified = new Map();
+  const verify = async (provider, name) => {
+    const key = runtimeEnv[name];
+    // Cache within this invocation only. Never persist a credential or its hash.
+    const id = `${provider}:${key}`;
+    if (!verified.has(id)) verified.set(id, await checkApiKey(provider, name, key, fetch));
+    checks.push(verified.get(id));
+  };
+  for (const adapterId of new Set(agentSelections.map(value => value.adapterId))) {
+    const claude = adapterId === "claude-code";
+    const label = claude ? "Claude Code" : "Codex";
+    if (runtimeProfile.environment.kind === "local") {
+      const installed = await probeCli(claude ? "claude" : "codex", runtimeEnv);
+      checks.push(result(installed ? "pass" : "fail", "agent.installed", installed
+        ? `${label} executable is available.`
+        : `${label} executable is missing or could not start. Install ${label} and ensure it is on PATH.`));
+    } else {
+      checks.push(result("warning", "agent.remote-unverified", `${label} installation in the E2B template is not checked locally.`));
+    }
+    const name = (claude
+      ? ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]
+      : ["CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "OPENAI_API_KEY"])
+      .find(name => nonblank(runtimeEnv[name]));
+    if (!name) {
+      checks.push(result("fail", "auth.missing", `${label} has no explicit credential. ${claude ? CLAUDE_RECOVERY : CODEX_RECOVERY}`));
+      continue;
+    }
+    const overridden = claude && name === "ANTHROPIC_API_KEY" && nonblank(runtimeEnv.CLAUDE_CODE_OAUTH_TOKEN)
+      ? " (takes precedence over CLAUDE_CODE_OAUTH_TOKEN)" : "";
+    checks.push(result("pass", "auth.source", `${label} uses ${name}${overridden}.`));
+    if (["CLAUDE_CODE_OAUTH_TOKEN", "CODEX_ACCESS_TOKEN"].includes(name)) {
+      // These first-party subscription tokens have no supported model-list
+      // authentication probe. Presence is not proof of validity or billing.
+      checks.push(result("warning", "auth.token-unverified", `${label} subscription token is configured; live validity is not verified without an Agent request.`));
+    } else {
+      await verify(claude ? "Anthropic" : "OpenAI", name);
+    }
+  }
+  if (judgeCredentialName && nonblank(runtimeEnv[judgeCredentialName])) {
+    await verify("Anthropic", judgeCredentialName);
+  }
+  for (const name of requiredCredentials) {
+    checks.push(result(nonblank(runtimeEnv[name]) ? "pass" : "fail", "credential.required", nonblank(runtimeEnv[name])
+      ? `Required task credential ${name} is configured (provider access is not checked).`
+      : `Required task credential ${name} is missing. Set it in .env.local before running.`));
+  }
+  if (runtimeProfile.environment.kind === "e2b") {
+    const checked = await checkE2b(runtimeEnv[runtimeProfile.environment.apiKeyEnv]);
+    checks.push(result(checked.status === "pass" ? "pass" : "fail", "runtime.e2b", `E2B: ${checked.message}.`));
+  }
+  if (runtimeProfile.resultStore.kind === "postgres") {
+    const checked = await checkPostgres(runtimeEnv[runtimeProfile.resultStore.databaseUrlEnv]);
+    checks.push(result(checked.status === "pass" ? "pass" : "fail", "runtime.postgres", `Postgres: ${checked.message}.`));
+  }
+  return { ok: checks.every(value => value.status !== "fail"), checks };
+}

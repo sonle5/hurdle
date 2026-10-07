@@ -25,7 +25,7 @@ function writeResult({ provider, status, message }) {
 
 try {
   const { environment, source } = loadProjectEnvironment(process.cwd());
-  process.stdout.write(`\n${paint("TAE preflight", "cyan")}\n\n`);
+  process.stdout.write(`\n${paint("Hurdle preflight", "cyan")}\n\n`);
   process.stdout.write(`Source  ${source}\n`);
   process.stdout.write("Usage   Anthropic and Together make minimal billable requests; E2B and Postgres are read-only.\n\n");
 
@@ -45,6 +45,6 @@ try {
     process.stdout.write(`${paint("Result", "green")}  ${checked} configured service${checked === 1 ? " is" : "s are"} ready\n`);
   }
 } catch {
-  process.stderr.write("tae [preflight-failed] Credential preflight could not start. Check that .env.local is valid.\n");
+  process.stderr.write("hurdle [preflight-failed] Credential preflight could not start. Check that .env.local is valid.\n");
   process.exitCode = 70;
 }

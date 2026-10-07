@@ -8,7 +8,7 @@ After source setup, from the repository root:
 
 ```sh
 npm run view
-npm --prefix harness exec -- tae view --store /absolute/path/to/.tae/results-v1
+npm --prefix harness exec -- hurdle view --store /absolute/path/to/.tae/results-v1
 ```
 
 The launcher binds to loopback and reports the URL; open that link in your

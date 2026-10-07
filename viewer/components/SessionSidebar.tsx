@@ -48,7 +48,7 @@ export function SessionSidebar({ messages }: { messages: ParsedMessage[] }) {
       <div className="px-4 h-12 border-b border-rule flex items-center flex-shrink-0">
         <Link href="/" className="inline-flex items-center gap-1.5 font-mono text-sm font-semibold text-foreground">
           <Activity className="h-3.5 w-3.5 text-fg-muted" strokeWidth={2.25} />
-          tae
+          hurdle
         </Link>
       </div>
       {/* Filters */}

@@ -1,10 +1,13 @@
 ![TAE — Together Agent Evals. Test how Claude Code and Codex use your API, SDK, or docs.](docs/assets/readme-hero.png)
 
-# Together Agent Evals
+# Hurdle — Together Agent Evals
 
 Run Claude Code or Codex against real tasks and record what they did. Score each
 run with deterministic code, an LLM Judge, or both, then inspect the transcript,
 API calls, tool use, and artifacts in a local viewer.
+
+The CLI is packaged on npm as [`hurdle`](https://www.npmjs.com/package/hurdle).
+See the [authoring guide](docs/authoring.md) for the `npx hurdle` workflow.
 
 ## Quick start
 
