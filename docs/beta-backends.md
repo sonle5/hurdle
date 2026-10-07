@@ -1,6 +1,6 @@
 # E2B and Postgres
 
-Hurdle runs locally and saves results to `.tae/results-v1` by default. Follow this
+Hurdle runs locally and saves results to `.hurdle/results-v1` by default. Follow this
 guide only when you need isolated E2B execution, Postgres storage, or both.
 
 For guided E2B setup, use `npx hurdle setup` in your evaluation project. It
@@ -47,7 +47,7 @@ npm run runtime:init -- postgres
 npm run runtime:init -- e2b-postgres
 ```
 
-The command writes `.tae/runtime/<kind>.json` and refuses to overwrite an
+The command writes `.hurdle/runtime/<kind>.json` and refuses to overwrite an
 existing file.
 
 Your E2B template must contain Node.js 22 and Claude Code. Set its name with
@@ -70,7 +70,7 @@ npm run db:migrate
 ```
 
 Hurdle creates tables in the `tae` schema, not `public`. Output artifact bytes
-stay in the local `.tae/postgres-artifacts` sidecar.
+stay in the local `.hurdle/postgres-artifacts` sidecar.
 
 Migrations are additive and checksum-verified. Do not reset a populated database
 or reuse legacy session tables as canonical Run records.
@@ -93,7 +93,7 @@ shell. Evaluation runs use the same precedence.
 Set the Runtime path you created, then run a RAG cell:
 
 ```sh
-RUNTIME=.tae/runtime/e2b.json
+RUNTIME=.hurdle/runtime/e2b.json
 
 npm run hurdle -- run \
   evals/together/hybrid.suite.mjs \
@@ -103,16 +103,16 @@ npm run hurdle -- run \
   --view
 ```
 
-Use `.tae/runtime/postgres.json` or
-`.tae/runtime/e2b-postgres.json` for the other configurations.
+Use `.hurdle/runtime/postgres.json` or
+`.hurdle/runtime/e2b-postgres.json` for the other configurations.
 
-Filesystem-backed E2B results are saved in `.tae/e2b-results-v1`. Postgres
+Filesystem-backed E2B results are saved in `.hurdle/e2b-results-v1`. Postgres
 results are written to the configured database.
 
 ## Reopen results
 
 ```sh
-npm run hurdle -- view --runtime .tae/runtime/postgres.json
+npm run hurdle -- view --runtime .hurdle/runtime/postgres.json
 ```
 
 Use the same Runtime file that produced the run.

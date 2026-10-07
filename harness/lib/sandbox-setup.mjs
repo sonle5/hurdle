@@ -9,16 +9,13 @@ import { resolveAuthoritySelections } from "./authority-profile.mjs";
 import { createTerminalProgress } from "./terminal-progress.mjs";
 import { promptSetup } from "./setup-prompts.mjs";
 import { normalizeE2BSettings } from "./execution-environments/e2b.mjs";
+import { DEFAULT_PROJECT_RUNTIME, projectRuntimePath } from "./project-paths.mjs";
 
-export const DEFAULT_PROJECT_RUNTIME = ".tae/runtime/default.json";
+export { DEFAULT_PROJECT_RUNTIME, projectRuntimePath } from "./project-paths.mjs";
 export const SETUP_AGENT_PACKAGES = Object.freeze({
   "claude-code": "@anthropic-ai/claude-code@2.1.288",
   codex: "@openai/codex@0.141.0",
 });
-export function projectRuntimePath(cwd) {
-  return existsSync(resolve(cwd, DEFAULT_PROJECT_RUNTIME)) ? DEFAULT_PROJECT_RUNTIME : null;
-}
-
 function setupError(code, message) { return Object.assign(new Error(message), { code }); }
 const nonblank = value => typeof value === "string" && value.trim().length > 0;
 
@@ -87,8 +84,9 @@ async function saveCredentials(cwd, values) {
   const ignore = join(cwd, ".gitignore");
   const ignored = await regularFileContents(ignore) ?? "";
   // Append last so an earlier negation cannot accidentally expose credentials.
-  if (ignored.trimEnd().split("\n").slice(-2).join("\n") !== "/.env.local\n/.tae/") {
-    await atomicWrite(ignore, `${ignored}${ignored.endsWith("\n") || !ignored ? "" : "\n"}/.env.local\n/.tae/\n`, 0o644);
+  const protectedPaths = "/.env.local\n/.hurdle/\n/.tae/";
+  if (ignored.trimEnd().split("\n").slice(-3).join("\n") !== protectedPaths) {
+    await atomicWrite(ignore, `${ignored}${ignored.endsWith("\n") || !ignored ? "" : "\n"}${protectedPaths}\n`, 0o644);
   }
   if (!Object.keys(values).length) return;
   const path = join(cwd, ".env.local");
@@ -117,9 +115,10 @@ export async function setupSandbox({ suite, template, yes = false }, io, depende
     const ids = [...new Set(authored.defaults.agentSelections.map(agent => agent.adapterId))].sort();
     const selectedTasks = authored.defaults.taskIds;
     const taskCredentials = [...new Set(selectedTasks.flatMap(id => authored.value.definition.tasks[id].credentialRequirements))];
-    const runtimeFile = resolve(io.cwd, DEFAULT_PROJECT_RUNTIME);
+    const runtimePath = projectRuntimePath(io.cwd) ?? DEFAULT_PROJECT_RUNTIME;
+    const runtimeFile = resolve(io.cwd, runtimePath);
     const previous = await regularFileContents(runtimeFile);
-    if (previous !== null) resolveRuntimeProfile({ cwd: io.cwd, runtimePath: DEFAULT_PROJECT_RUNTIME });
+    if (previous !== null) resolveRuntimeProfile({ cwd: io.cwd, runtimePath });
     const old = previous === null ? null : JSON.parse(previous);
     const name = template ?? (old?.environment.kind === "e2b" ? old.environment.settings?.workloadTemplate : null)
       ?? `hurdle-${ids.join("-")}:v1`;
@@ -135,10 +134,10 @@ export async function setupSandbox({ suite, template, yes = false }, io, depende
     }
     config.environment.settings ??= {};
     config.environment.settings.workloadTemplate = name;
-    const profile = resolveRuntimeProfile({ runtimePath: DEFAULT_PROJECT_RUNTIME, cwd: io.cwd }, { readFile: () => JSON.stringify(config) });
+    const profile = resolveRuntimeProfile({ runtimePath, cwd: io.cwd }, { readFile: () => JSON.stringify(config) });
     let settings;
     try { settings = normalizeE2BSettings(config.environment.settings); }
-    catch { throw setupError("setup.runtime-settings", "E2B Runtime settings are invalid. Check the templates, cpuCount, memoryMiB, and maxLifetimeMs in .tae/runtime/default.json before rerunning setup."); }
+    catch { throw setupError("setup.runtime-settings", `E2B Runtime settings are invalid. Check the templates, cpuCount, memoryMiB, and maxLifetimeMs in ${runtimePath} before rerunning setup.`); }
     const authority = resolveAuthoritySelections({ definition: authored.value.definition, selectedTaskIds: selectedTasks, judgeCapability: describeRuntimeJudgeCapability(profile) });
     if (!authority.ok) throw setupError("setup.authority", authority.diagnostics.map(d => d.message).join(" "));
     const judgeRequired = Object.values(authority.value.byTaskId).some(a => a.judge?.availability === "required");
@@ -185,7 +184,7 @@ export async function setupSandbox({ suite, template, yes = false }, io, depende
         config.environment.settings.cpuCount = available.cpuCount;
         config.environment.settings.memoryMiB = available.memoryMB;
       } else if (settings.cpuCount !== available.cpuCount || settings.memoryMiB !== available.memoryMB) {
-        throw setupError("setup.template-capacity", "Template capacity does not match the saved Runtime. Update cpuCount and memoryMiB in .tae/runtime/default.json, then rerun setup.");
+        throw setupError("setup.template-capacity", `Template capacity does not match the saved Runtime. Update cpuCount and memoryMiB in ${runtimePath}, then rerun setup.`);
       }
       try { normalizeE2BSettings(config.environment.settings); }
       catch { throw setupError("setup.template-capacity", "Template capacity is not supported by the E2B Runtime. Choose a template with at least 512 MB of memory."); }
@@ -209,7 +208,7 @@ export async function setupSandbox({ suite, template, yes = false }, io, depende
     // Keep existing stores, Judge settings, and user limits when reusing setup.
     await atomicWrite(runtimeFile, `${JSON.stringify(config, null, 2)}\n`, 0o600);
     line("pass", "Project sandbox configured.");
-    io.stdout.write(`\n  Runtime   ${DEFAULT_PROJECT_RUNTIME}\n  Suite     ${suite}\n\n  Model access, remote tools, and billing are checked during execution.\n  Next: npx hurdle run${suite === "evals/example.suite.mjs" || suite === "example.suite.mjs" ? "" : ` ${JSON.stringify(suite)}`} --view\n`);
+    io.stdout.write(`\n  Runtime   ${runtimePath}\n  Suite     ${suite}\n\n  Model access, remote tools, and billing are checked during execution.\n  Next: npx hurdle run${suite === "evals/example.suite.mjs" || suite === "example.suite.mjs" ? "" : ` ${JSON.stringify(suite)}`} --view\n`);
     return 0;
   } catch (error) {
     const known = error.code?.startsWith("setup.") || error.code?.startsWith("runtime.") || error.code === "backend-not-installed";

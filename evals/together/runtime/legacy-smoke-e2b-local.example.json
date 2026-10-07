@@ -13,7 +13,7 @@
   },
   "resultStore": {
     "kind": "local",
-    "root": "../../../.tae/legacy-smoke-local-results-v1"
+    "root": "../../../.hurdle/legacy-smoke-local-results-v1"
   },
   "judge": {
     "kind": "anthropic-json-v1",

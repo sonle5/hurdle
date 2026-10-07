@@ -32,7 +32,7 @@ async function fixture(t, example = "copy-message") {
     async openLocalResultStore() { assert.fail("Setup/validation must not create a Result Store"); },
     promptSetup: async () => null,
   };
-  return { root, io, dependencies, calls, output: () => stripVTControlCharacters(output), runtime: () => JSON.parse(readFileSync(join(root, ".tae/runtime/default.json"), "utf8")) };
+  return { root, io, dependencies, calls, output: () => stripVTControlCharacters(output), runtime: () => JSON.parse(readFileSync(join(root, ".hurdle/runtime/default.json"), "utf8")) };
 }
 
 test("setup builds once, saves a default, and validate/view discover it without execution", async t => {
@@ -43,7 +43,7 @@ test("setup builds once, saves a default, and validate/view discover it without 
       assert.deepEqual(ids, ["claude-code"]); assert.equal(key, f.dependencies.env.E2B_API_KEY);
       available = true; builds++; return { templateId: "test-template" };
     } }; },
-    async launchViewer({ storeEnvironment }) { assert.equal(storeEnvironment.TAE_RESULT_STORE_ROOT, join(f.root, ".tae/e2b-results-v1")); return { kind: "stopped" }; },
+    async launchViewer({ storeEnvironment }) { assert.equal(storeEnvironment.TAE_RESULT_STORE_ROOT, join(f.root, ".hurdle/e2b-results-v1")); return { kind: "stopped" }; },
   });
   assert.equal(await cli.main(["setup", "--yes"], f.io), 0, f.output());
   assert.equal(builds, 1);
@@ -59,8 +59,30 @@ test("setup builds once, saves a default, and validate/view discover it without 
   assert.equal(await cli.main(["view"], f.io), 0);
   assert.equal(await cli.main(["setup", "--yes"], f.io), 0);
   assert.equal(builds, 1, "An available template must be reused without build usage");
-  assert.equal(readFileSync(join(f.root, ".gitignore"), "utf8"), "/.env.local\n/.tae/\n");
+  assert.equal(readFileSync(join(f.root, ".gitignore"), "utf8"), "/.env.local\n/.hurdle/\n/.tae/\n");
   assert.doesNotMatch(f.output(), /test-e2b-secret|test-agent-secret|test-target-secret/);
+});
+
+test("setup, validate, and view reuse an existing .tae Runtime and preserve its store", async t => {
+  const f = await fixture(t, "together-api");
+  const path = join(f.root, ".tae/runtime/default.json");
+  const config = { schemaVersion: 1, environment: { kind: "e2b", apiKeyEnv: "E2B_API_KEY", settings: { workloadTemplate: "existing:v1", cpuCount: 2, memoryMiB: 2048, maxLifetimeMs: 120_000 } }, resultStore: { kind: "local", root: "../e2b-results-v1" }, viewer: { port: 3050 } };
+  mkdirSync(join(f.root, ".tae/runtime"), { recursive: true });
+  writeFileSync(path, JSON.stringify(config));
+  const stores = [];
+  const cli = createFrameworkCli({ ...f.dependencies,
+    loadSetupBackend: async () => ({ exists: async () => true, build() { assert.fail("Existing template must be reused"); } }),
+    async launchViewer({ storeEnvironment }) { stores.push(storeEnvironment.TAE_RESULT_STORE_ROOT); return { kind: "stopped" }; },
+  });
+  assert.equal(await cli.main(["setup"], f.io), 0, f.output());
+  assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), config);
+  assert.equal(existsSync(join(f.root, ".hurdle")), false);
+  assert.match(f.output(), /Runtime\s+\.tae\/runtime\/default\.json/);
+  assert.equal(await cli.main(["validate"], f.io), 0, f.output());
+  assert.equal(f.calls.at(-1)[1].runtimeProfile.environment.kind, "e2b");
+  assert.equal(await cli.main(["view"], f.io), 0, f.output());
+  assert.deepEqual(stores, [join(f.root, ".tae/e2b-results-v1")]);
+  assert.match(readFileSync(join(f.root, ".gitignore"), "utf8"), /\/\.tae\//);
 });
 
 test("setup adopts existing template capacity and rejects invalid Runtime limits before provider requests", async t => {
@@ -71,7 +93,7 @@ test("setup adopts existing template capacity and rejects invalid Runtime limits
   assert.equal(config.environment.settings.cpuCount, 1);
   assert.equal(config.environment.settings.memoryMiB, 1024);
   config.environment.settings.maxLifetimeMs = -1;
-  writeFileSync(join(f.root, ".tae/runtime/default.json"), JSON.stringify(config));
+  writeFileSync(join(f.root, ".hurdle/runtime/default.json"), JSON.stringify(config));
   const before = f.calls.length;
   assert.equal(await cli.main(["setup"], f.io), 1);
   assert.equal(f.calls.length, before);
@@ -84,7 +106,7 @@ test("the API starter's Local runtime is rejected by validate and run before aut
   for (const command of ["validate", "run"]) assert.equal(await cli.main([command], f.io), 1);
   assert.equal(f.calls.length, 0);
   assert.match(f.output(), /runtime.capture-required/);
-  assert.equal(existsSync(join(f.root, ".tae/results-v1")), false);
+  assert.equal(existsSync(join(f.root, ".hurdle/results-v1")), false);
 });
 
 test("missing/rejected credentials, declined builds, and missing custom templates stop before usage", async t => {
@@ -98,7 +120,7 @@ test("missing/rejected credentials, declined builds, and missing custom template
     if (scenario === "cancelled") deps.promptSetup = async () => "n";
     assert.equal(await createFrameworkCli(deps).main(args, f.io), 1, `${scenario}: ${f.output()}`);
     assert.equal(f.calls.filter(c => c[0] === "build").length, 0, scenario);
-    assert.equal(existsSync(join(f.root, ".tae/runtime/default.json")), false, scenario);
+    assert.equal(existsSync(join(f.root, ".hurdle/runtime/default.json")), false, scenario);
     if (["missing", "rejected"].includes(scenario)) assert.equal(f.calls.some(c => c[0] === "exists"), false);
   }
 });
@@ -123,7 +145,7 @@ test("hidden prompted credentials are saved privately without changing existing 
   assert.equal(saved.KEEP_ME, "yes");
   for (const name of ["E2B_API_KEY", "ANTHROPIC_API_KEY", "TOGETHER_API_KEY"]) assert.equal(saved[name], `private-${name}`);
   assert.equal(statSync(path).mode & 0o777, 0o600);
-  assert.match(readFileSync(join(f.root, ".gitignore"), "utf8"), /\/\.env\.local\n\/\.tae\//);
+  assert.match(readFileSync(join(f.root, ".gitignore"), "utf8"), /\/\.env\.local\n\/\.hurdle\//);
   assert.equal(prompts.filter(p => p.secret).length, 3);
   assert.doesNotMatch(f.output(), /private-E2B|private-ANTHROPIC|private-TOGETHER/);
 });
@@ -145,8 +167,8 @@ test("setup refuses credential symlinks and suppresses provider exception detail
 test("a failed build cannot change an active runtime, and reruns preserve custom settings", async t => {
   const f = await fixture(t);
   const runtime = { schemaVersion: 1, environment: { kind: "e2b", apiKeyEnv: "E2B_API_KEY", settings: { workloadTemplate: "existing:v1", cpuCount: 2, memoryMiB: 2048, maxLifetimeMs: 120_000 } }, resultStore: { kind: "local", root: "../custom-results" }, viewer: { port: 3050 } };
-  mkdirSync(join(f.root, ".tae/runtime"), { recursive: true });
-  writeFileSync(join(f.root, ".tae/runtime/default.json"), JSON.stringify(runtime));
+  mkdirSync(join(f.root, ".hurdle/runtime"), { recursive: true });
+  writeFileSync(join(f.root, ".hurdle/runtime/default.json"), JSON.stringify(runtime));
   const failed = createFrameworkCli({ ...f.dependencies, loadSetupBackend: async () => ({ exists: async () => false, build: async () => { throw Error("private-build-error"); } }) });
   assert.equal(await failed.main(["setup", "--yes"], f.io), 1);
   assert.deepEqual(f.runtime(), runtime);

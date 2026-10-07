@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { defaultLocalStoreRoot } from "./project-paths.mjs";
 
 const QUICKSTART_TASK = "copy-message";
 const GENERIC_NONZERO_PREFIX = "The evaluated agent process did not exit cleanly:";
@@ -66,7 +67,7 @@ export async function runSourceQuickstart({
   onStatus({ phase: "prepare", state: "complete", exitCode: preparationExitCode });
   if (preparationExitCode !== 0) return preparationExitCode;
 
-  const storeRoot = resolve(cwd, ".tae/results-v1");
+  const storeRoot = defaultLocalStoreRoot(cwd);
   onStatus({ phase: "run", state: "start" });
   const runExitCode = await runCli([
     "run",

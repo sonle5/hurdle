@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { relative } from "node:path";
+import { defaultLocalStoreRoot } from "../lib/project-paths.mjs";
 
 import { createTerminalProgress } from "../lib/terminal-progress.mjs";
 import {
@@ -196,7 +198,7 @@ try {
               durationSince(phaseStartedAt.get("view") ?? Date.now()),
             );
             process.stdout.write(
-              `\n${fact("Store", ".tae/results-v1", { stream: process.stdout })}`
+              `\n${fact("Store", relative(cwd, defaultLocalStoreRoot(cwd)), { stream: process.stdout })}`
               + `${fact("Viewer", match[1], { accent: true, stream: process.stdout })}\n`
               + "Press Ctrl+C to stop the Viewer\n",
             );

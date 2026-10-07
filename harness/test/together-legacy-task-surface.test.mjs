@@ -48,12 +48,12 @@ test("legacy smoke Runtime examples keep E2B fixed while selecting either Result
   });
   assert.deepEqual(local.resultStore, {
     kind: "local",
-    root: resolve(togetherRoot, "../../.tae/legacy-smoke-local-results-v1"),
+    root: resolve(togetherRoot, "../../.hurdle/legacy-smoke-local-results-v1"),
   });
   assert.deepEqual(postgres.resultStore, {
     kind: "postgres",
     databaseUrlEnv: "TAE_RESULT_STORE_DATABASE_URL",
-    artifactRoot: resolve(togetherRoot, "../../.tae/legacy-smoke-postgres-artifacts"),
+    artifactRoot: resolve(togetherRoot, "../../.hurdle/legacy-smoke-postgres-artifacts"),
   });
   assert.deepEqual(local.judge, {
     kind: "anthropic-json-v1",

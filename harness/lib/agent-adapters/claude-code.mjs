@@ -100,7 +100,7 @@ function workspaceFiles(
     : `${JSON.stringify(mcpValue, null, 2)}\n`;
   const mcpBytes = Buffer.from(mcpConfig);
   files.push({
-    path: legacyC52 ? ".mcp.json" : ".tae/claude-mcp.json",
+    path: legacyC52 ? ".mcp.json" : ".hurdle/claude-mcp.json",
     source: {
       kind: "generated",
       bytes: mcpBytes,
@@ -130,7 +130,7 @@ export function createClaudeCodeAdapter({
     "--setting-sources",
     "project",
     "--mcp-config",
-    ".tae/claude-mcp.json",
+    ".hurdle/claude-mcp.json",
     "--strict-mcp-config",
   ];
   return Object.freeze({

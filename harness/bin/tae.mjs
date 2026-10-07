@@ -192,7 +192,7 @@ const HELP_TEXT = Object.freeze({
     "",
     "Configure the current project's sandbox. E2B is the default provider.",
     "Prompts for missing credentials, reuses or builds a template, and checks readiness.",
-    "Saves .tae/runtime/default.json for validate, run, and view. No Agent runs.",
+    "Saves .hurdle/runtime/default.json for validate, run, and view. No Agent runs.",
     "Template builds use your E2B account and may be billed.",
     "",
     "Options:",

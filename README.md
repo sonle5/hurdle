@@ -37,6 +37,8 @@ The starter asks the agent to copy a fixture into `answer.txt`, scores the exact
 copy, and opens the results viewer. It does not need a Together key, Judge, E2B
 account, or database. Agent usage may be billed by your provider.
 
+Results are saved locally in `.hurdle/`. Existing `.tae/` projects still work.
+
 For Codex, install its CLI and use `npx hurdle init --agent codex` instead.
 Configure `CODEX_ACCESS_TOKEN`, `CODEX_API_KEY`, or `OPENAI_API_KEY` in `.env.local`
 (checked in that order), then use the same validate and run commands.

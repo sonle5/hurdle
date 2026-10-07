@@ -12,6 +12,7 @@ node_modules/
 .DS_Store
 
 # Local results (generated per-machine, never committed)
+.hurdle/
 .tae/
 results/
 

@@ -35,10 +35,10 @@ test("source quickstart runs the Starter Pack and opens its canonical Result Sto
     [
       "run",
       resolve(cwd, "examples/copy-message/example.suite.mjs"),
-      "--store", resolve(cwd, ".tae/results-v1"),
+      "--store", resolve(cwd, ".hurdle/results-v1"),
       "--experiment-version", "local-quickstart",
     ],
-    ["view", "--store", resolve(cwd, ".tae/results-v1")],
+    ["view", "--store", resolve(cwd, ".hurdle/results-v1")],
   ]);
   assert.deepEqual(statuses, [
     { phase: "prepare", state: "start" },

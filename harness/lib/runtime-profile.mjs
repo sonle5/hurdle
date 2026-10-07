@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { defaultLocalStoreRoot } from "./project-paths.mjs";
 
 import {
   ANTHROPIC_JSON_JUDGE_ID,
@@ -348,7 +349,7 @@ export function resolveRuntimeProfile({ runtimePath, cwd, defaultRoot } = {}, { 
       sourcePath: null,
       schemaVersion: 1,
       environment: { kind: "local", settings: {} },
-      resultStore: { kind: "local", root: resolve(defaultRoot ?? cwd, ".tae/results-v1") },
+      resultStore: { kind: "local", root: defaultLocalStoreRoot(defaultRoot ?? cwd) },
       viewer: { port: 3000 },
     });
   }

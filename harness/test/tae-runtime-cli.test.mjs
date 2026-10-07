@@ -636,7 +636,7 @@ test("hurdle view launches the canonical local source on loopback", async (t) =>
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].storeEnvironment, {
     TAE_RESULT_STORE_MODE: "local",
-    TAE_RESULT_STORE_ROOT: join(root, ".tae", "results-v1"),
+    TAE_RESULT_STORE_ROOT: join(root, ".hurdle", "results-v1"),
   });
   assert.equal(calls[0].port, 3000);
   assert.match(streams.read().stdout, /http:\/\/127\.0\.0\.1:3000/);
@@ -663,7 +663,7 @@ test("hurdle view shows one live readiness status in an interactive terminal", a
   assert.match(stripVTControlCharacters(streams.read().stdout), /✓ Viewer ready/);
   assert.equal(
     stripVTControlCharacters(streams.read().stdout),
-    "\nHurdle\n\n✓ Viewer ready\n\n  URL       http://127.0.0.1:3000\n  Store     .tae/results-v1\n\n  Press Ctrl+C to stop.\n",
+    "\nHurdle\n\n✓ Viewer ready\n\n  URL       http://127.0.0.1:3000\n  Store     .hurdle/results-v1\n\n  Press Ctrl+C to stop.\n",
   );
 });
 
@@ -719,13 +719,13 @@ test("hurdle view can open a canonical Local Result Store named directly", async
   const exit = await cli.main([
     "view",
     "--store",
-    "pack/.tae/results-v1",
+    "pack/.hurdle/results-v1",
   ], streams);
 
   assert.equal(exit, 0);
   assert.deepEqual(calls[0].storeEnvironment, {
     TAE_RESULT_STORE_MODE: "local",
-    TAE_RESULT_STORE_ROOT: join(root, "pack", ".tae", "results-v1"),
+    TAE_RESULT_STORE_ROOT: join(root, "pack", ".hurdle", "results-v1"),
   });
 });
 

@@ -14,7 +14,7 @@
   "resultStore": {
     "kind": "postgres",
     "databaseUrlEnv": "TAE_RESULT_STORE_DATABASE_URL",
-    "artifactRoot": "../../../.tae/legacy-smoke-postgres-artifacts"
+    "artifactRoot": "../../../.hurdle/legacy-smoke-postgres-artifacts"
   },
   "judge": {
     "kind": "anthropic-json-v1",

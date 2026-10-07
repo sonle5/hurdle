@@ -32,8 +32,8 @@ Configure `E2B_API_KEY`, `TOGETHER_API_KEY`, and Agent credentials in `.env.loca
 or export them before setup. Missing values are prompted in an interactive
 terminal; exported values are not copied into the file. New prompted values
 are written with private file permissions after readiness passes, and setup
-adds `.env.local` and `.tae/` to `.gitignore`. Existing file values override
-exports; a blank assignment overrides a working exported value too.
+adds `.env.local`, `.hurdle/`, and legacy `.tae/` to `.gitignore`. Existing file
+values override exports; a blank assignment overrides a working exported value too.
 
 Claude Code uses `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`; Codex uses
 `CODEX_ACCESS_TOKEN`, `CODEX_API_KEY`, or `OPENAI_API_KEY`. Use
@@ -67,7 +67,7 @@ builds do not activate a new project Runtime.
 
 ## Project defaults and overrides
 
-Setup writes `.tae/runtime/default.json`. `validate`, `run`, and `view` discover
+Setup writes `.hurdle/runtime/default.json`. `validate`, `run`, and `view` discover
 it automatically. An explicit `--runtime FILE` selects another Runtime;
 explicit run topology options (`--environment`, `--environment-settings`, or
 `--store`) select that topology instead of the saved default. To run locally:
@@ -76,12 +76,18 @@ explicit run topology options (`--environment`, `--environment-settings`, or
 npx hurdle run --environment local
 ```
 
+Existing `.tae/runtime/default.json` profiles are still discovered and reused
+by setup. Their configured Result Stores stay in place. If both directories
+contain a default Runtime, `.hurdle/runtime/default.json` takes precedence.
+Without a saved Runtime, local runs and the Viewer reuse `.tae/results-v1`
+when it exists and `.hurdle/results-v1` does not. Explicit paths always apply.
+
 Use `setup path/to/another.suite.mjs` when the Suite has a different filename;
 the saved default applies to this project, and the Suite argument still selects
 the evaluation for subsequent commands. `validate --offline` checks only Suite
 definitions; it does not establish sandbox readiness.
 
-New Runtime profiles use a local Result Store at `.tae/e2b-results-v1` and Viewer
+New Runtime profiles use a local Result Store at `.hurdle/e2b-results-v1` and Viewer
 port 3000. Each evaluation allocates an Agent sandbox and a Guardian sandbox,
 each limited to five minutes by the starter Runtime. This is a lifetime limit,
 not a dollar or token budget. Agent and Together inference may also be billed.

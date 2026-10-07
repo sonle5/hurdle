@@ -86,7 +86,7 @@ export async function initializeSuite({ destination, agent = "claude-code", exam
 
   let temporaryRoot;
   try {
-    temporaryRoot = await mkdtemp(join(parent, `.${basename(destination)}.tae-init-`));
+    temporaryRoot = await mkdtemp(join(parent, `.${basename(destination)}.hurdle-init-`));
     for (const relativePath of STARTER_FILES) {
       const outputPath = join(temporaryRoot, ...relativePath.split("/"));
       await mkdir(dirname(outputPath), { recursive: true });

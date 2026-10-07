@@ -158,7 +158,7 @@ test("CLI validate and run reject bad authentication before a store, agent, Judg
   }
   assert.equal(checks, 2);
   assert.equal(effects, 0);
-  assert.equal(existsSync(join(root, ".tae/results-v1")), false);
+  assert.equal(existsSync(join(root, ".hurdle/results-v1")), false);
   const offline = io();
   assert.equal(await cli.main(["validate", "--offline"], offline), 0);
   assert.equal(checks, 2);

@@ -280,7 +280,7 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
     assert.match(rejected.stdout, /rejected ANTHROPIC_API_KEY/);
     assert.match(rejected.stderr, /No evaluation started/);
     assert.doesNotMatch(rejected.stdout + rejected.stderr, /test-only-rejected-key|Viewer ready/);
-    assert.equal(existsSync(join(consumerRoot, ".tae/results-v1")), false);
+    assert.equal(existsSync(join(consumerRoot, ".hurdle/results-v1")), false);
     assert.equal(existsSync(join(consumerRoot, "results")), false);
   }
 
@@ -297,7 +297,7 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
     timeout: 20_000,
   });
   assert.equal(ready.status, 0, ready.stderr + ready.stdout);
-  assert.equal(existsSync(join(consumerRoot, ".tae/results-v1")), false);
+  assert.equal(existsSync(join(consumerRoot, ".hurdle/results-v1")), false);
 
   let stdout = "";
   let stderr = "";
@@ -369,7 +369,7 @@ test("a Local install runs a real controller without E2B and rejects missing E2B
   const remote = cli("run", "evals/example.suite.mjs", "--environment", "e2b");
   assert.equal(remote.status, 2, remote.stderr);
   assert.match(remote.stderr, /\[backend-not-installed\].*E2B.*npm run setup:backends/);
-  assert.equal(existsSync(join(cwd, ".tae/results-v1")), false);
+  assert.equal(existsSync(join(cwd, ".hurdle/results-v1")), false);
   // Exercise the real Local controller and filesystem store with a fake Agent.
   const bin = join(cwd, "bin");
   mkdirSync(bin);
@@ -390,5 +390,5 @@ test("a Local install runs a real controller without E2B and rejects missing E2B
   assert.equal(local.status, 0, local.stderr + local.stdout);
   assert.match(local.stdout, /^  Result\s+Passed$/m);
   assert.match(local.stdout, /^  Runs\s+1 passed$/m);
-  assert.equal(existsSync(join(cwd, ".tae/results-v1")), true);
+  assert.equal(existsSync(join(cwd, ".hurdle/results-v1")), true);
 });

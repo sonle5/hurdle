@@ -359,7 +359,7 @@ test("the CLI rejects a judged Suite before creating its default Store", (t) => 
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /authority\.judge-capability-missing/);
-  assert.equal(existsSync(join(root, ".tae", "results-v1")), false);
+  assert.equal(existsSync(join(root, ".hurdle", "results-v1")), false);
 });
 
 test("mandatory Run Trust remains outside a v1 judge verdict", async (t) => {

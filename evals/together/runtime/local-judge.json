@@ -6,7 +6,7 @@
   },
   "resultStore": {
     "kind": "local",
-    "root": "../../../.tae/results-v1"
+    "root": "../../../.hurdle/results-v1"
   },
   "judge": {
     "kind": "anthropic-json-v1",

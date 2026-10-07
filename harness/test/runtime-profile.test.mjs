@@ -25,7 +25,7 @@ test("resolveRuntimeProfile preserves the built-in Local topology without a runt
     sourcePath: null,
     schemaVersion: 1,
     environment: { kind: "local", settings: {} },
-    resultStore: { kind: "local", root: resolve(defaultRoot, ".tae/results-v1") },
+    resultStore: { kind: "local", root: resolve(defaultRoot, ".hurdle/results-v1") },
     viewer: { port: 3000 },
   });
   assert.equal(Object.isFrozen(profile), true);
@@ -158,7 +158,7 @@ test("Runtime Profile derives Viewer environment from only the selected Result S
   const local = resolveRuntimeProfile({ command: "view", cwd: "/workspace" });
   assert.deepEqual(viewerStoreEnvironment(local), {
     TAE_RESULT_STORE_MODE: "local",
-    TAE_RESULT_STORE_ROOT: resolve("/workspace", ".tae/results-v1"),
+    TAE_RESULT_STORE_ROOT: resolve("/workspace", ".hurdle/results-v1"),
   });
 
   const postgres = resolveRuntimeProfile(

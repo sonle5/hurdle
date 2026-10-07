@@ -49,7 +49,7 @@ See [sandbox setup](../../docs/sandbox-setup.md) for options and limits.
 
 The earlier source-only lab helper remains available below.
 
-To create a lab at `.tae/e2b-lab`, install optional E2B dependencies and prepare
+To create a lab at `.hurdle/e2b-lab`, install optional E2B dependencies and prepare
 it once:
 
 ```sh
@@ -63,15 +63,15 @@ instead and skip the template build. Its CPU/memory settings must match the
 Runtime; the default recipe uses 2 CPUs and 2048 MB.
 
 Add `E2B_API_KEY` and either `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` to
-`.tae/e2b-lab/.env.local`, or use credentials already exported in your shell.
+`.hurdle/e2b-lab/.env.local`, or use credentials already exported in your shell.
 Use `.env.example` as a reference. Do not commit credentials. Values configured
 in the lab's `.env.local` override shell values.
 
 On this Mac, create and open the credentials file:
 
 ```sh
-touch .tae/e2b-lab/.env.local
-open -e .tae/e2b-lab/.env.local
+touch .hurdle/e2b-lab/.env.local
+open -e .hurdle/e2b-lab/.env.local
 ```
 
 Add `E2B_API_KEY=your-key` and save. Keep your working Anthropic credentials
@@ -107,7 +107,7 @@ Validation checks API-key
 and E2B account access using read-only requests; it allocates no sandbox.
 Remote agent installation/model access are verified during execution. An
 existing template's capacity should be checked against
-`.tae/e2b-lab/.tae/runtime/e2b.json` before running.
+`.hurdle/e2b-lab/.hurdle/runtime/e2b.json` before running.
 
 After validation passes, run one `copy-message` evaluation and open its Viewer:
 
@@ -120,7 +120,7 @@ and Guardian), each with a five-minute lifetime limit. This is a time limit,
 not a dollar or token budget. There is one task/condition/repeat, no Judge, no
 Together API task, and no Postgres requirement.
 
-Results are stored in `.tae/e2b-lab/.tae/e2b-results-v1`.
+Results are stored in `.hurdle/e2b-lab/.hurdle/e2b-results-v1`.
 The Viewer uses `http://127.0.0.1:3002`. Reopen it with:
 
 ```sh

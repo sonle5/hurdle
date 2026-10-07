@@ -230,7 +230,7 @@ test("hurdle run composes Claude Code and local execution into the canonical sto
     "--setting-sources",
     "project",
     "--mcp-config",
-    ".tae/claude-mcp.json",
+    ".hurdle/claude-mcp.json",
     "--strict-mcp-config",
     "--disable-slash-commands",
     "--model",

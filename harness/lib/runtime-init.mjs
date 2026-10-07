@@ -56,7 +56,7 @@ export function createRuntimeConfig(mode, { template } = {}) {
 }
 
 export async function initializeRuntime({ cwd, mode, template }) {
-  const relativePath = `.tae/runtime/${mode}.json`;
+  const relativePath = `.hurdle/runtime/${mode}.json`;
   const path = resolve(cwd, relativePath);
   const config = createRuntimeConfig(mode, { template });
   await mkdir(dirname(path), { recursive: true });

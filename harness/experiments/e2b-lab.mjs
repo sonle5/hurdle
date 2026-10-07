@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Source-only experiment. Preparation and recipe preview never allocate E2B resources.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { main as cli } from "../bin/tae.mjs";
@@ -9,8 +10,12 @@ import { createRuntimeConfig } from "../lib/runtime-init.mjs";
 import { loadProjectEnvironment } from "../lib/project-environment.mjs";
 
 const repository = fileURLToPath(new URL("../../", import.meta.url));
-const lab = resolve(repository, ".tae/e2b-lab");
-const runtimePath = join(lab, ".tae/runtime/e2b.json");
+const currentLab = resolve(repository, ".hurdle/e2b-lab");
+const legacyLab = resolve(repository, ".tae/e2b-lab");
+const lab = !existsSync(currentLab) && existsSync(legacyLab) ? legacyLab : currentLab;
+const currentRuntime = join(lab, ".hurdle/runtime/e2b.json");
+const legacyRuntime = join(lab, ".tae/runtime/e2b.json");
+const runtimePath = !existsSync(currentRuntime) && existsSync(legacyRuntime) ? legacyRuntime : currentRuntime;
 const [command = "help", ...args] = process.argv.slice(2);
 const defaultTemplate = "hurdle-claude-code-dev:v1";
 const script = "node harness/experiments/e2b-lab.mjs";
@@ -55,10 +60,10 @@ async function prepare() {
   delete runtime.judge;
   runtime.environment.settings.maxLifetimeMs = 300_000;
   runtime.viewer.port = 3002;
-  await mkdir(join(lab, ".tae/runtime"), { recursive: true });
+  await mkdir(join(lab, ".hurdle/runtime"), { recursive: true });
   await writeFile(runtimePath, JSON.stringify(runtime, null, 2) + "\n", { mode: 0o600, flag: "wx" });
   await writeFile(join(lab, ".env.example"), "E2B_API_KEY=\nANTHROPIC_API_KEY=\n# CLAUDE_CODE_OAUTH_TOKEN=\n", { flag: "wx" });
-  await writeFile(join(lab, ".gitignore"), ".env.local\n.tae/\n", { flag: "wx" });
+  await writeFile(join(lab, ".gitignore"), ".env.local\n.hurdle/\n.tae/\n", { flag: "wx" });
   header();
   console.log(`${paint("✓", "green")} Lab prepared\n`);
   fact("Directory", lab);

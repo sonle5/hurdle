@@ -362,7 +362,7 @@ test("the checked-in Local Judge Runtime stores results at the repository root",
   assert.equal(runtime.judge.credentialEnv, "ANTHROPIC_API_KEY");
   assert.equal(
     runtime.resultStore.root,
-    fileURLToPath(new URL("../../.tae/results-v1", import.meta.url)),
+    fileURLToPath(new URL("../../.hurdle/results-v1", import.meta.url)),
   );
 });
 
