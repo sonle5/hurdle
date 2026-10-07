@@ -240,8 +240,9 @@ test("a canonical Local Result Store that has no runs renders an actionable empt
 
   const home = source("../app/page.tsx");
   assert.match(home, /canonicalSource\.status === "empty"/);
-  assert.match(home, /This Result Store is empty/);
-  assert.match(home, /npx hurdle run/);
+  assert.match(home, /Run your first evaluation/);
+  assert.match(home, /onboarding\.commands/);
+  assert.match(home, /Results folder/);
 });
 
 test("the session highlights use a roomy two-by-two layout inside the narrow detail column", () => {

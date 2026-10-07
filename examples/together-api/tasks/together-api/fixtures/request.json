@@ -1,0 +1,7 @@
+{
+  "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+  "messages": [{ "role": "user", "content": "In one short sentence, explain what an agent evaluation checks." }],
+  "max_tokens": 32,
+  "temperature": 0,
+  "stream": false
+}

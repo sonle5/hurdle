@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { validateViewerOnboarding } from "../harness/lib/viewer-onboarding.mjs";
 
 const READY_PATTERN = /\bready\s+in\b/i;
 const READY_TIMEOUT_MS = 30_000;
@@ -148,6 +149,7 @@ function viewerInvocation({ cwd, port }) {
  */
 export function launchViewer({
   storeEnvironment,
+  onboarding,
   port = 3000,
   cwd,
   env = process.env,
@@ -172,7 +174,12 @@ export function launchViewer({
     port,
     env,
     storeEnvironment,
-    runtimeEnvironment: invocation.environment,
+    runtimeEnvironment: {
+      ...invocation.environment,
+      ...(onboarding === undefined ? {} : {
+        TAE_VIEWER_ONBOARDING: JSON.stringify(validateViewerOnboarding(onboarding)),
+      }),
+    },
   });
   const url = `http://127.0.0.1:${port}`;
   let child;

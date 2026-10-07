@@ -10,12 +10,12 @@ export function CanonicalShell({ children }: { children: ReactNode }) {
             href="/"
             className="flex min-h-10 items-center gap-3 rounded-md pr-3 text-foreground transition-colors hover:text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-2"
           >
-            <span className="font-mono text-sm font-semibold tracking-tight">ae</span>
+            <span className="text-sm font-semibold tracking-tight">Hurdle</span>
             <span className="h-4 w-px bg-rule" aria-hidden />
-            <span className="text-sm font-medium">Evaluation runs</span>
+            <span className="text-sm font-medium">Results Viewer</span>
           </Link>
           <span className="hidden rounded-full border border-rule bg-surface px-2.5 py-1 text-[11px] font-medium text-fg-muted sm:inline-flex">
-            Canonical Result Store
+            Read only
           </span>
         </div>
       </header>

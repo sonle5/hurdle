@@ -6,6 +6,7 @@ import { getCanonicalDashboardSource } from "@/lib/canonical-dashboard-results.s
 import { getAllSessions, getDefaultEvalVersionId, getPreviousComparableVersion, getTaskFindings, getVersions, isWeeklyEvalVersion, type EvalVersionOption } from "@/lib/queries";
 import { formatModel } from "@/lib/utils";
 import { evalVersionDisplayNameById } from "@/lib/version-display";
+import { getViewerOnboarding } from "@/lib/viewer-onboarding.server";
 
 export const dynamic = "force-dynamic";
 
@@ -24,22 +25,43 @@ export default async function Home({
   const params = await searchParams;
   const canonicalSource = await getCanonicalDashboardSource();
   if (canonicalSource.status === "empty") {
+    const onboarding = getViewerOnboarding();
     return (
       <CanonicalShell>
-        <div className="mx-auto max-w-xl py-12 text-center sm:py-20">
+        <div className="mx-auto max-w-2xl py-12 text-center sm:py-20">
           <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-fg-faint">
             No runs yet
           </p>
           <h1 className="text-balance text-2xl font-semibold tracking-tight sm:text-3xl">
-            This Result Store is empty
+            Run your first evaluation
           </h1>
           <p className="mx-auto mt-3 max-w-lg text-pretty text-sm leading-6 text-fg-muted">
-            The Viewer is reading <code>{canonicalSource.root}</code>, which does not exist yet.
-            Run an evaluation to create it, then reload this page.
+            {onboarding?.commands
+              ? "Check readiness, then run your evaluation in the terminal. Reload this page when it finishes to see your results."
+              : "Run a Suite with a runtime that saves results to this folder, then reload this page."}
           </p>
-          <pre className="mt-6 overflow-x-auto rounded-xl border border-rule bg-surface p-4 text-left text-xs leading-6 text-foreground">
-            <code>npx hurdle run</code>
-          </pre>
+          {onboarding?.commands && (
+            <div className="mt-6 overflow-hidden rounded-xl border border-rule bg-surface text-left">
+              <div className="border-b border-rule px-4 py-3 text-xs font-medium text-fg-muted">
+                {onboarding.runtimeLabel} · Check readiness and run
+              </div>
+              <pre className="whitespace-pre-wrap break-words p-4 text-xs leading-6 text-foreground">
+                <code>{onboarding.commands}</code>
+              </pre>
+            </div>
+          )}
+          {onboarding?.commands && (
+            <p className="mt-4 text-sm leading-6 text-fg-muted">
+              Need to configure a sandbox or its credentials? Run <code className="text-foreground">{onboarding.setupCommand}</code> first.
+            </p>
+          )}
+          <p className="mt-4 text-xs leading-5 text-fg-faint">
+            Already tried a run? Check your terminal for errors. Agent and sandbox usage may be billed.
+          </p>
+          <details className="mt-8 text-left text-xs text-fg-muted">
+            <summary className="cursor-pointer rounded-md py-2 focus-visible:outline-2 focus-visible:outline-offset-2">Results folder</summary>
+            <code className="mt-2 block break-all rounded-lg border border-rule bg-surface p-3 leading-5">{canonicalSource.root}</code>
+          </details>
         </div>
       </CanonicalShell>
     );

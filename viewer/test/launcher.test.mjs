@@ -34,6 +34,7 @@ test("Viewer launcher starts the source Viewer on loopback with only canonical l
       OPENAI_API_KEY: "must-not-reach-viewer",
       TOGETHER_API_KEY: "must-not-reach-viewer",
       HOME: "/Users/operator",
+      TAE_VIEWER_ONBOARDING: "unrelated-context-must-not-reach-viewer",
       PATH: "/bin",
     },
     storeEnvironment: {
@@ -74,6 +75,23 @@ test("Viewer launcher starts the source Viewer on loopback with only canonical l
     exitCode: 0,
     url: "http://127.0.0.1:3100",
   });
+});
+
+test("Viewer forwards only explicit display context while filtering provider secrets", async () => {
+  const child = childProcess();
+  let environment;
+  const onboarding = { projectDirectory: "/project", commands: "hurdle validate\nhurdle run", setupCommand: "hurdle setup", runtimeLabel: "E2B sandbox" };
+  const completed = launchViewer({
+    cwd: "/workspace/source", onboarding,
+    env: { E2B_API_KEY: "secret", TOGETHER_API_KEY: "secret", TAE_VIEWER_ONBOARDING: "inherited-context" },
+    storeEnvironment: { TAE_RESULT_STORE_MODE: "local", TAE_RESULT_STORE_ROOT: "/results" },
+    spawn(command, args, options) { environment = options.env; return child; },
+  });
+  assert.deepEqual(JSON.parse(environment.TAE_VIEWER_ONBOARDING), onboarding);
+  assert.equal(environment.E2B_API_KEY, undefined);
+  assert.equal(environment.TOGETHER_API_KEY, undefined);
+  child.emit("close", 0, null);
+  await completed;
 });
 
 test("Viewer launcher starts the packaged Viewer without npm or source dependencies", async (t) => {

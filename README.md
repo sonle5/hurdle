@@ -44,6 +44,17 @@ Configure `CODEX_ACCESS_TOKEN`, `CODEX_API_KEY`, or `OPENAI_API_KEY` in `.env.lo
 > Local runs execute agent code on your computer with network access. They are
 > not a security sandbox. Only run tasks, checks, and Suites you trust.
 
+To try Together API activity in an E2B sandbox, start in a new project directory:
+
+```sh
+npx hurdle init --example together-api
+npx hurdle setup
+npx hurdle run --view
+```
+
+Setup guides credentials and template creation; builds and runs may be billed.
+See [sandbox setup](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/sandbox-setup.md) for existing templates, limits, and configuration.
+
 ## How it works
 
 1. A **Task** gives the agent a prompt and any files it needs.

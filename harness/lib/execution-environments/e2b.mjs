@@ -93,6 +93,9 @@ function normalizeSettings(settings = {}, defaults = DEFAULT_SETTINGS) {
   return deepFreeze(normalized);
 }
 
+// Configuration checks can reuse the execution rules without allocating resources.
+export { normalizeSettings as normalizeE2BSettings };
+
 function unavailableEgress(reason = "capture-failed") {
   return {
     status: "unavailable",

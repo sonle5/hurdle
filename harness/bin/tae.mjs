@@ -34,6 +34,8 @@ import {
 } from "../lib/v1-authoring.mjs";
 import { initializeSuite } from "../lib/starter-suite.mjs";
 import { checkAgentReadiness } from "../lib/agent-readiness.mjs";
+import { projectRuntimePath, setupSandbox } from "../lib/sandbox-setup.mjs";
+import { createViewerOnboarding } from "../lib/viewer-onboarding.mjs";
 
 const FIRST_PARTY_AGENT_ADAPTERS = Object.freeze({
   "claude-code": createClaudeCodeAdapter,
@@ -45,8 +47,9 @@ const AGENT_LABELS = Object.freeze({
   codex: "Codex",
 });
 const RUN_COLORS = Object.freeze({
-  cyan: "\u001b[36m",
   green: "\u001b[32m",
+  red: "\u001b[31m",
+  bold: "\u001b[1m",
   yellow: "\u001b[33m",
   dim: "\u001b[2m",
   reset: "\u001b[0m",
@@ -57,7 +60,7 @@ function plural(count, singular, pluralForm = `${singular}s`) {
 }
 
 function runOutputUsesColor(io) {
-  return Boolean(io.stdout?.isTTY || io.stderr?.isTTY) && !process.env.NO_COLOR;
+  return Boolean(io.stdout?.isTTY) && !process.env.NO_COLOR;
 }
 
 function paintRunOutput(value, color, enabled) {
@@ -163,6 +166,7 @@ const HELP_TEXT = Object.freeze({
     "",
     "Commands:",
     "  init [directory]   Create a starter evaluation",
+    "  setup [suite]      Configure the project sandbox (E2B)",
     "  validate [suite]   Validate a Suite and check Agent readiness",
     "  run [suite]        Run a Suite",
     "  view               Start the Results Viewer",
@@ -172,13 +176,29 @@ const HELP_TEXT = Object.freeze({
   ].join("\n"),
   init: [
     "Usage:",
-    "  hurdle init [directory] [--agent claude-code|codex]",
+    "  hurdle init [directory] [--agent claude-code|codex] [--example copy-message|together-api]",
     "",
     "Create a starter evaluation. The default directory is `evals`.",
     "The destination must not already exist.",
     "",
     "Options:",
     "  --agent ID         Choose Claude Code (default) or Codex",
+    "  --example NAME     Choose copy-message (default) or Together API demo",
+    "  -h, --help         Show this help",
+  ].join("\n"),
+  setup: [
+    "Usage:",
+    "  hurdle setup [suite] [options]",
+    "",
+    "Configure the current project's sandbox. E2B is the default provider.",
+    "Prompts for missing credentials, reuses or builds a template, and checks readiness.",
+    "Saves .tae/runtime/default.json for validate, run, and view. No Agent runs.",
+    "Template builds use your E2B account and may be billed.",
+    "",
+    "Options:",
+    "  --sandbox e2b      Select the sandbox provider",
+    "  --template NAME    Reuse an existing template (must include the Suite's Agent CLIs)",
+    "  --yes              Accept template build usage without a confirmation prompt",
     "  -h, --help         Show this help",
   ].join("\n"),
   validate: [
@@ -189,6 +209,7 @@ const HELP_TEXT = Object.freeze({
     "Uses read-only provider requests; never runs an Agent or Judge.",
     "The default Suite is `evals/example.suite.mjs` when it exists,",
     "otherwise `example.suite.mjs`.",
+    "Uses the project Runtime saved by setup unless overridden.",
     "",
     "Options:",
     "  --offline          Check Suite definitions only; no readiness checks",
@@ -203,6 +224,7 @@ const HELP_TEXT = Object.freeze({
     "",
     "Run a .suite.mjs Suite. The default is `evals/example.suite.mjs` when",
     "it exists, otherwise `example.suite.mjs`.",
+    "Uses the project Runtime saved by setup unless overridden.",
     "Agent and model options filter selections already defined by the Suite.",
     "",
     "Selection:",
@@ -248,7 +270,7 @@ function hasHelpFlag(args) {
 }
 
 function usage(io) {
-  io.stderr.write("Usage: hurdle <init [directory] | validate [suite] | run [suite] [options] [--view] | view [--runtime FILE | --store DIR]>\n");
+  io.stderr.write("Usage: hurdle <init [directory] | setup [suite] | validate [suite] | run [suite] [options] [--view] | view [--runtime FILE | --store DIR]>\n");
   return 2;
 }
 
@@ -369,6 +391,7 @@ function parseRunArguments(args, io, { validation = false } = {}) {
       io,
     );
   }
+  if (values.runtime === null && values.explicitTopology.size === 0) values.runtime = projectRuntimePath(io.cwd);
   return { ok: true, values };
 }
 
@@ -408,7 +431,9 @@ function validateRunSelection(options, definition, io) {
   return { ok: true };
 }
 
-async function serveResolvedViewer(runtimeProfile, io, dependencies) {
+async function serveResolvedViewer(runtimeProfile, io, dependencies, {
+  showHeader = true, suite = defaultSuiteArgument(io.cwd), storeOverride = false,
+} = {}) {
   let storeEnvironment;
   try {
     storeEnvironment = viewerStoreEnvironment(runtimeProfile, dependencies.env);
@@ -421,16 +446,30 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies) {
   const progress = io.stderr?.isTTY === true
     ? createTerminalProgress({ stream: io.stderr })
     : null;
-  const viewerStartedAt = Date.now();
+  const useColor = runOutputUsesColor(io);
+  if (showHeader) io.stdout.write(`\n${paintRunOutput("Hurdle", "bold", useColor)}\n\n`);
   const markReady = (url) => {
     if (readyPrinted) return;
     readyPrinted = true;
-    progress?.succeed("Results Viewer ready", `${Date.now() - viewerStartedAt}ms`);
-    io.stdout.write(`Viewer: ${url}\nPress Ctrl+C to stop the Viewer\n`);
+    progress?.stop();
+    io.stdout.write(
+      `${paintRunOutput("✓", "green", useColor)} Viewer ready\n\n`
+      + runFact("URL", url, { useColor })
+      + runFact("Store", displayStore(runtimeProfile, io.cwd), { useColor })
+      + `\n  ${paintRunOutput("Press Ctrl+C to stop.", "dim", useColor)}\n`,
+    );
   };
   progress?.start("Starting Results Viewer");
   const outcome = await dependencies.launchViewer({
     storeEnvironment,
+    onboarding: createViewerOnboarding({
+      cwd: io.cwd,
+      cliPath: fileURLToPath(import.meta.url),
+      sourceCheckout: existsSync(new URL("../../viewer/package.json", import.meta.url)),
+      suite,
+      runtimeProfile,
+      storeOverride,
+    }),
     port: runtimeProfile.viewer.port,
     cwd: dependencies.viewerCwd,
     env: dependencies.env,
@@ -489,26 +528,30 @@ async function runCliMain(argv, io, dependencies) {
     }
     return usage(io);
   }
-  if (["init", "validate", "run", "view"].includes(command) && hasHelpFlag(args)) {
+  if (["init", "setup", "validate", "run", "view"].includes(command) && hasHelpFlag(args)) {
     return help(command, io);
   }
 
   if (command === "init") {
-    let directory = "evals", agent = "claude-code", directorySeen = false, agentSeen = false;
+    let directory = "evals", agent = "claude-code", example = "copy-message", directorySeen = false, agentSeen = false, exampleSeen = false;
     for (let index = 0; index < args.length; index++) {
       if (args[index] === "--agent" && !agentSeen) {
         agent = args[++index];
         agentSeen = true;
         if (!["claude-code", "codex"].includes(agent)) return argumentError("--agent must be claude-code or codex.", io).exitCode;
+      } else if (args[index] === "--example" && !exampleSeen) {
+        example = args[++index];
+        exampleSeen = true;
+        if (!["copy-message", "together-api"].includes(example)) return argumentError("--example must be copy-message or together-api.", io).exitCode;
       } else if (!args[index].startsWith("-") && !directorySeen) {
         directory = args[index];
         directorySeen = true;
       } else {
-        return argumentError("Use init [directory] [--agent claude-code|codex].", io).exitCode;
+        return argumentError("Use init [directory] [--agent claude-code|codex] [--example copy-message|together-api].", io).exitCode;
       }
     }
     const destination = resolve(io.cwd, directory);
-    const result = await dependencies.initializeSuite({ destination, agent });
+    const result = await dependencies.initializeSuite({ destination, agent, example });
     if (!result.ok) {
       printDiagnostics(result.diagnostics, io);
       return 1;
@@ -516,8 +559,10 @@ async function runCliMain(argv, io, dependencies) {
     const evalName = directory;
     io.stdout.write(`Created evaluation: ${evalName}\n`);
     io.stdout.write(`Suite: ${evalName}/example.suite.mjs\n`);
-    io.stdout.write(`\nThe starter asks ${AGENT_LABELS[agent]} to copy a fixture into answer.txt.\nHurdle checks the exact contents and opens the results with --view.\n`);
-    io.stdout.write(agent === "codex"
+    io.stdout.write(example === "together-api"
+      ? `\nThe starter asks ${AGENT_LABELS[agent]} to inspect Together models and make one small chat request.\nHurdle checks captured API activity and the saved response.\nRequires TOGETHER_API_KEY and an E2B sandbox. Agent, Together, and E2B usage may be billed.\n`
+      : `\nThe starter asks ${AGENT_LABELS[agent]} to copy a fixture into answer.txt.\nHurdle checks the exact contents and opens the results with --view.\n`);
+    if (example !== "together-api") io.stdout.write(agent === "codex"
       ? "Requires Codex on PATH and CODEX_ACCESS_TOKEN, CODEX_API_KEY, or OPENAI_API_KEY.\n"
       : "Requires Claude Code on PATH and a valid ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN.\n");
     io.stdout.write("Configure credentials in .env.local; your interactive login is not inherited.\n");
@@ -526,10 +571,26 @@ async function runCliMain(argv, io, dependencies) {
       : ` ${JSON.stringify(`${evalName}/example.suite.mjs`)}`;
     io.stdout.write(
       `\nNext:\n`
-      + `  npx hurdle validate${suiteArgument}\n`
+      + (example === "together-api" ? `  npx hurdle setup${suiteArgument}\n` : `  npx hurdle validate${suiteArgument}\n`)
       + `  npx hurdle run${suiteArgument} --view\n`,
     );
     return 0;
+  }
+
+  if (command === "setup") {
+    const options = { suite: defaultSuiteArgument(io.cwd), sandbox: "e2b", template: undefined, yes: false };
+    const seen = new Set();
+    for (let index = 0; index < args.length; index++) {
+      const arg = args[index];
+      if (arg === "--yes" && !seen.has(arg)) { options.yes = true; seen.add(arg); }
+      else if (["--sandbox", "--template"].includes(arg) && !seen.has(arg) && args[index + 1] && !args[index + 1].startsWith("-")) {
+        seen.add(arg); options[arg.slice(2)] = args[++index];
+      } else if (!arg.startsWith("-") && !seen.has("suite")) { options.suite = arg; seen.add("suite"); }
+      else return argumentError("Use setup [suite] [--sandbox e2b] [--template NAME] [--yes].", io).exitCode;
+    }
+    if (options.sandbox !== "e2b") return argumentError("Only the E2B sandbox provider is supported currently.", io).exitCode;
+    if (options.template && !/^[A-Za-z0-9][A-Za-z0-9_./:-]*$/.test(options.template)) return argumentError("Use an E2B template ID or name, optionally with a tag.", io).exitCode;
+    return setupSandbox(options, io, dependencies);
   }
 
   if (command === "run" || command === "validate") {
@@ -640,6 +701,15 @@ async function runCliMain(argv, io, dependencies) {
       disposeAuthoredSuite();
       return 2;
     }
+    if (runtimeProfile.environment.kind === "local" && selectedTaskIds.some(taskId => (
+      resolvedPlan.value.definition.tasks[taskId].executionRequirements?.some(requirement => [
+        "environment.trusted-egress-capture", "environment.trusted-request-blocking",
+      ].includes(requirement))
+    ))) {
+      io.stderr.write("hurdle [runtime.capture-required] Selected Tasks require trusted API capture or request blocking. Run `npx hurdle setup` to configure E2B, or select an E2B Runtime with --runtime. No evaluation started.\n");
+      disposeAuthoredSuite();
+      return 1;
+    }
     const judgeCapability = describeRuntimeJudgeCapability(runtimeProfile);
     const authoritySelection = resolveAuthoritySelections({
       definition: resolvedPlan.value.definition,
@@ -722,7 +792,8 @@ async function runCliMain(argv, io, dependencies) {
     }
     for (const check of readiness.checks) {
       const symbol = { pass: "✓", fail: "✗", warning: "!" }[check.status];
-      io.stdout.write(`${symbol} ${check.message}\n`);
+      const color = { pass: "green", fail: "red", warning: "yellow" }[check.status];
+      io.stdout.write(`${paintRunOutput(symbol, color, runOutputUsesColor(io))} ${check.message}\n`);
     }
     if (!readiness.ok) {
       io.stderr.write("hurdle [not-ready] Resolve the setup errors above and run `npx hurdle validate` again. No evaluation started.\n");
@@ -764,7 +835,7 @@ async function runCliMain(argv, io, dependencies) {
         (taskId) => authoritySelection.value.byTaskId[taskId],
       );
       io.stdout.write(
-        `\n${paintRunOutput("Hurdle", "cyan", useColor)}\n\n`
+        `\n${paintRunOutput("Hurdle", "bold", useColor)}\n\n`
         + runFact("Plan", plan, { useColor })
         + runFact("Agent", agents, { useColor })
         + runFact("Runtime", runtime, { useColor })
@@ -966,7 +1037,7 @@ async function runCliMain(argv, io, dependencies) {
     if (interruptedSignal === "SIGTERM") return 143;
     const runExitCode = counts.fail + counts.incomplete + counts.unknown === 0 ? 0 : 1;
     if (!options.viewAfterRun) return runExitCode;
-    const viewerExitCode = await serveResolvedViewer(runtimeProfile, io, dependencies);
+    const viewerExitCode = await serveResolvedViewer(runtimeProfile, io, dependencies, { showHeader: false, suite: options.suite });
     return viewerExitCode === 0 ? runExitCode : viewerExitCode;
   }
 
@@ -976,7 +1047,7 @@ async function runCliMain(argv, io, dependencies) {
     let runtimeProfile;
     try {
       runtimeProfile = resolveRuntimeProfile({
-        runtimePath: parsed.values.runtime ?? undefined,
+        runtimePath: parsed.values.runtime ?? projectRuntimePath(io.cwd) ?? undefined,
         cwd: io.cwd,
       });
       if (parsed.values.store) {
@@ -993,7 +1064,7 @@ async function runCliMain(argv, io, dependencies) {
       io.stderr.write(`hurdle [${error.code}] ${error.message}\n`);
       return 2;
     }
-    return serveResolvedViewer(runtimeProfile, io, dependencies);
+    return serveResolvedViewer(runtimeProfile, io, dependencies, { storeOverride: Boolean(parsed.values.store) });
   }
 
   return usage(io);

@@ -248,6 +248,15 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   const codexValidated = cli("validate", "codex-evals/example.suite.mjs", "--offline");
   assert.equal(codexValidated.status, 0, codexValidated.stderr);
 
+  const setupHelp = cli("help", "setup");
+  assert.equal(setupHelp.status, 0, setupHelp.stderr);
+  assert.match(setupHelp.stdout, /hurdle setup/);
+  const togetherInitialized = cli("init", "together-evals", "--example", "together-api");
+  assert.equal(togetherInitialized.status, 0, togetherInitialized.stderr);
+  const togetherValidated = cli("validate", "together-evals/example.suite.mjs", "--offline");
+  assert.equal(togetherValidated.status, 0, togetherValidated.stderr);
+  assert.match(readFileSync(join(consumerRoot, "together-evals/tasks/together-api/fixtures/request.json"), "utf8"), /max_tokens/);
+
   const port = await availablePort();
   writeFileSync(join(consumerRoot, "runtime.json"), `${JSON.stringify({
     schemaVersion: 1,
@@ -323,7 +332,7 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
     }
   });
 
-  await waitForOutput(child, new RegExp(`Viewer: http://127\\.0\\.0\\.1:${port}`), output);
+  await waitForOutput(child, new RegExp(`URL\\s+http://127\\.0\\.0\\.1:${port}`), output);
   assert.match(stdout, /^  Result\s+Passed$/m);
   assert.match(stdout, /^  Runs\s+1 passed$/m);
   const response = await fetch(`http://127.0.0.1:${port}`);

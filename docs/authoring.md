@@ -36,7 +36,15 @@ readiness. `run` repeats the same checks before opening a result store or
 launching an agent. A rejected credential stops the command with recovery steps.
 
 Use the same `--runtime FILE` and agent/model filters as your run to check the
-configuration you intend to execute. For definition-only CI or offline work:
+configuration you intend to execute.
+
+For guided sandbox configuration, use `npx hurdle setup`. E2B is the default
+sandbox provider. The saved project Runtime is used automatically by validate,
+run, and view; explicit Runtime or run topology options override it. Create a
+Together API demo with `init --example together-api`. See
+[sandbox setup](./sandbox-setup.md) for credentials, templates, and usage limits.
+
+For definition-only CI or offline work:
 
 ```sh
 npx hurdle validate --offline

@@ -1,6 +1,6 @@
 {
   "name": "hurdle",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Run and inspect evidence-backed evaluations for coding agents.",
   "type": "module",
   "bin": {
@@ -25,6 +25,8 @@
     "docs/beta-backends.md",
     "docs/assets/readme-hero.png",
     "examples/copy-message",
+    "examples/together-api",
+    "docs/sandbox-setup.md",
     "harness/bin",
     "harness/index.mjs",
     "harness/lib",

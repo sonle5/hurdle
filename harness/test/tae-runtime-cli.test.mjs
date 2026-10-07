@@ -546,11 +546,14 @@ test("hurdle run --view opens the recorded Local store and preserves a non-pass"
     TAE_RESULT_STORE_MODE: "local",
     TAE_RESULT_STORE_ROOT: join(root, "results"),
   });
+  assert.equal(calls[0].onboarding.projectDirectory, root);
+  assert.match(calls[0].onboarding.commands, /hurdle validate --environment local --store results/);
+  assert.match(calls[0].onboarding.commands, /hurdle run --environment local --store results/);
   assert.match(streams.read().stdout, /^  Result\s+Needs attention$/m);
   assert.match(streams.read().stdout, /^  Runs\s+1 incomplete$/m);
   assert.match(streams.read().stdout, /^  Reason\s+E2B execution failed before evidence capture\.$/m);
   assert.doesNotMatch(streams.read().stdout, /run_failed|sha256:/);
-  assert.match(streams.read().stdout, /Viewer: http:\/\/127\.0\.0\.1:3000/);
+  assert.match(streams.read().stdout, /URL\s+http:\/\/127\.0\.0\.1:3000/);
 });
 
 test("hurdle run --view does not open a Viewer for a rejected matrix", async (t) => {
@@ -656,10 +659,11 @@ test("hurdle view shows one live readiness status in an interactive terminal", a
 
   assert.equal(exit, 0);
   assert.match(streams.read().stderr, /Starting Results Viewer/);
-  assert.match(streams.read().stderr, /Results Viewer ready/);
+  assert.doesNotMatch(streams.read().stderr, /Results Viewer ready|\d+ms/);
+  assert.match(stripVTControlCharacters(streams.read().stdout), /✓ Viewer ready/);
   assert.equal(
-    streams.read().stdout,
-    "Viewer: http://127.0.0.1:3000\nPress Ctrl+C to stop the Viewer\n",
+    stripVTControlCharacters(streams.read().stdout),
+    "\nHurdle\n\n✓ Viewer ready\n\n  URL       http://127.0.0.1:3000\n  Store     .tae/results-v1\n\n  Press Ctrl+C to stop.\n",
   );
 });
 

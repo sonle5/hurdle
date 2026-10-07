@@ -3,14 +3,16 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveV1Suite } from "./v1-authoring.mjs";
 
-const starterTemplateRoot = new URL("../../examples/copy-message/", import.meta.url);
-const STARTER_FILES = Object.freeze([
+const STARTERS = Object.freeze({ "copy-message": [
   "README.md",
   "example.suite.mjs",
   "tasks/copy-message/prompt.md",
   "tasks/copy-message/checks.mjs",
   "tasks/copy-message/fixtures/message.txt",
-]);
+], "together-api": [
+  "README.md", "example.suite.mjs", "tasks/together-api/prompt.md",
+  "tasks/together-api/checks.mjs", "tasks/together-api/fixtures/request.json",
+] });
 
 async function pathExists(path) {
   try {
@@ -37,13 +39,16 @@ function initDiagnostic(code, destination, message) {
   };
 }
 
-export async function initializeSuite({ destination, agent = "claude-code" } = {}) {
+export async function initializeSuite({ destination, agent = "claude-code", example = "copy-message" } = {}) {
   if (!isAbsolute(destination ?? "")) {
     throw new TypeError("destination must be an absolute path");
   }
   if (!["claude-code", "codex"].includes(agent)) {
     return initDiagnostic("init.agent-invalid", destination, "Choose claude-code or codex for the starter Agent.");
   }
+  if (!Object.hasOwn(STARTERS, example)) return initDiagnostic("init.example-invalid", destination, "Choose copy-message or together-api.");
+  const starterTemplateRoot = new URL(`../../examples/${example}/`, import.meta.url);
+  const STARTER_FILES = STARTERS[example];
 
   if (await pathExists(destination)) {
     return initDiagnostic(

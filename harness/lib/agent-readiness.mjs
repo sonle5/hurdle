@@ -31,11 +31,12 @@ export async function probeAgentCli(command, env) {
 
 async function checkApiKey(provider, name, key, fetch) {
   const anthropic = provider === "Anthropic";
-  const recovery = anthropic ? CLAUDE_RECOVERY : CODEX_RECOVERY;
+  const together = provider === "Together";
+  const recovery = anthropic ? CLAUDE_RECOVERY : together ? "Set a valid TOGETHER_API_KEY in .env.local; configured values override the shell." : CODEX_RECOVERY;
   try {
     const response = await fetch(anthropic
       ? "https://api.anthropic.com/v1/models?limit=1"
-      : "https://api.openai.com/v1/models", {
+      : together ? "https://api.together.ai/v1/models" : "https://api.openai.com/v1/models", {
       method: "GET",
       headers: anthropic
         ? { "x-api-key": key, "anthropic-version": "2023-06-01" }
@@ -47,7 +48,7 @@ async function checkApiKey(provider, name, key, fetch) {
     // for this authentication check; do not read, retain, or echo the body.
     await response.body?.cancel();
     if (response.status === 200) {
-      return result("pass", "auth.verified", `${provider} accepted ${name} (read-only authentication check).`);
+      return result("pass", "auth.verified", `${provider} · ${name} verified.`);
     }
     if (response.status === 401) {
       return result("fail", "auth.rejected", `${provider} rejected ${name} (HTTP 401). ${recovery}`);
@@ -70,12 +71,15 @@ export async function checkAgentReadiness({
 } = {}) {
   const checks = [];
   const verified = new Map();
-  const verify = async (provider, name) => {
+  const verify = async (provider, name, suffix = "") => {
     const key = runtimeEnv[name];
     // Cache within this invocation only. Never persist a credential or its hash.
     const id = `${provider}:${key}`;
-    if (!verified.has(id)) verified.set(id, await checkApiKey(provider, name, key, fetch));
-    checks.push(verified.get(id));
+    if (verified.has(id)) return;
+    const checked = await checkApiKey(provider, name, key, fetch);
+    const displayed = { ...checked, message: `${checked.message}${suffix}` };
+    verified.set(id, displayed);
+    checks.push(displayed);
   };
   for (const adapterId of new Set(agentSelections.map(value => value.adapterId))) {
     const claude = adapterId === "claude-code";
@@ -86,7 +90,7 @@ export async function checkAgentReadiness({
         ? `${label} executable is available.`
         : `${label} executable is missing or could not start. Install ${label} and ensure it is on PATH.`));
     } else {
-      checks.push(result("warning", "agent.remote-unverified", `${label} installation in the E2B template is not checked locally.`));
+      checks.push(result("warning", "agent.remote-unverified", `${label} availability will be checked during E2B execution.`));
     }
     const name = (claude
       ? ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]
@@ -98,19 +102,19 @@ export async function checkAgentReadiness({
     }
     const overridden = claude && name === "ANTHROPIC_API_KEY" && nonblank(runtimeEnv.CLAUDE_CODE_OAUTH_TOKEN)
       ? " (takes precedence over CLAUDE_CODE_OAUTH_TOKEN)" : "";
-    checks.push(result("pass", "auth.source", `${label} uses ${name}${overridden}.`));
     if (["CLAUDE_CODE_OAUTH_TOKEN", "CODEX_ACCESS_TOKEN"].includes(name)) {
       // These first-party subscription tokens have no supported model-list
       // authentication probe. Presence is not proof of validity or billing.
-      checks.push(result("warning", "auth.token-unverified", `${label} subscription token is configured; live validity is not verified without an Agent request.`));
+      checks.push(result("warning", "auth.token-unverified", `${label} · ${name} configured; live validity unverified.`));
     } else {
-      await verify(claude ? "Anthropic" : "OpenAI", name);
+      await verify(claude ? "Anthropic" : "OpenAI", name, overridden ? ` ${name}${overridden}.` : "");
     }
   }
   if (judgeCredentialName && nonblank(runtimeEnv[judgeCredentialName])) {
     await verify("Anthropic", judgeCredentialName);
   }
   for (const name of requiredCredentials) {
+    if (name === "TOGETHER_API_KEY" && nonblank(runtimeEnv[name])) { await verify("Together", name); continue; }
     checks.push(result(nonblank(runtimeEnv[name]) ? "pass" : "fail", "credential.required", nonblank(runtimeEnv[name])
       ? `Required task credential ${name} is configured (provider access is not checked).`
       : `Required task credential ${name} is missing. Set it in .env.local before running.`));

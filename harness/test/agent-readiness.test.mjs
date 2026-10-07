@@ -43,6 +43,20 @@ test("invalid Claude key wins over OAuth and yields a safe actionable diagnosis"
   assert.doesNotMatch(text, /private-bad-key|private-token|private-response|untrusted/);
 });
 
+test("an agent and Judge sharing a key get one authentication check and one status line", async () => {
+  let requests = 0;
+  const checked = await checkAgentReadiness({
+    ...input({ ANTHROPIC_API_KEY: "test-only-key" }),
+    judgeCredentialName: "ANTHROPIC_API_KEY",
+  }, {
+    probeCli: async () => true,
+    fetch: async () => { requests++; return success(); },
+  });
+  assert.equal(checked.ok, true);
+  assert.equal(requests, 1);
+  assert.equal(checked.checks.filter(value => value.code.startsWith("auth.")).length, 1);
+});
+
 test("OpenAI key probes follow the Codex adapter's precedence and never infer", async () => {
   const checked = await checkAgentReadiness(input({ CODEX_API_KEY: "selected", OPENAI_API_KEY: "ignored" }, "codex"), {
     probeCli: async command => command === "codex",
@@ -53,7 +67,8 @@ test("OpenAI key probes follow the Codex adapter's precedence and never infer", 
     },
   });
   assert.equal(checked.ok, true);
-  assert.match(JSON.stringify(checked), /accepted CODEX_API_KEY/);
+  assert.match(JSON.stringify(checked), /OpenAI · CODEX_API_KEY verified/);
+  assert.equal(checked.checks.filter(value => value.code.startsWith("auth.")).length, 1);
 });
 
 test("subscription credentials report presence without claiming live verification", async () => {
@@ -194,4 +209,42 @@ test("init --agent codex creates a valid Codex starter and gives the right crede
   assert.equal(suite.defaults.agentSelections[0].adapterId, "codex");
   assert.equal(await cli.main(["init", "another", "--agent", "unknown"], io), 2);
   assert.equal(existsSync(join(root, "another")), false);
+});
+
+test("readiness symbols use run colors and respect NO_COLOR and redirected output", async t => {
+  const root = mkdtempSync(join(tmpdir(), "hurdle-readiness-colors-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const cli = createFrameworkCli({
+    env: {},
+    checkAgentReadiness: async () => ({ ok: false, checks: [
+      { status: "pass", message: "installed" },
+      { status: "warning", message: "unverified" },
+      { status: "fail", message: "rejected" },
+    ] }),
+  });
+  let text = "";
+  const output = { cwd: root, stdout: { isTTY: true, write(v) { text += v; } }, stderr: { write(v) { text += v; } } };
+  assert.equal(await cli.main(["init"], output), 0);
+  const original = process.env.NO_COLOR;
+  try {
+    delete process.env.NO_COLOR;
+    text = "";
+    assert.equal(await cli.main(["validate"], output), 1);
+    assert.match(text, /\u001b\[32m✓\u001b\[0m installed/);
+    assert.match(text, /\u001b\[33m!\u001b\[0m unverified/);
+    assert.match(text, /\u001b\[31m✗\u001b\[0m rejected/);
+    process.env.NO_COLOR = "1";
+    text = "";
+    await cli.main(["validate"], output);
+    assert.doesNotMatch(text, /\u001b/);
+    delete process.env.NO_COLOR;
+    output.stdout.isTTY = false;
+    output.stderr.isTTY = true;
+    text = "";
+    await cli.main(["validate"], output);
+    assert.doesNotMatch(text, /\u001b/);
+  } finally {
+    if (original === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = original;
+  }
 });
