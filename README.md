@@ -1,4 +1,4 @@
-![Hurdle. Test how Claude Code and Codex use your API, SDK, or docs.](https://raw.githubusercontent.com/Nutlope/together-agent-evals/main/docs/assets/readme-hero.png)
+![Hurdle. Test how Claude Code and Codex use your API, SDK, or docs.](https://cdn.jsdelivr.net/npm/hurdle@0.2.5/docs/assets/readme-hero.png)
 
 # Hurdle — Together Agent Evals
 
