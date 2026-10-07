@@ -36,6 +36,10 @@ import { initializeSuite } from "../lib/starter-suite.mjs";
 import { checkAgentReadiness } from "../lib/agent-readiness.mjs";
 import { projectRuntimePath, setupSandbox } from "../lib/sandbox-setup.mjs";
 import { createViewerOnboarding } from "../lib/viewer-onboarding.mjs";
+import {
+  terminalUsesColor, paintTerminal as paintRunOutput, terminalFact as runFact,
+  terminalHeader, terminalStatus, terminalNote, terminalNext, suiteCommand,
+} from "../lib/terminal-output.mjs";
 
 const FIRST_PARTY_AGENT_ADAPTERS = Object.freeze({
   "claude-code": createClaudeCodeAdapter,
@@ -46,31 +50,17 @@ const AGENT_LABELS = Object.freeze({
   "claude-code": "Claude Code",
   codex: "Codex",
 });
-const RUN_COLORS = Object.freeze({
-  green: "\u001b[32m",
-  red: "\u001b[31m",
-  bold: "\u001b[1m",
-  yellow: "\u001b[33m",
-  dim: "\u001b[2m",
-  reset: "\u001b[0m",
-});
 
 function plural(count, singular, pluralForm = `${singular}s`) {
   return count === 1 ? singular : pluralForm;
 }
 
 function runOutputUsesColor(io) {
-  return Boolean(io.stdout?.isTTY) && !process.env.NO_COLOR;
+  return terminalUsesColor(io.stdout);
 }
 
-function paintRunOutput(value, color, enabled) {
-  return enabled ? `${RUN_COLORS[color]}${value}${RUN_COLORS.reset}` : value;
-}
-
-function runFact(label, value, { color = null, useColor = false } = {}) {
-  const key = paintRunOutput(label.padEnd(9), "dim", useColor);
-  const renderedValue = color ? paintRunOutput(value, color, useColor) : value;
-  return `  ${key} ${renderedValue}\n`;
+function writeError(io, text) {
+  io.stderr.write(terminalStatus("fail", text.trimEnd(), io.stderr));
 }
 
 function agentSelectionLabel(selection) {
@@ -153,7 +143,7 @@ function renderDiagnostic(diagnostic, cwd) {
 
 function printDiagnostics(diagnostics, io) {
   for (const diagnostic of diagnostics) {
-    io.stderr.write(renderDiagnostic(diagnostic, io.cwd));
+    writeError(io, renderDiagnostic(diagnostic, io.cwd));
   }
 }
 
@@ -180,6 +170,11 @@ const HELP_TEXT = Object.freeze({
     "",
     "Create a starter evaluation. The default directory is `evals`.",
     "The destination must not already exist.",
+    "",
+    "Credentials come from .env.local or exported environment variables.",
+    "Interactive Agent logins are not inherited. Claude Code uses",
+    "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN; Codex uses CODEX_ACCESS_TOKEN,",
+    "CODEX_API_KEY, or OPENAI_API_KEY. Together API also needs TOGETHER_API_KEY.",
     "",
     "Options:",
     "  --agent ID         Choose Claude Code (default) or Codex",
@@ -261,7 +256,8 @@ const HELP_TEXT = Object.freeze({
 });
 
 function help(topic, io) {
-  io.stdout.write(`${HELP_TEXT[topic]}\n`);
+  const body = topic === "main" ? HELP_TEXT[topic].slice("Hurdle\n\n".length) : HELP_TEXT[topic];
+  io.stdout.write(terminalHeader(io.stdout).trimStart() + `${body}\n`);
   return 0;
 }
 
@@ -270,12 +266,12 @@ function hasHelpFlag(args) {
 }
 
 function usage(io) {
-  io.stderr.write("Usage: hurdle <init [directory] | setup [suite] | validate [suite] | run [suite] [options] [--view] | view [--runtime FILE | --store DIR]>\n");
+  writeError(io, "hurdle [argument-error] Unknown command or help topic. Run npx hurdle help.\n");
   return 2;
 }
 
 function argumentError(message, io) {
-  io.stderr.write(`hurdle [argument-error] ${message}\n`);
+  writeError(io, `hurdle [argument-error] ${message}\n`);
   return { ok: false, exitCode: 2 };
 }
 
@@ -439,7 +435,7 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies, {
     storeEnvironment = viewerStoreEnvironment(runtimeProfile, dependencies.env);
   } catch (error) {
     if (!(error instanceof RuntimeProfileError)) throw error;
-    io.stderr.write(`hurdle [${error.code}] ${error.message}\n`);
+    writeError(io, `hurdle [${error.code}] ${error.message}\n`);
     return 2;
   }
   let readyPrinted = false;
@@ -447,13 +443,13 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies, {
     ? createTerminalProgress({ stream: io.stderr })
     : null;
   const useColor = runOutputUsesColor(io);
-  if (showHeader) io.stdout.write(`\n${paintRunOutput("Hurdle", "bold", useColor)}\n\n`);
+  if (showHeader) io.stdout.write(terminalHeader(io.stdout));
   const markReady = (url) => {
     if (readyPrinted) return;
     readyPrinted = true;
     progress?.stop();
     io.stdout.write(
-      `${paintRunOutput("✓", "green", useColor)} Viewer ready\n\n`
+      terminalStatus("pass", "Viewer ready", io.stdout) + "\n"
       + runFact("URL", url, { useColor })
       + runFact("Store", displayStore(runtimeProfile, io.cwd), { useColor })
       + `\n  ${paintRunOutput("Press Ctrl+C to stop.", "dim", useColor)}\n`,
@@ -489,22 +485,22 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies, {
   }
   progress?.fail(readyPrinted ? "Results Viewer stopped unexpectedly" : "Results Viewer failed to start");
   if (outcome.reason === "disposal-unconfirmed") {
-    io.stderr.write("hurdle [viewer-disposal-unconfirmed] Viewer shutdown could not be confirmed. Check for a surviving Viewer process before restarting.\n");
+    writeError(io, "hurdle [viewer-disposal-unconfirmed] Viewer shutdown could not be confirmed. Check for a surviving Viewer process before restarting.\n");
     return 1;
   }
   if (outcome.reason === "port-in-use") {
-    io.stderr.write(
+    writeError(io,
       `hurdle [viewer-port-in-use] Port ${runtimeProfile.viewer.port} is already in use.\n`
       + `Open http://127.0.0.1:${runtimeProfile.viewer.port} if the Viewer is already running, `
       + "or stop that process and run this command again.\n",
     );
   } else if (outcome.reason === "viewer-lock-held") {
-    io.stderr.write(
+    writeError(io,
       "hurdle [viewer-lock-held] Another Viewer development server appears to be running from this checkout.\n"
       + "Stop that Viewer and run this command again. If no Viewer is running, remove the stale viewer/.next/dev/lock file.\n",
     );
   } else {
-    io.stderr.write(
+    writeError(io,
       "hurdle [viewer-failed] The Results Viewer could not be started. "
       + "Run `npm --prefix viewer run dev` to inspect the startup error.\n",
     );
@@ -556,24 +552,19 @@ async function runCliMain(argv, io, dependencies) {
       printDiagnostics(result.diagnostics, io);
       return 1;
     }
-    const evalName = directory;
-    io.stdout.write(`Created evaluation: ${evalName}\n`);
-    io.stdout.write(`Suite: ${evalName}/example.suite.mjs\n`);
-    io.stdout.write(example === "together-api"
-      ? `\nThe starter asks ${AGENT_LABELS[agent]} to inspect Together models and make one small chat request.\nHurdle checks captured API activity and the saved response.\nRequires TOGETHER_API_KEY and an E2B sandbox. Agent, Together, and E2B usage may be billed.\n`
-      : `\nThe starter asks ${AGENT_LABELS[agent]} to copy a fixture into answer.txt.\nHurdle checks the exact contents and opens the results with --view.\n`);
-    if (example !== "together-api") io.stdout.write(agent === "codex"
-      ? "Requires Codex on PATH and CODEX_ACCESS_TOKEN, CODEX_API_KEY, or OPENAI_API_KEY.\n"
-      : "Requires Claude Code on PATH and a valid ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN.\n");
-    io.stdout.write("Configure credentials in .env.local; your interactive login is not inherited.\n");
-    const suiteArgument = evalName === "evals"
-      ? ""
-      : ` ${JSON.stringify(`${evalName}/example.suite.mjs`)}`;
-    io.stdout.write(
-      `\nNext:\n`
-      + (example === "together-api" ? `  npx hurdle setup${suiteArgument}\n` : `  npx hurdle validate${suiteArgument}\n`)
-      + `  npx hurdle run${suiteArgument} --view\n`,
-    );
+    const suite = `${directory.replace(/\/$/, "")}/example.suite.mjs`;
+    const useColor = runOutputUsesColor(io);
+    io.stdout.write(terminalHeader(io.stdout)
+      + terminalStatus("pass", "Evaluation created", io.stdout) + "\n"
+      + runFact("Suite", suite, { useColor })
+      + runFact("Agent", AGENT_LABELS[agent], { useColor })
+      + (example === "together-api" ? runFact("Needs", "E2B + TOGETHER_API_KEY", { useColor }) : "")
+      + runFact("Auth", ".env.local or shell · see npx hurdle help init", { useColor })
+      + runFact("Usage", example === "together-api" ? "Agent, Together, and E2B may be billed" : "Agent may be billed", { useColor })
+      + terminalNext([
+        suiteCommand(example === "together-api" ? "setup" : "validate", suite),
+        suiteCommand("run", suite, { view: true }),
+      ], io.stdout));
     return 0;
   }
 
@@ -658,11 +649,16 @@ async function runCliMain(argv, io, dependencies) {
       options.taskIds.length > 0 ? options.taskIds : undefined,
       "Task",
     );
+    io.stdout.write(terminalHeader(io.stdout));
     if (validation) {
-      io.stdout.write(`Valid Suite: ${options.suite}\n`);
-      io.stdout.write(`Tasks: ${selectedTaskIds.length}  Conditions: ${options.conditionIds.length || Object.keys(resolvedPlan.value.definition.conditions).length}\n`);
+      const useColor = runOutputUsesColor(io);
+      const conditions = options.conditionIds.length || Object.keys(resolvedPlan.value.definition.conditions).length;
+      io.stdout.write(terminalStatus("pass", "Suite valid", io.stdout) + "\n"
+        + runFact("Suite", options.suite, { useColor })
+        + runFact("Plan", `${selectedTaskIds.length} ${plural(selectedTaskIds.length, "task")} · ${conditions} ${plural(conditions, "condition")}`, { useColor }));
       if (options.offline) {
-        io.stdout.write("Readiness: not checked (--offline). Run `npx hurdle validate` before an evaluation.\n");
+        io.stdout.write("\n" + terminalStatus("warning", "Readiness not checked (--offline)", io.stdout)
+          + terminalNext([suiteCommand("validate", options.suite)], io.stdout));
         disposeAuthoredSuite();
         return 0;
       }
@@ -697,7 +693,7 @@ async function runCliMain(argv, io, dependencies) {
       }
     } catch (error) {
       if (!(error instanceof RuntimeProfileError)) throw error;
-      io.stderr.write(`hurdle [${error.code}] ${error.message}\n`);
+      writeError(io, `hurdle [${error.code}] ${error.message}\n`);
       disposeAuthoredSuite();
       return 2;
     }
@@ -706,7 +702,7 @@ async function runCliMain(argv, io, dependencies) {
         "environment.trusted-egress-capture", "environment.trusted-request-blocking",
       ].includes(requirement))
     ))) {
-      io.stderr.write("hurdle [runtime.capture-required] Selected Tasks require trusted API capture or request blocking. Run `npx hurdle setup` to configure E2B, or select an E2B Runtime with --runtime. No evaluation started.\n");
+      writeError(io, `hurdle [runtime.capture-required] Selected Tasks require trusted API capture or request blocking. Run \`${suiteCommand("setup", options.suite)}\` to configure E2B, or select an E2B Runtime with --runtime. No evaluation started.\n`);
       disposeAuthoredSuite();
       return 1;
     }
@@ -723,11 +719,11 @@ async function runCliMain(argv, io, dependencies) {
       const plannedCells = selectedTaskIds.length
         * selectedConditionCount
         * options.agentSelections.length;
-      io.stderr.write(
+      writeError(io,
         `hurdle [matrix-rejected] ${plannedCells} selected cells could not be executed.\n`,
       );
       for (const diagnostic of authoritySelection.diagnostics.slice(0, 10)) {
-        io.stderr.write(`hurdle [${diagnostic.code}] ${diagnostic.message}\n`);
+        writeError(io, `hurdle [${diagnostic.code}] ${diagnostic.message}\n`);
       }
       const exitCode = authoritySelection.diagnostics.every(
         ({ category }) => category === "selection",
@@ -760,7 +756,7 @@ async function runCliMain(argv, io, dependencies) {
       dependencies.assertRuntimeDependencies(runtimeProfile);
     } catch (error) {
       if (!(error instanceof RuntimeProfileError || error instanceof BackendDependencyError)) throw error;
-      io.stderr.write(`hurdle [${error.code}] ${error.message}\n`);
+      writeError(io, `hurdle [${error.code}] ${error.message}\n`);
       disposeAuthoredSuite();
       return 2;
     }
@@ -775,7 +771,7 @@ async function runCliMain(argv, io, dependencies) {
           ?? { kind: "environment" }
       ).kind === "environment");
     }));
-    io.stdout.write(`\nReadiness (${dependencies.environmentSource})\n`);
+    io.stdout.write("\n" + terminalNote(`Readiness (${dependencies.environmentSource})`, io.stdout));
     let readiness;
     try {
       readiness = await dependencies.checkAgentReadiness({
@@ -786,22 +782,22 @@ async function runCliMain(argv, io, dependencies) {
         judgeCredentialName: authorityNeedsJudge ? runtimeProfile.judge.credentialEnv : null,
       });
     } catch {
-      io.stderr.write("hurdle [readiness-unavailable] Readiness checks could not complete. No evaluation started; check your setup and retry.\n");
+      writeError(io, "hurdle [readiness-unavailable] Readiness checks could not complete. No evaluation started; check your setup and retry.\n");
       disposeAuthoredSuite();
       return 1;
     }
     for (const check of readiness.checks) {
-      const symbol = { pass: "✓", fail: "✗", warning: "!" }[check.status];
-      const color = { pass: "green", fail: "red", warning: "yellow" }[check.status];
-      io.stdout.write(`${paintRunOutput(symbol, color, runOutputUsesColor(io))} ${check.message}\n`);
+      io.stdout.write(terminalStatus(check.status, check.message, io.stdout));
     }
     if (!readiness.ok) {
-      io.stderr.write("hurdle [not-ready] Resolve the setup errors above and run `npx hurdle validate` again. No evaluation started.\n");
+      writeError(io, `hurdle [not-ready] Resolve the setup errors above and run \`${suiteCommand("validate", options.suite)}\` again. No evaluation started.\n`);
       disposeAuthoredSuite();
       return 1;
     }
     if (validation) {
-      io.stdout.write("Readiness checks passed. Model access, billing, and task success are checked during execution.\n");
+      io.stdout.write("\n" + terminalStatus("pass", "Ready to run", io.stdout)
+        + terminalNote("Model access, billing, and task success are checked during execution.", io.stdout)
+        + terminalNext([suiteCommand("run", options.suite, { view: true })], io.stdout));
       disposeAuthoredSuite();
       return 0;
     }
@@ -835,8 +831,7 @@ async function runCliMain(argv, io, dependencies) {
         (taskId) => authoritySelection.value.byTaskId[taskId],
       );
       io.stdout.write(
-        `\n${paintRunOutput("Hurdle", "bold", useColor)}\n\n`
-        + runFact("Plan", plan, { useColor })
+        "\n" + runFact("Plan", plan, { useColor })
         + runFact("Agent", agents, { useColor })
         + runFact("Runtime", runtime, { useColor })
         + runFact("Scoring", scoringLabel(authorities), { useColor })
@@ -864,7 +859,7 @@ async function runCliMain(argv, io, dependencies) {
         : await dependencies.openLocalResultStore({ root: runtimeProfile.resultStore.root });
     } catch {
       progress.stop();
-      io.stderr.write("hurdle [store-unavailable] The configured Result Store could not be opened.\n");
+      writeError(io, "hurdle [store-unavailable] The configured Result Store could not be opened.\n");
       disposeAuthoredSuite();
       return 1;
     }
@@ -968,21 +963,21 @@ async function runCliMain(argv, io, dependencies) {
       disposeAuthoredSuite();
     }
     if (storeCloseFailed) {
-      io.stderr.write(
+      writeError(io,
         "hurdle [store-close-failed] The configured Result Store could not be closed cleanly.\n",
       );
       return 1;
     }
     if (executionFailed) {
-      io.stderr.write("hurdle [run-failed] Evaluation setup or execution failed; resources were closed.\n");
+      writeError(io, "hurdle [run-failed] Evaluation setup or execution failed; resources were closed.\n");
       return 1;
     }
     if (result.status === "rejected") {
-      io.stderr.write(
+      writeError(io,
         `hurdle [matrix-rejected] ${result.summary.plannedCells} selected cells could not be executed.\n`,
       );
       for (const diagnostic of result.diagnostics.slice(0, 10)) {
-        io.stderr.write(`hurdle [${diagnostic.code}] ${diagnostic.message}\n`);
+        writeError(io, `hurdle [${diagnostic.code}] ${diagnostic.message}\n`);
       }
       return result.diagnostics.every(({ category }) => category === "selection") ? 2 : 1;
     }
@@ -1061,7 +1056,7 @@ async function runCliMain(argv, io, dependencies) {
       }
     } catch (error) {
       if (!(error instanceof RuntimeProfileError)) throw error;
-      io.stderr.write(`hurdle [${error.code}] ${error.message}\n`);
+      writeError(io, `hurdle [${error.code}] ${error.message}\n`);
       return 2;
     }
     return serveResolvedViewer(runtimeProfile, io, dependencies, { storeOverride: Boolean(parsed.values.store) });
@@ -1108,9 +1103,7 @@ if (
   try {
     process.exitCode = await main(process.argv.slice(2));
   } catch {
-    process.stderr.write(
-      "hurdle [internal-error] An unexpected internal error occurred.\n",
-    );
+    writeError({ stderr: process.stderr }, "hurdle [internal-error] An unexpected internal error occurred.\n");
     process.exitCode = 70;
   }
 }

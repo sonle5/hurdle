@@ -222,11 +222,11 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
 
   const initialized = cli("init");
   assert.equal(initialized.status, 0, initialized.stderr);
-  assert.match(initialized.stdout, /^Created evaluation: evals$/m);
-  assert.match(initialized.stdout, /npx hurdle validate\n  npx hurdle run --view/);
+  assert.match(initialized.stdout, /^✓ Evaluation created$/m);
+  assert.match(initialized.stdout, /npx hurdle validate\n            npx hurdle run --view/);
   const validated = cli("validate", "--offline");
   assert.equal(validated.status, 0, validated.stderr);
-  assert.match(validated.stdout, /^Valid Suite: evals\/example\.suite\.mjs$/m);
+  assert.match(validated.stdout, /^  Suite     evals\/example\.suite\.mjs$/m);
 
   const fakeBin = join(consumerRoot, "fake-bin");
   mkdirSync(fakeBin);

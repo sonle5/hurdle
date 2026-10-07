@@ -1,16 +1,7 @@
+import { paintTerminal as paint } from "./terminal-output.mjs";
+
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const CLEAR_LINE = "\r\u001b[2K";
-const COLORS = Object.freeze({
-  cyan: "\u001b[36m",
-  green: "\u001b[32m",
-  red: "\u001b[31m",
-  yellow: "\u001b[33m",
-  reset: "\u001b[0m",
-});
-
-function paint(value, color, enabled) {
-  return enabled ? `${COLORS[color]}${value}${COLORS.reset}` : value;
-}
 
 export function createTerminalProgress({
   stream,

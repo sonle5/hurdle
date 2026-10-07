@@ -10,6 +10,10 @@ import { createTerminalProgress } from "./terminal-progress.mjs";
 import { promptSetup } from "./setup-prompts.mjs";
 import { normalizeE2BSettings } from "./execution-environments/e2b.mjs";
 import { DEFAULT_PROJECT_RUNTIME, projectRuntimePath } from "./project-paths.mjs";
+import {
+  terminalUsesColor, terminalFact, terminalHeader, terminalStatus,
+  terminalNote, terminalNext, suiteCommand,
+} from "./terminal-output.mjs";
 
 export { DEFAULT_PROJECT_RUNTIME, projectRuntimePath } from "./project-paths.mjs";
 export const SETUP_AGENT_PACKAGES = Object.freeze({
@@ -101,16 +105,16 @@ async function saveCredentials(cwd, values) {
 }
 
 export async function setupSandbox({ suite, template, yes = false }, io, dependencies) {
-  const color = Boolean(io.stdout.isTTY) && !process.env.NO_COLOR;
-  const paint = (text, code) => color ? `\u001b[${code}m${text}\u001b[0m` : text;
-  const line = (status, text) => io.stdout.write(`${paint({ pass: "✓", fail: "✗", warning: "!" }[status], { pass: 32, fail: 31, warning: 33 }[status])} ${text}\n`);
+  const useColor = terminalUsesColor(io.stdout);
+  const fact = (label, value) => terminalFact(label, value, { useColor });
+  const line = (status, text) => io.stdout.write(terminalStatus(status, text, io.stdout));
   const prompt = dependencies.promptSetup ?? promptSetup;
-  io.stdout.write(`\n${paint("Hurdle", 1)}\n\n  Sandbox   E2B\n\n`);
+  io.stdout.write(terminalHeader(io.stdout) + fact("Sandbox", "E2B") + "\n");
   let authored;
   try {
     if (!existsSync(resolve(io.cwd, suite))) throw setupError("setup.suite-missing", "Create an evaluation first: npx hurdle init (or npx hurdle init --example together-api).");
     authored = await dependencies.resolveV1Suite({ suitePath: resolve(io.cwd, suite) });
-    if (!authored.ok) throw setupError("setup.suite-invalid", "The Suite is invalid. Run npx hurdle validate --offline to inspect its diagnostics.");
+    if (!authored.ok) throw setupError("setup.suite-invalid", `The Suite is invalid. Run ${suiteCommand("validate", suite)} --offline to inspect its diagnostics.`);
     dependencies.assertRuntimeDependencies({ environment: { kind: "e2b" } });
     const ids = [...new Set(authored.defaults.agentSelections.map(agent => agent.adapterId))].sort();
     const selectedTasks = authored.defaults.taskIds;
@@ -192,14 +196,16 @@ export async function setupSandbox({ suite, template, yes = false }, io, depende
     await saveCredentials(io.cwd, entered);
     if (!available) {
       const capacity = { cpuCount: settings.cpuCount, memoryMB: settings.memoryMiB };
-      io.stdout.write(`\n  Template  ${name}\n  Build     ${capacity.cpuCount} CPUs · ${capacity.memoryMB} MB · installs ${ids.join(" + ")}\n  Building uses your E2B account and may be billed. No evaluation runs during setup.\n\n`);
+      io.stdout.write("\n" + fact("Template", name)
+        + fact("Build", `${capacity.cpuCount} CPUs · ${capacity.memoryMB} MB · ${ids.join(" + ")}`)
+        + fact("Usage", "Template build may be billed") + "\n");
       if (!yes) {
         const answer = await prompt({ message: "  Build this template? [y/N]: " }, io);
         if (!answer || !["y", "yes"].includes(answer.trim().toLowerCase())) throw setupError("setup.build-required", "Template build not started. Rerun setup to confirm, or use --yes to accept build usage without a prompt.");
       }
       const progress = io.stderr.isTTY ? createTerminalProgress({ stream: io.stderr }) : null;
       progress?.start("Building E2B template");
-      if (!progress) io.stdout.write("Building E2B template…\n");
+      if (!progress) io.stdout.write(terminalNote("Building E2B template…", io.stdout));
       try { await backend.build(name, ids, env[profile.environment.apiKeyEnv], capacity); }
       catch { throw setupError("setup.build-failed", "E2B template build failed. Inspect the build in your E2B dashboard, then rerun setup. Project Runtime was not changed."); }
       finally { progress?.stop(); }
@@ -208,7 +214,9 @@ export async function setupSandbox({ suite, template, yes = false }, io, depende
     // Keep existing stores, Judge settings, and user limits when reusing setup.
     await atomicWrite(runtimeFile, `${JSON.stringify(config, null, 2)}\n`, 0o600);
     line("pass", "Project sandbox configured.");
-    io.stdout.write(`\n  Runtime   ${runtimePath}\n  Suite     ${suite}\n\n  Model access, remote tools, and billing are checked during execution.\n  Next: npx hurdle run${suite === "evals/example.suite.mjs" || suite === "example.suite.mjs" ? "" : ` ${JSON.stringify(suite)}`} --view\n`);
+    io.stdout.write("\n" + fact("Runtime", runtimePath) + fact("Suite", suite)
+      + "\n" + terminalNote("Model access, remote tools, and billing are checked during execution.", io.stdout)
+      + terminalNext([suiteCommand("run", suite, { view: true })], io.stdout));
     return 0;
   } catch (error) {
     const known = error.code?.startsWith("setup.") || error.code?.startsWith("runtime.") || error.code === "backend-not-installed";

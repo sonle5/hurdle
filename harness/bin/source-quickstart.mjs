@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { relative } from "node:path";
-import { defaultLocalStoreRoot } from "../lib/project-paths.mjs";
+import { terminalFact, terminalUsesColor } from "../lib/terminal-output.mjs";
 
 import { createTerminalProgress } from "../lib/terminal-progress.mjs";
 import {
   projectQuickstartRunIssue,
   renderQuickstartHeader,
   runSourceQuickstart,
+  createQuickstartViewerOutput,
 } from "../lib/source-quickstart.mjs";
 
 const CAPTURE_MAX_BYTES = 256 * 1024;
@@ -81,14 +81,8 @@ function writeFailureDetails(value) {
   if (trimmed) process.stderr.write(`${trimmed}\n`);
 }
 
-const ANSI = Object.freeze({ cyan: "\u001b[36m", dim: "\u001b[2m", reset: "\u001b[0m" });
-
-function fact(label, value, { accent = false, stream = process.stderr } = {}) {
-  const useColor = stream.isTTY === true && !process.env.NO_COLOR;
-  const key = label.padEnd(7);
-  const paintedKey = useColor ? `${ANSI.dim}${key}${ANSI.reset}` : key;
-  const paintedValue = useColor && accent ? `${ANSI.cyan}${value}${ANSI.reset}` : value;
-  return `  ${paintedKey} ${paintedValue}\n`;
+function fact(label, value, { stream = process.stderr } = {}) {
+  return terminalFact(label, value, { useColor: terminalUsesColor(stream) });
 }
 
 function writeRunIssue(value) {
@@ -178,33 +172,10 @@ try {
         return exitCode;
       }
 
-      let pending = "";
-      const stdout = {
-        write(chunk) {
-          pending += String(chunk);
-          while (pending.includes("\n")) {
-            const newline = pending.indexOf("\n");
-            const line = pending.slice(0, newline);
-            pending = pending.slice(newline + 1);
-            const match = /^Viewer: (.+)$/.exec(line);
-            if (!match) {
-              if (line === "Press Ctrl+C to stop the Viewer") continue;
-              process.stdout.write(`${line}\n`);
-              continue;
-            }
-            viewerReady = true;
-            progress.succeed(
-              "Results Viewer ready",
-              durationSince(phaseStartedAt.get("view") ?? Date.now()),
-            );
-            process.stdout.write(
-              `\n${fact("Store", relative(cwd, defaultLocalStoreRoot(cwd)), { stream: process.stdout })}`
-              + `${fact("Viewer", match[1], { accent: true, stream: process.stdout })}\n`
-              + "Press Ctrl+C to stop the Viewer\n",
-            );
-          }
-        },
-      };
+      const stdout = createQuickstartViewerOutput({
+        stream: process.stdout,
+        onReady() { viewerReady = true; progress.stop(); },
+      });
       const stderr = {
         isTTY: false,
         write(chunk) {

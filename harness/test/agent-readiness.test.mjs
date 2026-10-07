@@ -162,7 +162,7 @@ test("CLI validate and run reject bad authentication before a store, agent, Judg
   const offline = io();
   assert.equal(await cli.main(["validate", "--offline"], offline), 0);
   assert.equal(checks, 2);
-  assert.match(offline.read(), /Readiness: not checked/);
+  assert.match(offline.read(), /Readiness not checked/);
   assert.equal(await cli.main(["run", "--offline"], io()), 2, "Run cannot bypass readiness");
 });
 
@@ -201,8 +201,11 @@ test("init --agent codex creates a valid Codex starter and gives the right crede
   const io = { cwd: root, stdout: { write(v) { text += v; } }, stderr: { write(v) { text += v; } } };
   const cli = createFrameworkCli();
   assert.equal(await cli.main(["init", "--agent", "codex"], io), 0);
-  assert.match(text, /starter asks Codex/);
-  assert.match(text, /Requires Codex on PATH and CODEX_ACCESS_TOKEN/);
+  assert.match(text, /Agent     Codex/);
+  assert.match(text, /Auth      .env.local or shell/);
+  let guidance = "";
+  await cli.main(["help", "init"], { ...io, stdout: { write(v) { guidance += v; } } });
+  assert.match(guidance, /Codex uses CODEX_ACCESS_TOKEN/);
   const suite = await resolveV1Suite({ suitePath: join(root, "evals/example.suite.mjs") });
   t.after(() => suite.dispose());
   assert.equal(suite.ok, true);
@@ -239,7 +242,7 @@ test("readiness symbols use run colors and respect NO_COLOR and redirected outpu
     assert.doesNotMatch(text, /\u001b/);
     delete process.env.NO_COLOR;
     output.stdout.isTTY = false;
-    output.stderr.isTTY = true;
+    output.stderr.isTTY = false;
     text = "";
     await cli.main(["validate"], output);
     assert.doesNotMatch(text, /\u001b/);

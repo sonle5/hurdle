@@ -115,18 +115,18 @@ test("hurdle init and offline validation work without credentials", (t) => {
   const initialized = runCli(cwd, ["init"]);
   assert.equal(initialized.status, 0);
   assert.equal(initialized.stderr, "");
-  assert.match(initialized.stdout, /^Created evaluation: evals\n/);
+  assert.match(initialized.stdout, /✓ Evaluation created\n\n  Suite     evals\/example\.suite\.mjs\n/);
   assert.match(
     initialized.stdout,
-    /Next:\n  npx hurdle validate\n  npx hurdle run --view\n/,
+    /  Next      npx hurdle validate\n            npx hurdle run --view\n/,
   );
   assert.doesNotMatch(initialized.stdout, /sha256:/);
 
   const validated = runCli(cwd, ["validate", "--offline"]);
   assert.equal(validated.status, 0);
   assert.equal(validated.stderr, "");
-  assert.match(validated.stdout, /^Valid Suite: evals\/example.suite.mjs\n/);
-  assert.match(validated.stdout, /Tasks: 1  Conditions: 1\n/);
+  assert.match(validated.stdout, /✓ Suite valid\n\n  Suite     evals\/example\.suite\.mjs\n/);
+  assert.match(validated.stdout, /  Plan      1 task · 1 condition\n/);
   assert.doesNotMatch(validated.stdout, /sha256:/);
 });
 
@@ -576,7 +576,7 @@ test("hurdle run reports unknown matrix filters as argument errors", (t) => {
     ]);
     assert.equal(result.status, 2);
     assert.equal(result.stdout, "");
-    assert.equal(result.stderr, `hurdle [argument-error] ${expected}\n`);
+    assert.equal(result.stderr, `✗ hurdle [argument-error] ${expected}\n`);
     assert.doesNotMatch(result.stderr, /internal-error/);
   }
 });
@@ -597,10 +597,10 @@ test("hurdle run rejects E2B without its operational key before opening a store"
   ], { E2B_API_KEY: "" });
 
   assert.equal(result.status, 2);
-  assert.equal(result.stdout, "");
+  assert.equal(result.stdout, "\nHurdle\n\n");
   assert.equal(
     result.stderr,
-    "hurdle [argument-error] --environment e2b requires E2B_API_KEY.\n",
+    "✗ hurdle [argument-error] --environment e2b requires E2B_API_KEY.\n",
   );
   assert.equal(existsSync(store), false);
 });
@@ -660,6 +660,6 @@ test("hurdle run rejects ambiguous or duplicate matrix selectors", (t) => {
     const result = runCli(cwd, ["run", manifest, ...args]);
     assert.equal(result.status, 2);
     assert.equal(result.stdout, "");
-    assert.equal(result.stderr, `hurdle [argument-error] ${expected}\n`);
+    assert.equal(result.stderr, `✗ hurdle [argument-error] ${expected}\n`);
   }
 });

@@ -2,9 +2,10 @@
 
 import { loadProjectEnvironment } from "../lib/project-environment.mjs";
 import { initializeRuntime } from "../lib/runtime-init.mjs";
+import { terminalHeader, terminalStatus, terminalFact, terminalUsesColor, terminalNext } from "../lib/terminal-output.mjs";
 
 function usage(message) {
-  if (message) process.stderr.write(`${message}\n\n`);
+  process.stderr.write(terminalStatus("fail", message ?? "Choose e2b, postgres, or e2b-postgres.", process.stderr));
   process.stderr.write("Usage: npm run runtime:init -- <e2b|postgres|e2b-postgres> [--template NAME]\n");
   return 2;
 }
@@ -41,17 +42,17 @@ if (!selected) {
         mode: selected.mode,
         template,
       });
-      process.stdout.write(`\nCreated  ${created.relativePath}\n\n`);
-      process.stdout.write("Next\n");
-      process.stdout.write("  npm run preflight\n");
-      if (created.usesPostgres) process.stdout.write("  npm run db:migrate\n");
-      process.stdout.write(
-        "  node harness/bin/tae.mjs run "
-        + `evals/together/hybrid.suite.mjs --runtime ${created.relativePath} --view\n`,
-      );
+      process.stdout.write(terminalHeader(process.stdout)
+        + terminalStatus("pass", "Runtime created", process.stdout) + "\n"
+        + terminalFact("Runtime", created.relativePath, { useColor: terminalUsesColor(process.stdout) })
+        + terminalNext([
+          "npm run preflight",
+          ...(created.usesPostgres ? ["npm run db:migrate"] : []),
+          `npm run hurdle -- run evals/together/hybrid.suite.mjs --runtime ${created.relativePath} --view`,
+        ], process.stdout));
     }
   } catch (error) {
-    process.stderr.write(`${error?.message ?? "Runtime could not be created."}\n`);
+    process.stderr.write(terminalStatus("fail", error?.message ?? "Runtime could not be created.", process.stderr));
     process.exitCode = error?.code === "runtime-exists" ? 1 : 70;
   }
 }

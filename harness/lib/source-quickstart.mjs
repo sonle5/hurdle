@@ -1,30 +1,34 @@
 import { resolve } from "node:path";
 import { defaultLocalStoreRoot } from "./project-paths.mjs";
+import { paintTerminal } from "./terminal-output.mjs";
+import { stripVTControlCharacters } from "node:util";
 
 const QUICKSTART_TASK = "copy-message";
 const GENERIC_NONZERO_PREFIX = "The evaluated agent process did not exit cleanly:";
 const FALLBACK_REASON =
   "The starter evaluation did not complete. Open its Transcript in the Viewer for details.";
-const LOGO = Object.freeze([
-  Object.freeze(["████████", "  ████  ", "████████"]),
-  Object.freeze(["   ██   ", " ██  ██ ", "██      "]),
-  Object.freeze(["   ██   ", "████████", "██████  "]),
-  Object.freeze(["   ██   ", "██    ██", "██      "]),
-  Object.freeze(["   ██   ", "██    ██", "████████"]),
-]);
-const LOGO_COLORS = Object.freeze([
-  "\u001b[38;2;139;92;246m",
-  "\u001b[38;2;219;39;119m",
-  "\u001b[38;2;234;88;12m",
-]);
-const ANSI_RESET = "\u001b[0m";
-
 export function renderQuickstartHeader({ isTTY = false, useColor = isTTY } = {}) {
-  if (!isTTY) return "Together Agent Evals";
-  const art = LOGO.map((parts) => parts.map((part, index) => (
-    useColor ? `${LOGO_COLORS[index]}${part}${ANSI_RESET}` : part
-  )).join("  ")).join("\n");
-  return art;
+  return paintTerminal("Hurdle", "bold", isTTY && useColor && !process.env.NO_COLOR);
+}
+
+export function createQuickstartViewerOutput({ stream, onReady }) {
+  let pending = "", ready = false;
+  return {
+    isTTY: Boolean(stream.isTTY),
+    write(chunk) {
+      pending += String(chunk);
+      while (pending.includes("\n")) {
+        const newline = pending.indexOf("\n");
+        const line = pending.slice(0, newline);
+        pending = pending.slice(newline + 1);
+        const text = stripVTControlCharacters(line);
+        // The source quickstart already printed the shared heading.
+        if (text === "Hurdle") continue;
+        if (text === "✓ Viewer ready" && !ready) { ready = true; onReady(); }
+        stream.write(`${line}\n`);
+      }
+    },
+  };
 }
 
 export function projectQuickstartRunIssue(value) {

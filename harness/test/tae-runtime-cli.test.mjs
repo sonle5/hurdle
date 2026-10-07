@@ -425,7 +425,7 @@ test("hurdle run reports a Postgres close failure without exposing its connectio
   assert.equal(exit, 1);
   assert.equal(
     streams.read().stderr,
-    "hurdle [store-close-failed] The configured Result Store could not be closed cleanly.\n",
+    "✗ hurdle [store-close-failed] The configured Result Store could not be closed cleanly.\n",
   );
   assert.doesNotMatch(`${streams.read().stdout}\n${streams.read().stderr}`, /close-secret/);
 });
@@ -612,7 +612,7 @@ test("hurdle run accepts --view only once", async () => {
   assert.equal(exit, 2);
   assert.equal(
     streams.read().stderr,
-    "hurdle [argument-error] Option '--view' may only be supplied once.\n",
+    "✗ hurdle [argument-error] Option '--view' may only be supplied once.\n",
   );
 });
 
@@ -678,7 +678,7 @@ test("hurdle view reports unconfirmed shutdown without claiming success", async 
   const streams = io(process.cwd());
   assert.equal(await cli.main(["view"], streams), 1);
   assert.equal(streams.read().stderr,
-    "hurdle [viewer-disposal-unconfirmed] Viewer shutdown could not be confirmed. Check for a surviving Viewer process before restarting.\n");
+    "✗ hurdle [viewer-disposal-unconfirmed] Viewer shutdown could not be confirmed. Check for a surviving Viewer process before restarting.\n");
 });
 
 test("hurdle view explains how to recover when its port is already occupied", async (t) => {

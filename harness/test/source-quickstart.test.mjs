@@ -126,23 +126,12 @@ test("quickstart keeps a safe fallback when no projected reason is available", (
   });
 });
 
-test("quickstart uses a compact coloured TAE mark only in an interactive terminal", () => {
-  assert.equal(renderQuickstartHeader(), "Together Agent Evals");
-
-  const plain = renderQuickstartHeader({ isTTY: true, useColor: false });
-  assert.equal(plain, [
-    "████████    ████    ████████",
-    "   ██      ██  ██   ██      ",
-    "   ██     ████████  ██████  ",
-    "   ██     ██    ██  ██      ",
-    "   ██     ██    ██  ████████",
-  ].join("\n"));
-
+test("quickstart uses the shared neutral Hurdle header", () => {
+  assert.equal(renderQuickstartHeader(), "Hurdle");
+  assert.equal(renderQuickstartHeader({ isTTY: true, useColor: false }), "Hurdle");
   const coloured = renderQuickstartHeader({ isTTY: true, useColor: true });
-  assert.match(coloured, /\u001b\[38;2;139;92;246m/);
-  assert.match(coloured, /\u001b\[38;2;219;39;119m/);
-  assert.match(coloured, /\u001b\[38;2;234;88;12m/);
-  assert.equal(coloured.replace(/\u001b\[[0-9;]+m/gu, ""), plain);
+  assert.equal(coloured.replace(/\u001b\[[0-9;]+m/gu, ""), "Hurdle");
+  if (!process.env.NO_COLOR) assert.match(coloured, /\u001b\[1mHurdle/);
 });
 
 test("quickstart progress uses stable plain output outside a TTY", () => {

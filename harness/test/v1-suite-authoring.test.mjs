@@ -99,8 +99,8 @@ test("a code-authored Suite runs two independent Local repeats through the canon
 
   const validation = runCli(root, ["validate", "general.suite.mjs", "--offline"]);
   assert.equal(validation.status, 0, validation.stderr);
-  assert.match(validation.stdout, /^Valid Suite: general\.suite\.mjs$/m);
-  assert.match(validation.stdout, /^Tasks: 1  Conditions: 1$/m);
+  assert.match(validation.stdout, /^  Suite     general\.suite\.mjs$/m);
+  assert.match(validation.stdout, /^  Plan      1 task · 1 condition$/m);
 
   const storeRoot = join(root, ".hurdle", "results-v1");
   const result = runCli(
