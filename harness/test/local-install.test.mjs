@@ -228,6 +228,16 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
     timeout: 20_000,
   });
 
+  for (const command of ["version", "--version", "-v"]) {
+    const result = cli(command);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, `${installedPackage.version}\n`);
+    assert.equal(result.stderr, "");
+  }
+  const legacyVersion = spawnSync(process.execPath, [legacyCliPath, "--version"], { cwd: consumerRoot, encoding: "utf8" });
+  assert.equal(legacyVersion.status, 0, legacyVersion.stderr);
+  assert.equal(legacyVersion.stdout, `${installedPackage.version}\n`);
+
   const initialized = cli("init");
   assert.equal(initialized.status, 0, initialized.stderr);
   assert.match(initialized.stdout, /^✓ Evaluation created$/m);

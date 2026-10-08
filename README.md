@@ -1,52 +1,38 @@
-![Hurdle. Test how Claude Code and Codex use your API, SDK, or docs.](https://cdn.jsdelivr.net/npm/hurdle@0.2.6/docs/assets/readme-hero.png)
+![Hurdle. Test how Claude Code and Codex use your API, SDK, or docs.](https://cdn.jsdelivr.net/npm/hurdle@0.2.7/docs/assets/readme-hero.png)
 
 # Hurdle — Together Agent Evals
 
-Run Claude Code or Codex against real tasks and record what they did. Score each
-run with deterministic code, an LLM Judge, or both, then inspect the transcript,
-API calls, tool use, and artifacts in a local viewer.
-
-The CLI is packaged on npm as [`hurdle`](https://www.npmjs.com/package/hurdle).
-See the [authoring guide](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/authoring.md) for Tasks, Suites, and configuration.
+Evaluate Claude Code and Codex on real tasks. Score results and inspect transcripts,
+API calls, tool use, and artifacts in the results viewer.
 
 ## Quick start
 
-Install Node.js 22.13 or newer and Claude Code, then create an evaluation in
-an empty directory or your existing project:
+Requires Node.js 22.13+ and Claude Code.
 
 ```sh
 mkdir my-evals && cd my-evals
 npx hurdle init
 ```
 
-Add either `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` to `.env.local`.
-For subscription authentication, generate the token with `claude setup-token`.
-Keep `.env.local` out of version control. Hurdle uses isolated agent
-configuration, so an interactive CLI login alone is not inherited.
+Set `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in `.env.local`.
+For subscription access, generate a token with `claude setup-token`.
 
 ```sh
 npx hurdle validate
 npx hurdle run --view
 ```
 
-`validate` checks definitions, setup, and API-key authentication without running
-an agent. `run` repeats those checks before starting. Subscription tokens are
-checked for configuration; their live validity is not verified.
+Results are saved in `.hurdle/`. Local execution is not a security sandbox;
+use trusted tasks and keep credentials out of version control. Agent usage may be billed.
 
-The starter asks the agent to copy a fixture into `answer.txt`, scores the exact
-copy, and opens the results viewer. It does not need a Together key, Judge, E2B
-account, or database. Agent usage may be billed by your provider.
+Check your installed version with `npx hurdle --version` (or `npx hurdle version`).
 
-Results are saved locally in `.hurdle/`. Existing `.tae/` projects still work.
+For Codex, install its CLI, use `npx hurdle init --agent codex`, and set `OPENAI_API_KEY` instead.
+See [authoring](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/authoring.md) for other authentication options.
 
-For Codex, install its CLI and use `npx hurdle init --agent codex` instead.
-Configure `CODEX_ACCESS_TOKEN`, `CODEX_API_KEY`, or `OPENAI_API_KEY` in `.env.local`
-(checked in that order), then use the same validate and run commands.
+## E2B sandbox
 
-> Local runs execute agent code on your computer with network access. They are
-> not a security sandbox. Only run tasks, checks, and Suites you trust.
-
-To try Together API activity in an E2B sandbox, start in a new project directory:
+In a new project, add `E2B_API_KEY`, `TOGETHER_API_KEY`, and your agent credentials to `.env.local`:
 
 ```sh
 npx hurdle init --example together-api
@@ -54,23 +40,15 @@ npx hurdle setup --yes
 npx hurdle run --view
 ```
 
-Setup reads configured credentials; `--yes` accepts template build usage. Builds and runs may be billed.
-See [sandbox setup](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/sandbox-setup.md) for existing templates, limits, and configuration.
+Setup builds the E2B template. Sandbox and API usage may be billed.
+See [setup](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/sandbox-setup.md) for existing templates and Postgres.
 
-To save results in an existing Postgres database, set `HURDLE_RESULT_STORE_DATABASE_URL`
-in `.env.local`, then run `npx hurdle setup --store postgres`.
-It checks the connection and applies migrations to the `hurdle` schema, keeping your execution settings.
-Setup never prompts by default; use `--json` for automation or `--interactive` for terminal prompts.
+For an existing Postgres database, set `HURDLE_RESULT_STORE_DATABASE_URL` in `.env.local`,
+then run `npx hurdle setup --store postgres`.
 
-## How it works
+## Tasks and checks
 
-1. A **Task** gives the agent a prompt and any files it needs.
-2. A **Suite** chooses the Tasks, agents, models, conditions, repeats, and
-   scoring mode.
-3. Hurdle runs the matrix, evaluates the captured evidence, and saves each result
-   for review and comparison.
-
-Each Task keeps its instructions and evaluation together:
+A Suite selects Tasks and agents. Each Task keeps its prompt, fixtures, and checks together:
 
 ```text
 evals/
@@ -81,8 +59,6 @@ evals/
         ├── checks.mjs
         └── fixtures/message.txt
 ```
-
-Checks run against the captured result:
 
 ```js
 import { defineChecks } from "hurdle";
@@ -104,18 +80,11 @@ export default defineChecks((run) => {
 });
 ```
 
-Use `code` for deterministic checks, `judge` for an LLM rubric, or `hybrid`
-when both must pass. Tasks can also block an exact expensive or destructive
-request before it reaches the provider.
+Score with `code`, an LLM `judge`, or `hybrid` checks.
 
-## Included evaluations
+## From source
 
-The repository includes Together API tasks for chat, RAG search, tool calling,
-and GPU discovery. See [Together evaluations](https://github.com/Nutlope/together-agent-evals/blob/main/evals/together/README.md) for the
-tasks, costs, credentials, and scoring behavior.
-
-To work from source or run the included evaluations, clone the repository
-(repository access is required while it is private):
+Repository access is required while it is private.
 
 ```sh
 git clone https://github.com/Nutlope/together-agent-evals.git
@@ -124,7 +93,7 @@ cp .env.example .env.local
 npm run setup
 ```
 
-Add your agent credentials to `.env.local`, then try the starter from source:
+Add your agent credentials to `.env.local`, then run the starter:
 
 ```sh
 npm run hurdle -- validate examples/copy-message/example.suite.mjs
@@ -133,7 +102,6 @@ npm run hurdle -- run examples/copy-message/example.suite.mjs --view
 
 ## Documentation
 
-- [Authoring Tasks, Suites, checks, Judges, and request guards](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/authoring.md)
-- [E2B and Postgres setup](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/beta-backends.md)
-- [Copy-message example](https://cdn.jsdelivr.net/npm/hurdle@latest/examples/copy-message/example.suite.mjs)
-- [Contributing](https://cdn.jsdelivr.net/npm/hurdle@latest/CONTRIBUTING.md) and [security reporting](https://cdn.jsdelivr.net/npm/hurdle@latest/SECURITY.md)
+- [Authoring](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/authoring.md)
+- [Sandbox and storage setup](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/sandbox-setup.md)
+- [Contributing](https://cdn.jsdelivr.net/npm/hurdle@latest/CONTRIBUTING.md) · [Security](https://cdn.jsdelivr.net/npm/hurdle@latest/SECURITY.md)

@@ -55,7 +55,7 @@ test("hurdle exposes global and per-command help without executing a command", (
     assert.equal(result.status, 0);
     assert.equal(result.stderr, "");
     assert.match(result.stdout, /^Hurdle\n\nUsage:\n  hurdle <command> \[options\]/);
-    for (const command of ["init", "validate", "run", "view"]) {
+    for (const command of ["init", "validate", "run", "view", "version"]) {
       assert.match(result.stdout, new RegExp(`^  ${command}\\b`, "m"));
     }
   }
@@ -66,6 +66,7 @@ test("hurdle exposes global and per-command help without executing a command", (
     ["validate", /hurdle validate \[suite\]/],
     ["run", /hurdle run \[suite\] \[options\]/],
     ["view", /hurdle view \[--runtime FILE \| --store DIR\]/],
+    ["version", /hurdle version/],
   ]) {
     const direct = runCli(cwd, [command, "--help"]);
     const topic = runCli(cwd, ["help", command]);
@@ -106,6 +107,26 @@ test("hurdle exposes global and per-command help without executing a command", (
     assert.match(runHelp.stdout, new RegExp(`^  ${option}\\b`, "m"));
   }
   assert.equal(existsSync(join(cwd, "evals")), false);
+});
+
+test("hurdle reports its installed version without reading project configuration", (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "hurdle-cli-version-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(join(cwd, ".env.local"));
+  writeFileSync(join(cwd, "package.json"), JSON.stringify({ version: "99.0.0" }));
+  const { version } = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+  for (const command of ["version", "--version", "-v"]) {
+    const result = runCli(cwd, [command]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, `${version}\n`);
+    assert.equal(result.stderr, "");
+    const invalid = runCli(cwd, [command, "extra"]);
+    assert.equal(invalid.status, 2);
+    assert.match(invalid.stderr, /\[argument-error\]/);
+    assert.equal(invalid.stdout, "");
+  }
+  assert.equal(runCli(cwd, ["version", "--help"]).status, 0);
+  assert.equal(existsSync(join(cwd, ".hurdle")), false);
 });
 
 test("hurdle init and offline validation work without credentials", (t) => {

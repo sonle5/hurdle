@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -162,6 +162,7 @@ const HELP_TEXT = Object.freeze({
     "  validate [suite]   Validate a Suite and check Agent readiness",
     "  run [suite]        Run a Suite",
     "  view               Start the Results Viewer",
+    "  version            Show the installed version",
     "  help [command]     Show help for a command",
     "",
     "Run `hurdle help <command>` for command options.",
@@ -251,6 +252,13 @@ const HELP_TEXT = Object.freeze({
     "`--runtime` cannot be combined with `--environment`,",
     "`--environment-settings`, or `--store`.",
   ].join("\n"),
+  version: [
+    "Usage:",
+    "  hurdle version",
+    "",
+    "Print the installed package version. No project or credentials required.",
+    "Aliases: hurdle --version, hurdle -v",
+  ].join("\n"),
   view: [
     "Usage:",
     "  hurdle view [--runtime FILE | --store DIR]",
@@ -282,6 +290,16 @@ function usage(io) {
 function argumentError(message, io) {
   writeError(io, `hurdle [argument-error] ${message}\n`);
   return { ok: false, exitCode: 2 };
+}
+
+function versionCommand(argv, io) {
+  const [command, ...args] = argv;
+  if (!["version", "--version", "-v"].includes(command)) return null;
+  if (command === "version" && args.length === 1 && hasHelpFlag(args)) return help("version", io);
+  if (args.length !== 0) return argumentError("Use version, --version, or -v without additional arguments.", io).exitCode;
+  const { version } = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+  io.stdout.write(`${version}\n`);
+  return 0;
 }
 
 function defaultSuiteArgument(cwd) {
@@ -518,6 +536,8 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies, {
 }
 
 async function runCliMain(argv, io, dependencies) {
+  const versionResult = versionCommand(argv, io);
+  if (versionResult !== null) return versionResult;
   const [command, ...args] = argv;
   if (!command) return help("main", io);
 
@@ -1115,6 +1135,8 @@ export async function main(argv, io = {
   stdout: process.stdout,
   stderr: process.stderr,
 }) {
+  const versionResult = versionCommand(argv, io);
+  if (versionResult !== null) return versionResult;
   let configured;
   try { configured = loadProjectEnvironment(io.cwd); }
   catch (error) {
