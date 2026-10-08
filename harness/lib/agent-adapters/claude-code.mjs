@@ -8,6 +8,7 @@ import {
 } from "../spawn-claude.mjs";
 import { deepFreeze, RunSelectionInputError, sha256 } from "../run-model.mjs";
 import { redactSecretBytes, redactSecretText } from "../evidence-redaction.mjs";
+import { isAgentEffort } from "../agent-effort.mjs";
 
 const ALLOWED_ENVIRONMENT_NAMES = Object.freeze([
   "PATH",
@@ -152,6 +153,9 @@ export function createClaudeCodeAdapter({
       if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
         throw new RunSelectionInputError("Claude Adapter settings must be an object");
       }
+      if (settings.effort !== undefined && !isAgentEffort(settings.effort)) {
+        throw new RunSelectionInputError("Claude effort must be low, medium, high, xhigh, or max");
+      }
       const launchProtocol = settings.launchProtocol ?? null;
       if (launchProtocol !== null && launchProtocol !== LEGACY_C52_PRINT_PROTOCOL) {
         throw new RunSelectionInputError("Claude launch protocol is unsupported");
@@ -236,6 +240,7 @@ export function createClaudeCodeAdapter({
           ...baseArgs,
           ...(resources.skills.length === 0 ? ["--disable-slash-commands"] : []),
           ...(requestedModel ? ["--model", requestedModel] : []),
+          ...(settings.effort ? ["--effort", settings.effort] : []),
           "--dangerously-skip-permissions",
           "-p",
         ],
@@ -245,7 +250,7 @@ export function createClaudeCodeAdapter({
         workspaceFiles: workspaceFiles(resources),
       });
     },
-    createContinuationPlan({ handle, prompt, requestedModel, resources = { skills: [], mcpServers: [] } }) {
+    createContinuationPlan({ handle, prompt, requestedModel, settings = {}, resources = { skills: [], mcpServers: [] } }) {
       const sessionId = continuationHandles.get(handle);
       if (!sessionId) {
         throw new TypeError("Claude continuation handle is unavailable");
@@ -260,6 +265,7 @@ export function createClaudeCodeAdapter({
           ...baseArgs,
           ...(resources.skills.length === 0 ? ["--disable-slash-commands"] : []),
           ...(requestedModel ? ["--model", requestedModel] : []),
+          ...(settings.effort ? ["--effort", settings.effort] : []),
           "--resume",
           sessionId,
           "--dangerously-skip-permissions",

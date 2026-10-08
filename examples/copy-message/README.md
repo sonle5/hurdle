@@ -1,8 +1,10 @@
 # Copy a message
 
-A product-neutral code-checked Task. It needs Claude Code authentication, but
-no Together key, Judge, database or sandbox account. To use Codex instead,
-change the Suite's runner to `codex` and provide its authentication.
+A product-neutral code-checked Task. It needs the selected Agent's authentication,
+but no Together key, Judge, database or sandbox account. The default Claude
+starter pins `claude-opus-5-5` with `effort: "medium"`. Use `hurdle init --agent codex` for
+a starter pinned to `gpt-6.1-sol` with medium effort, and provide its authentication.
+Use `init --model MODEL --effort LEVEL` or edit the Suite to change these settings.
 
 The agent reads `fixtures/message.txt` and writes its exact contents into
 `answer.txt`. A successful run shows `Passed` and opens the results viewer.

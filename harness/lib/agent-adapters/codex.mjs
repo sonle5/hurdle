@@ -1,6 +1,7 @@
 import { decodeControllerJsonl } from "../controller-transcript.mjs";
 import { deepFreeze, RunSelectionInputError } from "../run-model.mjs";
 import { redactSecretBytes, redactSecretText } from "../evidence-redaction.mjs";
+import { isAgentEffort } from "../agent-effort.mjs";
 
 const ALLOWED_ENVIRONMENT_NAMES = Object.freeze([
   "PATH",
@@ -72,14 +73,17 @@ function normalizeCodexSettings({ requestedModel, settings }) {
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
     throw new RunSelectionInputError("Codex Adapter settings must be an object");
   }
-  if (Object.keys(settings).length > 0) {
+  if (Object.keys(settings).some(key => key !== "effort")) {
     throw new RunSelectionInputError(
       "Codex does not support Agent Adapter settings in this slice",
     );
   }
+  if (settings.effort !== undefined && !isAgentEffort(settings.effort)) {
+    throw new RunSelectionInputError("Codex effort must be low, medium, high, xhigh, or max");
+  }
   return deepFreeze({
     requestedModel: requestedModel?.trim() || null,
-    settings: {},
+    settings: settings.effort === undefined ? {} : { effort: settings.effort },
   });
 }
 
@@ -201,6 +205,9 @@ export function createCodexAdapter({
           "--sandbox",
           "workspace-write",
           ...mcpArguments(resources),
+          ...(normalized.settings.effort
+            ? ["-c", `model_reasoning_effort=${JSON.stringify(normalized.settings.effort)}`]
+            : []),
           ...(normalized.requestedModel
             ? ["--model", normalized.requestedModel]
             : []),

@@ -9,6 +9,16 @@ npx hurdle init
 The starter uses Claude Code by default. Use `npx hurdle init --agent codex`
 to create a Codex starter instead.
 
+Starters pin Claude Code to `claude-opus-5-5` and Codex to `gpt-6.1-sol`, both
+with medium reasoning effort. Override these when creating a starter:
+
+```sh
+npx hurdle init --agent codex --model gpt-6.1-sol --effort medium
+```
+
+`init --model` writes a model into the Suite. `run --model` and
+`validate --model` only filter models already declared by the Suite.
+
 An evaluation has two parts: a **Suite** selects what to run, and each **Task**
 defines a prompt and its checks.
 
@@ -60,13 +70,17 @@ import { defineSuite } from "hurdle";
 
 export default defineSuite({
   tasks: ["./tasks/copy-message"],
-  agents: [{ runner: "claude-code", model: "claude-sonnet-4-6" }],
+  agents: [{ runner: "claude-code", model: "claude-opus-5-5", effort: "medium" }],
   verdict: "code",
 });
 ```
 
 - `tasks` contains paths relative to the Suite file.
 - `agents` selects the runner and, optionally, its model.
+- Each Agent's optional `effort` selects `low`, `medium`, `high`, `xhigh`, or
+  `max` reasoning effort. Hurdle forwards it to the agent CLI and saves it in
+  the run configuration. Available effort levels depend on the selected model
+  and installed CLI version. Omit it to use the agent's default.
 - `conditions` defines the skills and MCP servers available to the Agent. When
   omitted, the Suite has one empty `baseline` Condition.
 - `repeats` runs every selected cell independently, even after a failure. It

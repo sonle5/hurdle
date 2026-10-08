@@ -2,6 +2,12 @@ import { copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveV1Suite } from "./v1-authoring.mjs";
+import { isAgentEffort } from "./agent-effort.mjs";
+
+export const STARTER_AGENT_MODELS = Object.freeze({
+  "claude-code": "claude-opus-5-5",
+  codex: "gpt-6.1-sol",
+});
 
 const STARTERS = Object.freeze({ "copy-message": [
   "README.md",
@@ -39,7 +45,7 @@ function initDiagnostic(code, destination, message) {
   };
 }
 
-export async function initializeSuite({ destination, agent = "claude-code", example = "copy-message" } = {}) {
+export async function initializeSuite({ destination, agent = "claude-code", example = "copy-message", model, effort = "medium" } = {}) {
   if (!isAbsolute(destination ?? "")) {
     throw new TypeError("destination must be an absolute path");
   }
@@ -47,6 +53,10 @@ export async function initializeSuite({ destination, agent = "claude-code", exam
     return initDiagnostic("init.agent-invalid", destination, "Choose claude-code or codex for the starter Agent.");
   }
   if (!Object.hasOwn(STARTERS, example)) return initDiagnostic("init.example-invalid", destination, "Choose copy-message or together-api.");
+  model ??= STARTER_AGENT_MODELS[agent];
+  if (typeof model !== "string" || !model.trim()) return initDiagnostic("init.model-invalid", destination, "Choose a nonblank Agent model.");
+  if (!isAgentEffort(effort)) return initDiagnostic("init.effort-invalid", destination, "Choose low, medium, high, xhigh, or max effort.");
+  model = model.trim();
   const starterTemplateRoot = new URL(`../../examples/${example}/`, import.meta.url);
   const STARTER_FILES = STARTERS[example];
 
@@ -95,11 +105,12 @@ export async function initializeSuite({ destination, agent = "claude-code", exam
         outputPath,
       );
     }
-    if (agent === "codex") {
-      const suitePath = join(temporaryRoot, "example.suite.mjs");
-      const source = await readFile(suitePath, "utf8");
-      await writeFile(suitePath, source.replace('runner: "claude-code"', 'runner: "codex"'));
-    }
+    const suitePath = join(temporaryRoot, "example.suite.mjs");
+    const source = await readFile(suitePath, "utf8");
+    await writeFile(suitePath, source
+      .replace('runner: "claude-code"', () => `runner: ${JSON.stringify(agent)}`)
+      .replace('model: "claude-opus-5-5"', () => `model: ${JSON.stringify(model)}`)
+      .replace('effort: "medium"', () => `effort: ${JSON.stringify(effort)}`));
 
     const resolved = await resolveV1Suite({
       suitePath: join(temporaryRoot, "example.suite.mjs"),
@@ -133,6 +144,8 @@ export async function initializeSuite({ destination, agent = "claude-code", exam
       value: {
         root: destination,
         suitePath: join(destination, "example.suite.mjs"),
+        model,
+        effort,
         createdFiles: [...STARTER_FILES],
         definitionFingerprint: resolved.value.definitionFingerprint,
       },

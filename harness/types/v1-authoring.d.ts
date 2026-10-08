@@ -3,6 +3,7 @@ export type V1VerdictMode = "code" | "hybrid" | "judge";
 export interface V1Agent {
   readonly runner: "claude-code" | "codex";
   readonly model?: string | null;
+  readonly effort?: "low" | "medium" | "high" | "xhigh" | "max";
 }
 
 export interface V1ConditionResources {

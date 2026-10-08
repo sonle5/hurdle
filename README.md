@@ -30,6 +30,9 @@ Check your installed version with `npx hurdle --version` (or `npx hurdle version
 For Codex, install its CLI, use `npx hurdle init --agent codex`, and set `OPENAI_API_KEY` instead.
 See [authoring](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/authoring.md) for other authentication options.
 
+Starters pin Claude Opus 5.5 or GPT-6.1 Sol with medium reasoning effort.
+Use `init --model MODEL --effort LEVEL` to choose another configuration.
+
 ## E2B sandbox
 
 In a new project, add `E2B_API_KEY`, `TOGETHER_API_KEY`, and your agent credentials to `.env.local`:

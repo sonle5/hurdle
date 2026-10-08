@@ -18,7 +18,7 @@ import test from "node:test";
 import { createClaudeCodeAdapter } from "../lib/agent-adapters/claude-code.mjs";
 import { openLocalResultStore } from "../lib/local-result-store.mjs";
 
-function editStarter(cwd, { agents = [{ runner: "claude-code", model: "test-model" }], matrix = false, secret = false, delay = false } = {}) {
+function editStarter(cwd, { agents = [{ runner: "claude-code", model: "test-model", effort: "medium" }], matrix = false, secret = false, delay = false } = {}) {
   const root = join(cwd, "evals");
   if (matrix) cpSync(join(root, "tasks", "copy-message"), join(root, "tasks", "copy-message-alt"), { recursive: true });
   writeFileSync(join(root, "example.suite.mjs"), 'import { defineSuite } from "tae";\nexport default defineSuite(' + JSON.stringify({
@@ -233,6 +233,7 @@ test("hurdle run composes Claude Code and local execution into the canonical sto
   assert.equal(record.state, "complete");
   assert.equal(record.verdict, "pass");
   assert.equal(record.execution.adapterId, "claude-code");
+  assert.deepEqual(record.snapshot.agent, { adapterId: "claude-code", requestedModel: "test-model", settings: { effort: "medium" } });
   assert.equal(record.execution.sessionId, "cli-session");
   assert.deepEqual(record.snapshot.environment.settings, {});
   const transcriptBytes = await store.readEvidence(record.evidence.transcript, {
@@ -256,6 +257,8 @@ test("hurdle run composes Claude Code and local execution into the canonical sto
     "--disable-slash-commands",
     "--model",
     "test-model",
+    "--effort",
+    "medium",
     "--dangerously-skip-permissions",
     "-p",
   ]);
@@ -284,7 +287,7 @@ test("hurdle run composes Codex and maps CI auth into redacted canonical evidenc
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   assert.equal(runCli(cwd, ["init"]).status, 0);
 
-  editStarter(cwd, { agents: [{ runner: "codex", model: "gpt-test" }], secret: true });
+  editStarter(cwd, { agents: [{ runner: "codex", model: "gpt-test", effort: "medium" }], secret: true });
 
   const binRoot = join(cwd, "bin");
   mkdirSync(binRoot);
@@ -335,6 +338,7 @@ test("hurdle run composes Codex and maps CI auth into redacted canonical evidenc
   assert.equal(record.state, "complete");
   assert.equal(record.verdict, "pass");
   assert.equal(record.execution.adapterId, "codex");
+  assert.deepEqual(record.snapshot.agent, { adapterId: "codex", requestedModel: "gpt-test", settings: { effort: "medium" } });
   assert.equal(record.execution.sessionId, "codex-cli-session");
   assert.deepEqual(record.metrics.common, {
     inputTokens: 7,
@@ -367,6 +371,8 @@ test("hurdle run composes Codex and maps CI auth into redacted canonical evidenc
     "--skip-git-repo-check",
     "--sandbox",
     "workspace-write",
+    "-c",
+    'model_reasoning_effort="medium"',
     "--model",
     "gpt-test",
     "-",
@@ -448,9 +454,10 @@ test("Claude Code owns opaque single-use continuation handles", () => {
     handle: decoded.continuationHandle,
     prompt: "Continue teardown.",
     requestedModel: null,
-    settings: {},
+    settings: { effort: "medium" },
   });
   assert.equal(plan.command, "/opt/claude");
+  assert.deepEqual(plan.args.slice(plan.args.indexOf("--effort"), plan.args.indexOf("--effort") + 2), ["--effort", "medium"]);
   assert.deepEqual(
     plan.args.slice(plan.args.indexOf("--resume"), plan.args.indexOf("--resume") + 2),
     ["--resume", "session-123"],

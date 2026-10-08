@@ -1,4 +1,5 @@
 import { normalizePostgresConnectionString } from "./postgres-connection-string.mjs";
+import { backendDependencyInstallCommand } from "./backend-dependencies.mjs";
 import { hurdleEnvironmentValue, RESULT_STORE_DATABASE_URL_ENV } from "./hurdle-environment.mjs";
 
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
@@ -130,7 +131,7 @@ export async function checkE2bCredential(apiKey, { loadE2b } = {}) {
     return result("E2B", "pass", "account access succeeded; no sandbox was created");
   } catch (error) {
     if (error?.code === "ERR_MODULE_NOT_FOUND") {
-      return result("E2B", "fail", "backend dependencies are not installed; run npm run setup:backends");
+      return result("E2B", "fail", `backend dependencies are not installed; run ${backendDependencyInstallCommand()}`);
     }
     return result("E2B", "fail", "credential or account access was rejected");
   }

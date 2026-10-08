@@ -1,10 +1,17 @@
 import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 
+export function backendDependencyInstallCommand() {
+  return existsSync(new URL("../../viewer/package.json", import.meta.url))
+    ? "npm run setup:backends from the repository root"
+    : "npm install hurdle --include=optional in your evaluation project";
+}
+
 export class BackendDependencyError extends Error {
   constructor(backend) {
-    super(`${backend} dependencies are not installed. Run npm run setup:backends from the repository root.`);
+    super(`${backend} dependencies are not installed. Run ${backendDependencyInstallCommand()}.`);
     this.code = "backend-not-installed";
   }
 }

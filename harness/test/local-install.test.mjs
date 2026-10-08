@@ -241,6 +241,8 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   const initialized = cli("init");
   assert.equal(initialized.status, 0, initialized.stderr);
   assert.match(initialized.stdout, /^✓ Evaluation created$/m);
+  assert.match(initialized.stdout, /^  Model\s+claude-opus-5-5$/m);
+  assert.match(initialized.stdout, /^  Effort\s+medium$/m);
   assert.match(initialized.stdout, /npx hurdle validate\n            npx hurdle run --view/);
   const validated = cli("validate", "--offline");
   assert.equal(validated.status, 0, validated.stderr);
@@ -263,6 +265,7 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   const codexInitialized = cli("init", "codex-evals", "--agent", "codex");
   assert.equal(codexInitialized.status, 0, codexInitialized.stderr);
   assert.match(readFileSync(join(consumerRoot, "codex-evals/example.suite.mjs"), "utf8"), /runner: "codex"/);
+  assert.match(readFileSync(join(consumerRoot, "codex-evals/example.suite.mjs"), "utf8"), /model: "gpt-6\.1-sol", effort: "medium"/);
   const codexValidated = cli("validate", "codex-evals/example.suite.mjs", "--offline");
   assert.equal(codexValidated.status, 0, codexValidated.stderr);
 
@@ -302,6 +305,19 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   const togetherValidated = cli("validate", "together-evals/example.suite.mjs", "--offline");
   assert.equal(togetherValidated.status, 0, togetherValidated.stderr);
   assert.match(readFileSync(join(consumerRoot, "together-evals/tasks/together-api/fixtures/request.json"), "utf8"), /max_tokens/);
+
+  const customInitialized = cli("init", "custom-evals", "--agent", "codex", "--model", "gpt-6.1-sol", "--effort", "high");
+  assert.equal(customInitialized.status, 0, customInitialized.stderr);
+  assert.match(cli("validate", "custom-evals/example.suite.mjs", "--offline").stdout, /gpt-6\.1-sol · high effort/);
+
+  const missingBackend = spawnSync(process.execPath, [cliPath, "run", "--environment", "e2b"], {
+    cwd: consumerRoot,
+    encoding: "utf8",
+    env: { ...process.env, E2B_API_KEY: "test-not-a-real-key" },
+    timeout: 20_000,
+  });
+  assert.equal(missingBackend.status, 2, missingBackend.stdout + missingBackend.stderr);
+  assert.match(missingBackend.stderr, /\[backend-not-installed\].*npm install hurdle --include=optional/);
 
   const port = await availablePort();
   writeFileSync(join(consumerRoot, "runtime.json"), `${JSON.stringify({
@@ -381,6 +397,7 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   await waitForOutput(child, new RegExp(`URL\\s+http://127\\.0\\.0\\.1:${port}`), output);
   assert.match(stdout, /^  Result\s+Passed$/m);
   assert.match(stdout, /^  Runs\s+1 passed$/m);
+  assert.match(stdout, /claude-opus-5-5 · medium effort/);
   const response = await fetch(`http://127.0.0.1:${port}`);
   assert.equal(response.status, 200);
   await response.body?.cancel();
@@ -414,7 +431,7 @@ test("a Local install runs a real controller without E2B and rejects missing E2B
   assert.equal(validated.status, 0, validated.stderr);
   const remote = cli("run", "evals/example.suite.mjs", "--environment", "e2b");
   assert.equal(remote.status, 2, remote.stderr);
-  assert.match(remote.stderr, /\[backend-not-installed\].*E2B.*npm run setup:backends/);
+  assert.match(remote.stderr, /\[backend-not-installed\].*E2B.*npm install hurdle --include=optional/);
   assert.equal(existsSync(join(cwd, ".hurdle/results-v1")), false);
   // Exercise the real Local controller and filesystem store with a fake Agent.
   const bin = join(cwd, "bin");

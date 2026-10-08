@@ -29,6 +29,7 @@ import {
   ANTHROPIC_JSON_JUDGE_MAX_TIMEOUT_MS,
 } from "./judges/anthropic-json.mjs";
 import { normalizeExchangeFactProfiles } from "./exchange-facts.mjs";
+import { isAgentEffort } from "./agent-effort.mjs";
 
 const TASK_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CONDITION_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -356,7 +357,7 @@ function validateSuite(suite, suiteFile) {
     fail("suite.agents-invalid", "Suite agents must be a nonempty array.", suiteFile);
   }
   const agents = suite.agents.map((agent, index) => {
-    assertClosedKeys(agent, ["runner", "model"], `Suite agent ${index + 1}`, suiteFile);
+    assertClosedKeys(agent, ["runner", "model", "effort"], `Suite agent ${index + 1}`, suiteFile);
     if (!ADAPTER_IDS.has(agent.runner)) {
       fail("suite.agent-invalid", "Suite agent runner must be 'claude-code' or 'codex'.", suiteFile);
     }
@@ -365,10 +366,13 @@ function validateSuite(suite, suiteFile) {
     )) {
       fail("suite.agent-invalid", "Suite agent model must be null or a nonblank string.", suiteFile);
     }
+    if (agent.effort !== undefined && !isAgentEffort(agent.effort)) {
+      fail("suite.agent-invalid", "Suite agent effort must be low, medium, high, xhigh, or max.", suiteFile);
+    }
     return Object.freeze({
       adapterId: agent.runner,
       requestedModel: agent.model?.trim() ?? null,
-      settings: Object.freeze({}),
+      settings: Object.freeze(agent.effort === undefined ? {} : { effort: agent.effort }),
     });
   });
   if (new Set(agents.map((agent) => JSON.stringify(agent))).size !== agents.length) {

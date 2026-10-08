@@ -5,15 +5,21 @@ One Agent looks up Together models, makes one short chat completion, saves
 response and captured HTTP activity in the Results Viewer.
 
 ```sh
-npx hurdle setup
+npx hurdle setup --yes
 npx hurdle run --view
 ```
 
-Setup configures E2B and asks for E2B, Agent, and Together credentials when
-missing. Keep `.env.local` out of version control. Setup may build an E2B
+Set `E2B_API_KEY`, `TOGETHER_API_KEY`, and Agent credentials in `.env.local`
+or your shell before setup. Setup reports missing credentials without prompting;
+use `setup --interactive` for credential prompts and build approval.
+Keep `.env.local` out of version control. `--yes` accepts building an E2B
 template; it checks authentication through read-only requests and never runs
 inference or the evaluation. Remote tools and model access remain unverified
 until the run.
+
+The starter pins `claude-opus-5-5` with `effort: "medium"`. Use
+`init --example together-api --agent codex` for `gpt-6.1-sol` with medium effort.
+Use `init --model MODEL --effort LEVEL` or edit the Suite to change these settings.
 
 The Suite uses one task, one baseline condition, and one repeat, with code
 scoring and no Judge. The runtime created by setup uses two sandboxes, each with

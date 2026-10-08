@@ -6,6 +6,6 @@ export default defineSuite({
     hosts: ["api.together.ai", "api.together.xyz"],
   },
   tasks: ["./tasks/together-api"],
-  agents: [{ runner: "claude-code" }],
+  agents: [{ runner: "claude-code", model: "claude-opus-5-5", effort: "medium" }],
   verdict: "code",
 });

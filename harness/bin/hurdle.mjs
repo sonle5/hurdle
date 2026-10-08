@@ -32,7 +32,8 @@ import {
   V1AuthoringError,
   resolveV1Suite,
 } from "../lib/v1-authoring.mjs";
-import { initializeSuite } from "../lib/starter-suite.mjs";
+import { initializeSuite, STARTER_AGENT_MODELS } from "../lib/starter-suite.mjs";
+import { isAgentEffort } from "../lib/agent-effort.mjs";
 import { checkAgentReadiness } from "../lib/agent-readiness.mjs";
 import { projectRuntimePath, setupSandbox } from "../lib/sandbox-setup.mjs";
 import { setupPostgresStore } from "../lib/postgres-setup.mjs";
@@ -67,7 +68,8 @@ function writeError(io, text) {
 
 function agentSelectionLabel(selection) {
   const agent = AGENT_LABELS[selection.adapterId] ?? selection.adapterId;
-  return selection.requestedModel ? `${agent} · ${selection.requestedModel}` : agent;
+  const model = selection.requestedModel ? `${agent} · ${selection.requestedModel}` : agent;
+  return selection.settings?.effort ? `${model} · ${selection.settings.effort} effort` : model;
 }
 
 function scoringLabel(authorities) {
@@ -169,10 +171,11 @@ const HELP_TEXT = Object.freeze({
   ].join("\n"),
   init: [
     "Usage:",
-    "  hurdle init [directory] [--agent claude-code|codex] [--example copy-message|together-api]",
+    "  hurdle init [directory] [--agent claude-code|codex] [--example copy-message|together-api] [--model MODEL] [--effort LEVEL]",
     "",
     "Create a starter evaluation. The default directory is `evals`.",
-    "The destination must not already exist.",
+    "The destination must not already exist; its parent directory must exist.",
+    "Starters pin Claude Opus 5.5 or GPT-6.1 Sol with medium reasoning effort.",
     "",
     "Credentials come from .env.local or exported environment variables.",
     "Interactive Agent logins are not inherited. Claude Code uses",
@@ -182,6 +185,8 @@ const HELP_TEXT = Object.freeze({
     "Options:",
     "  --agent ID         Choose Claude Code (default) or Codex",
     "  --example NAME     Choose copy-message (default) or Together API demo",
+    "  --model MODEL      Override the starter Agent model",
+    "  --effort LEVEL     low, medium (default), high, xhigh, or max",
     "  -h, --help         Show this help",
   ].join("\n"),
   setup: [
@@ -558,7 +563,8 @@ async function runCliMain(argv, io, dependencies) {
   }
 
   if (command === "init") {
-    let directory = "evals", agent = "claude-code", example = "copy-message", directorySeen = false, agentSeen = false, exampleSeen = false;
+    let directory = "evals", agent = "claude-code", example = "copy-message", model, effort = "medium", directorySeen = false, agentSeen = false, exampleSeen = false;
+    const seenOptions = new Set();
     for (let index = 0; index < args.length; index++) {
       if (args[index] === "--agent" && !agentSeen) {
         agent = args[++index];
@@ -568,15 +574,26 @@ async function runCliMain(argv, io, dependencies) {
         example = args[++index];
         exampleSeen = true;
         if (!["copy-message", "together-api"].includes(example)) return argumentError("--example must be copy-message or together-api.", io).exitCode;
+      } else if (["--model", "--effort"].includes(args[index]) && !seenOptions.has(args[index])) {
+        const option = args[index];
+        const value = args[++index];
+        if (!value || value.startsWith("-") || !value.trim()) return argumentError(`Option '${option}' requires a value.`, io).exitCode;
+        seenOptions.add(option);
+        if (option === "--model") model = value.trim();
+        else {
+          if (!isAgentEffort(value)) return argumentError("--effort must be low, medium, high, xhigh, or max.", io).exitCode;
+          effort = value;
+        }
       } else if (!args[index].startsWith("-") && !directorySeen) {
         directory = args[index];
         directorySeen = true;
       } else {
-        return argumentError("Use init [directory] [--agent claude-code|codex] [--example copy-message|together-api].", io).exitCode;
+        return argumentError("Use init [directory] [--agent claude-code|codex] [--example copy-message|together-api] [--model MODEL] [--effort LEVEL].", io).exitCode;
       }
     }
     const destination = resolve(io.cwd, directory);
-    const result = await dependencies.initializeSuite({ destination, agent, example });
+    model ??= STARTER_AGENT_MODELS[agent];
+    const result = await dependencies.initializeSuite({ destination, agent, example, model, effort });
     if (!result.ok) {
       printDiagnostics(result.diagnostics, io);
       return 1;
@@ -587,6 +604,8 @@ async function runCliMain(argv, io, dependencies) {
       + terminalStatus("pass", "Evaluation created", io.stdout) + "\n"
       + runFact("Suite", suite, { useColor })
       + runFact("Agent", AGENT_LABELS[agent], { useColor })
+      + runFact("Model", model, { useColor })
+      + runFact("Effort", effort, { useColor })
       + (example === "together-api" ? runFact("Needs", "E2B + TOGETHER_API_KEY", { useColor }) : "")
       + runFact("Auth", ".env.local or shell · see npx hurdle help init", { useColor })
       + runFact("Usage", example === "together-api" ? "Agent, Together, and E2B may be billed" : "Agent may be billed", { useColor })
@@ -698,7 +717,8 @@ async function runCliMain(argv, io, dependencies) {
       const conditions = options.conditionIds.length || Object.keys(resolvedPlan.value.definition.conditions).length;
       io.stdout.write(terminalStatus("pass", "Suite valid", io.stdout) + "\n"
         + runFact("Suite", options.suite, { useColor })
-        + runFact("Plan", `${selectedTaskIds.length} ${plural(selectedTaskIds.length, "task")} · ${conditions} ${plural(conditions, "condition")}`, { useColor }));
+        + runFact("Plan", `${selectedTaskIds.length} ${plural(selectedTaskIds.length, "task")} · ${conditions} ${plural(conditions, "condition")}`, { useColor })
+        + runFact("Agent", options.agentSelections.map(agentSelectionLabel).join(", "), { useColor }));
       if (options.offline) {
         io.stdout.write("\n" + terminalStatus("warning", "Readiness not checked (--offline)", io.stdout)
           + terminalNext([suiteCommand("validate", options.suite)], io.stdout));

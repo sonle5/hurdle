@@ -22,6 +22,7 @@
     "CONTRIBUTING.md",
     ".env.example",
     "docs/authoring.md",
+    "docs/cli-testing.md",
     "docs/beta-backends.md",
     "docs/assets/readme-hero.png",
     "examples/copy-message",
