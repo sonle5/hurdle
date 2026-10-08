@@ -25,7 +25,7 @@ export function TokensDisplay({ tokens }: { tokens: { input: number; output: num
   return (
     <TooltipProvider delay={0}>
       <span className="inline-flex items-center gap-3 flex-wrap tabular-nums text-sm">
-        <TokenItem icon={ArrowUp} value={tokens.input} label="Input tokens" />
+        <TokenItem icon={ArrowUp} value={tokens.input} label="Uncached input tokens" />
         <TokenItem icon={ArrowDown} value={tokens.output} label="Output tokens" />
         <TokenItem icon={BookOpen} value={tokens.cacheRead} label="Cache read tokens" />
         <TokenItem icon={PenLine} value={tokens.cacheCreate} label="Cache write tokens" />

@@ -1,3 +1,4 @@
+import { readSessionTokenUsage, summarizeSessionTokens } from "./session-usage.mjs";
 import { withTaskPromptMessage } from "./session-prompt.mjs";
 
 export type ToolUse = {
@@ -21,6 +22,7 @@ export type MessageBlock =
 export type ParsedMessage = {
   uuid: string;
   parentUuid: string | null;
+  providerMessageId?: string;
   timestamp: string;
   role: "user" | "assistant";
   msgType: string;
@@ -48,7 +50,7 @@ export type SessionStats = {
     cacheCreate: number;
     totalIn: number;
   };
-  costUsd: number; // Opus 4.6 pricing
+  costUsd: number; // Reported cost, or a historical estimate when unavailable
   firstTimestamp: string;
   lastTimestamp: string;
   skillInjections: number;
@@ -203,7 +205,7 @@ const PRICE_OUTPUT = 75;
 const PRICE_CACHE_READ = 1.5;
 const PRICE_CACHE_CREATE = 18.75;
 
-export function computeStats(messages: ParsedMessage[]): SessionStats {
+export function computeStats(messages: ParsedMessage[], reportedUsage: unknown = null): SessionStats {
   let userMessages = 0;
   let assistantMessages = 0;
   let toolCalls = 0;
@@ -216,7 +218,7 @@ export function computeStats(messages: ParsedMessage[]): SessionStats {
   let model: string | null = null;
   let firstTimestamp = "";
   let lastTimestamp = "";
-  const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, totalIn: 0 };
+  const tokens = summarizeSessionTokens(messages, reportedUsage);
 
   for (const m of messages) {
     if (m.timestamp) {
@@ -254,16 +256,9 @@ export function computeStats(messages: ParsedMessage[]): SessionStats {
           }
         }
       }
-      if (m.usage) {
-        tokens.input += m.usage.input_tokens || 0;
-        tokens.output += m.usage.output_tokens || 0;
-        tokens.cacheRead += m.usage.cache_read_input_tokens || 0;
-        tokens.cacheCreate += m.usage.cache_creation_input_tokens || 0;
-      }
     }
   }
 
-  tokens.totalIn = tokens.input + tokens.cacheRead + tokens.cacheCreate;
   const costUsd =
     (tokens.input * PRICE_INPUT +
       tokens.output * PRICE_OUTPUT +
@@ -392,6 +387,8 @@ export function parseSessionFromJsonl(
   // just inline the parsing logic from parseSessionJsonl
   const format = detectSessionFormat(lines[0]);
   let messages: ParsedMessage[];
+  let reportedUsage: unknown = null;
+  let reportedCost: number | null = null;
   if (format === "pi") {
     messages = parsePiSessionJsonl(lines);
   } else {
@@ -399,6 +396,12 @@ export function parseSessionFromJsonl(
     messages = [];
     for (const line of lines) {
       const obj = JSON.parse(line);
+      if (obj.type === "result") {
+        // Final usage includes completed output counts absent from partial
+        // assistant frames. Do not add these totals to per-message snapshots.
+        reportedUsage = readSessionTokenUsage(obj.usage) ? obj.usage : null;
+        reportedCost = typeof obj.total_cost_usd === "number" && Number.isFinite(obj.total_cost_usd) && obj.total_cost_usd >= 0 ? obj.total_cost_usd : null;
+      }
       const msg = obj.message;
       if (!msg) continue;
       const role = msg.role as string;
@@ -430,6 +433,7 @@ export function parseSessionFromJsonl(
       }
       messages.push({
         uuid: obj.uuid,
+        providerMessageId: typeof msg.id === "string" && msg.id ? msg.id : undefined,
         parentUuid: obj.parentUuid ?? null,
         timestamp: obj.timestamp,
         role: role as "user" | "assistant",
@@ -445,7 +449,8 @@ export function parseSessionFromJsonl(
     prompt: meta.taskPrompt,
     timestamp: messages[0]?.timestamp ?? meta.startedAt ?? "",
   }) as ParsedMessage[];
-  const stats = computeStats(messages);
+  const stats = computeStats(messages, reportedUsage);
+  if (reportedCost !== null) stats.costUsd = reportedCost;
 
   const outcome = {
     passed: meta.result === "pass" ? true : meta.result === "fail" ? false : null,
