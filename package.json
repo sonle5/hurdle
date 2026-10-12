@@ -1,6 +1,6 @@
 {
   "name": "hurdle",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Run and inspect evidence-backed evaluations for coding agents.",
   "type": "module",
   "bin": {
