@@ -1,4 +1,4 @@
-![Hurdle. Test how Claude Code and Codex use your API, SDK, or docs.](https://cdn.jsdelivr.net/npm/hurdle@0.2.8/docs/assets/readme-hero.png)
+![Hurdle. Test how Claude Code and Codex use your API, SDK, or docs.](https://cdn.jsdelivr.net/npm/hurdle@0.2.9/docs/assets/readme-hero.png)
 
 # Hurdle — Together Agent Evals
 
