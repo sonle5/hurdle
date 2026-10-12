@@ -31,7 +31,10 @@ For Codex, install its CLI, use `npx hurdle init --agent codex`, and set `OPENAI
 See [authoring](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/authoring.md) for other authentication options.
 
 Starters pin Claude Opus 5.5 or GPT-6.1 Sol with medium reasoning effort.
-Use `init --model MODEL --effort LEVEL` to choose another configuration.
+Use `init --model MODEL --effort LEVEL` to choose another configuration, or
+`run --model MODEL` to override the selected runner’s model for one run.
+Use `models --agent claude-code` or `models --agent codex` for up to 10 recent
+text/code choices. Add `--all` for the full catalog.
 
 ## Together sandbox
 

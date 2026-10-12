@@ -317,7 +317,7 @@ test("hurdle run composes Codex and maps CI auth into redacted canonical evidenc
     "--agent",
     "codex",
     "--model",
-    "gpt-test",
+    "future-codex-2099",
     "--store",
     storeRoot,
   ], {
@@ -339,7 +339,8 @@ test("hurdle run composes Codex and maps CI auth into redacted canonical evidenc
   assert.equal(record.state, "complete");
   assert.equal(record.verdict, "pass");
   assert.equal(record.execution.adapterId, "codex");
-  assert.deepEqual(record.snapshot.agent, { adapterId: "codex", requestedModel: "gpt-test", settings: { effort: "medium" } });
+  assert.deepEqual(record.snapshot.agent, { adapterId: "codex", requestedModel: "future-codex-2099", settings: { effort: "medium" } });
+  assert.match(readFileSync(join(cwd, "evals/example.suite.mjs"), "utf8"), /gpt-test/);
   assert.equal(record.execution.sessionId, "codex-cli-session");
   assert.deepEqual(record.metrics.common, {
     inputTokens: 7,
@@ -375,7 +376,7 @@ test("hurdle run composes Codex and maps CI auth into redacted canonical evidenc
     "-c",
     'model_reasoning_effort="medium"',
     "--model",
-    "gpt-test",
+    "future-codex-2099",
     "-",
   ]);
   assert.match(commandItem.prompt, /write its exact contents to `answer\.txt`/);

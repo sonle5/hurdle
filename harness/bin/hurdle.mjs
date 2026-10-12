@@ -43,6 +43,8 @@ import { setupPostgresStore } from "../lib/postgres-setup.mjs";
 import { createSetupOutput } from "../lib/setup-output.mjs";
 import { createViewerOnboarding } from "../lib/viewer-onboarding.mjs";
 import { defaultProjectSuite, discoverProjectSuites, resolveProjectSuite } from "../lib/project-suites.mjs";
+import { selectSuiteAgents } from "../lib/suite-agent-selection.mjs";
+import { discoverModels, selectCatalogModels, ModelDiscoveryError } from "../lib/model-discovery.mjs";
 import {
   terminalUsesColor, paintTerminal as paintRunOutput, terminalFact as runFact,
   terminalHeader, terminalStatus, terminalNote, terminalNext, suiteCommand, quoteCommandArgument, cliExecutable,
@@ -117,6 +119,7 @@ const PRODUCTION_DEPENDENCIES = Object.freeze({
   env: process.env,
   environmentSource: "provided environment",
   checkAgentReadiness,
+  discoverModels,
   processTarget: process,
   viewerCwd: fileURLToPath(new URL("../../", import.meta.url)),
   initializeSuite,
@@ -167,6 +170,7 @@ const HELP_TEXT = Object.freeze({
     "Commands:",
     "  init [directory]   Create a starter evaluation",
     "  suites [suite]     List Suites or inspect one (alias: ls)",
+    "  models             Discover model IDs for an Agent",
     "  setup [suite]      Configure the project Runtime",
     "  runtime            Show the project Runtime configuration",
     "  validate [suite]   Validate a Suite and check Agent readiness",
@@ -282,25 +286,22 @@ const HELP_TEXT = Object.freeze({
     "  --offline          Check Suite definitions only; no readiness checks",
     "  --runtime FILE     Check the Runtime Profile used by run",
     "  --agent ID         Check one Agent selected by the Suite",
-    "  --model MODEL      Filter Suite model selections",
+    "  --model MODEL      Override the selected runner's model",
     "  -h, --help         Show this help",
   ].join("\n"),
   run: [
     "Usage:",
     "  hurdle run [suite] [options]",
     "",
-    "Run a .suite.mjs Suite by path or unique short name from `hurdle suites`.",
-    "With no selection, use evals/example.suite.mjs, example.suite.mjs,",
-    "or the sole project Suite (bundled examples are not selected automatically).",
-    "Uses the project Runtime saved by setup unless overridden.",
-    "Without a saved Runtime, use Local execution and filesystem storage.",
-    "Agent and model options filter selections already defined by the Suite.",
+    "Run a Suite by name or path. Omit it to use the project default.",
+    "Uses your saved Runtime, or Local execution and filesystem storage.",
     "",
     "Selection:",
     "  --task ID                   Select a Task; repeat to select more",
     "  --condition ID              Select a Condition; repeat to select more",
-    "  --agent claude-code|codex   Select an Agent",
-    "  --model MODEL               Select a model",
+    "  --agent claude-code|codex   Filter Suite Agents",
+    "  --model MODEL               Override the selected runner's model",
+    "                              Use --model -h for model guidance",
     "",
     "Execution:",
     `  --concurrency N             Run up to N cells at once (1–100; default: ${DEFAULT_RUN_CONCURRENCY})`,
@@ -319,6 +320,26 @@ const HELP_TEXT = Object.freeze({
     "",
     "`--runtime` cannot be combined with `--environment`,",
     "`--environment-settings`, or `--store`.",
+  ].join("\n"),
+  models: [
+    "Usage:",
+    "  hurdle models --agent claude-code|codex [--all] [--json]",
+    "",
+    "List up to 10 recent text/code models from upstream catalogs.",
+    "Newest first by catalog date; undated entries retain upstream order.",
+    "Claude uses the Anthropic Models API and requires ANTHROPIC_API_KEY.",
+    "Codex uses its CLI catalog plus OpenAI's live catalog when an API key is set.",
+    "Provider-only IDs have unverified runner compatibility.",
+    "No evaluation runs. Catalog entries do not verify account access.",
+    "",
+    "Options:",
+    "  --agent ID         Select claude-code or codex",
+    "  --all              Show the full catalog, including older and other models",
+    "  --json             Emit one JSON result",
+    "  -h, --help         Show this help",
+    "",
+    "You can supply any supported ID with --model, including unlisted models.",
+    "New models may require an updated Agent CLI or sandbox image.",
   ].join("\n"),
   version: [
     "Usage:",
@@ -340,11 +361,11 @@ const HELP_TEXT = Object.freeze({
   ].join("\n"),
 });
 
-function help(topic, io) {
+function help(topic, io, selection = null) {
   const body = topic === "main" ? HELP_TEXT[topic].slice("Hurdle\n\n".length) : HELP_TEXT[topic];
   io.stdout.write(terminalHeader(io.stdout).trimStart() + `${body}\n`);
   if (["setup", "run", "validate"].includes(topic)) {
-    io.stdout.write(projectSuiteHelp(topic, io.cwd));
+    io.stdout.write(projectSuiteHelp(topic, io.cwd, selection));
   }
   return 0;
 }
@@ -357,13 +378,15 @@ function suiteSelection(suite) {
   return suite.ambiguous || suite.name.startsWith("-") ? suite.path : suite.name;
 }
 
-function projectSuiteHelp(command, cwd) {
+function projectSuiteHelp(command, cwd, selectedSuite = null) {
   const executable = projectExecutable(cwd);
   let suites;
   try { suites = discoverProjectSuites(cwd); }
   catch { return `\nList Suites:\n  ${executable} suites\n\nOr select an explicit .suite.mjs path.\n`; }
   const defaultPath = defaultProjectSuite(cwd, suites);
-  const example = suites.find(suite => suite.path === defaultPath) ?? suites.find(suite => !suite.bundled) ?? suites[0];
+  const selected = selectedSuite ? resolveProjectSuite(cwd, selectedSuite) : null;
+  const example = suites.find(suite => suite.path === selected?.path)
+    ?? suites.find(suite => suite.path === defaultPath) ?? suites.find(suite => !suite.bundled) ?? suites[0];
   const selection = example ? quoteCommandArgument(suiteSelection(example)) : "evals/example.suite.mjs";
   const suiteRows = suites.map(suite => `  ${suiteSelection(suite).padEnd(22)} ${suite.path}${suite.path === defaultPath ? "  (default)" : ""}`);
   const heading = example ? `Examples using ${suiteSelection(example)}:` : "Examples after creating a Suite with init:";
@@ -386,6 +409,62 @@ function selectProjectSuite(selection, io, report = message => argumentError(mes
     ? `Suite name '${selection}' is ambiguous. Use one of these paths:\n\n${result.matches.map(suite => `  ${quoteCommandArgument(suite.path)}`).join("\n")}`
     : `Unknown Suite name '${selection}'. Pass a .suite.mjs path or list the available names.`;
   return report(`${message}\n\n  ${projectExecutable(io.cwd)} suites`);
+}
+
+function suiteModelRows(agents) {
+  return [...new Set(agents.map(agent => {
+    const model = agent.requestedModel ?? "(runner default; omit --model)";
+    const effort = agent.settings?.effort ? ` · ${agent.settings.effort} effort` : "";
+    return `  ${model} · ${AGENT_LABELS[agent.adapterId] ?? agent.adapterId}${effort}`;
+  }))];
+}
+
+function writeModelHelp(command, options, agents, io) {
+  const executable = projectExecutable(io.cwd);
+  const runners = [...new Set(agents.map(agent => agent.adapterId))];
+  const sample = agents.find(agent => agent.requestedModel !== null) ?? agents[0];
+  const runner = options.agent ?? (runners.length > 1 ? sample?.adapterId : null);
+  const example = `${executable} ${command} ${quoteCommandArgument(options.suite ?? "SUITE")}${runner ? ` --agent ${runner}` : ""} --model ${quoteCommandArgument(sample?.requestedModel ?? "MODEL")}`;
+  const choices = options.agent ? [options.agent] : runners.length ? runners : Object.keys(FIRST_PARTY_AGENT_ADAPTERS);
+  io.stdout.write(terminalHeader(io.stdout)
+    + `Usage:\n  hurdle ${command} [suite] --model MODEL\n\n`
+    + "Use any model ID or alias supported by the selected runner.\n\n"
+    + (agents.length ? `Suite defaults (${options.suite}):\n${suiteModelRows(agents).join("\n")}\n\n` : "")
+    + `Example:\n  ${example}\n\n`
+    + `Discover model IDs:\n${choices.map(agent => `  ${executable} models --agent ${agent}`).join("\n")}\n\n`
+    + "With both runners in the Suite, select one with --agent claude-code or --agent codex.\n");
+  return 0;
+}
+
+async function modelHelp(command, args, io, dependencies) {
+  const index = args.indexOf("--model");
+  if (args.lastIndexOf("--model") !== index) return argumentError("Option '--model' may only be supplied once.", io).exitCode;
+  const parsed = parseRunArguments(args.filter((arg, position) => position !== index && !["-h", "--help"].includes(arg)), io, { validation: command === "validate" });
+  if (!parsed.ok) return parsed.exitCode;
+  const options = parsed.values;
+  if (options.suite === null) {
+    const defaultSuite = defaultSuiteArgument(io.cwd);
+    if (!existsSync(resolve(io.cwd, defaultSuite))) return writeModelHelp(command, options, [], io);
+    options.suite = defaultSuite;
+  }
+  const selected = selectProjectSuite(options.suite, io);
+  if (!selected.ok) return selected.exitCode;
+  let authored;
+  try {
+    try { authored = await dependencies.resolveV1Suite({ suitePath: resolve(io.cwd, selected.suite) }); }
+    catch (error) {
+      if (!(error instanceof V1AuthoringError)) throw error;
+      printDiagnostics([error], io);
+      return 1;
+    }
+    if (!authored.ok) {
+      printDiagnostics(authored.diagnostics, io);
+      return 1;
+    }
+    const agents = authored.defaults.agentSelections.filter(agent => options.agent === undefined || agent.adapterId === options.agent);
+    if (!agents.length) return argumentError(`No Suite Agent matches '${options.agent}'.\n\nSuite models:\n${suiteModelRows(authored.defaults.agentSelections).join("\n")}`, io).exitCode;
+    return writeModelHelp(command, options, agents, io);
+  } finally { authored?.dispose?.(); }
 }
 
 function missingRunSuite(command, io, suite = null) {
@@ -483,6 +562,74 @@ async function inspectProjectSuite(selection, io, dependencies, { json, runtimeP
 
 function hasHelpFlag(args) {
   return args.some((argument) => ["--help", "-h"].includes(argument));
+}
+
+function modelsError(io, json, code, message, exitCode = 1) {
+  if (json) io.stdout.write(`${JSON.stringify({ schemaVersion: 1, command: "models", models: [], error: { code, message } })}\n`);
+  else writeError(io, `hurdle [${code}] ${message}\n`);
+  return exitCode;
+}
+
+function parseModelsArguments(args, io) {
+  const json = args.includes("--json");
+  const invalid = message => ({ ok: false, exitCode: modelsError(io, json, "argument-error", message, 2) });
+  const seen = new Set();
+  let agent;
+  for (let index = 0; index < args.length; index++) {
+    const option = args[index];
+    if (!["--agent", "--all", "--json"].includes(option)) return invalid("Use models --agent claude-code|codex [--all] [--json].");
+    if (seen.has(option)) return invalid(`${option} may only be supplied once.`);
+    seen.add(option);
+    if (option === "--agent") agent = args[++index];
+  }
+  if (!Object.hasOwn(FIRST_PARTY_AGENT_ADAPTERS, agent)) return invalid("Select an Agent: models --agent claude-code|codex [--all] [--json].");
+  return { ok: true, agent, json, all: seen.has("--all") };
+}
+
+async function showModels(args, io, dependencies) {
+  const parsed = parseModelsArguments(args, io);
+  if (!parsed.ok) return parsed.exitCode;
+  const controller = new AbortController();
+  let interrupted;
+  const interrupt = signal => { interrupted = signal; controller.abort(); };
+  const onSigint = () => interrupt("SIGINT");
+  const onSigterm = () => interrupt("SIGTERM");
+  dependencies.processTarget.once("SIGINT", onSigint);
+  dependencies.processTarget.once("SIGTERM", onSigterm);
+  try {
+    const catalog = selectCatalogModels(await dependencies.discoverModels({ agent: parsed.agent, env: dependencies.env, signal: controller.signal }), { all: parsed.all });
+    if (controller.signal.aborted) throw new ModelDiscoveryError("models.cancelled", "Model discovery was cancelled.");
+    if (parsed.json) {
+      io.stdout.write(`${JSON.stringify({ schemaVersion: 1, command: "models", ...catalog })}\n`);
+      return 0;
+    }
+    io.stdout.write(terminalHeader(io.stdout)
+      + runFact("Agent", AGENT_LABELS[parsed.agent], { useColor: runOutputUsesColor(io) })
+      + runFact("Catalog", catalog.source, { useColor: runOutputUsesColor(io) })
+      + runFact("Models", parsed.all ? "full catalog" : "recent text/code choices · up to 10", { useColor: runOutputUsesColor(io) }) + "\n");
+    if (!catalog.models.length) io.stdout.write("No models returned. You can still supply --model MODEL directly.\n");
+    else {
+      const width = Math.max(8, ...catalog.models.map(model => model.id.length));
+      io.stdout.write(`  ${"Model ID".padEnd(width)}  Name / reported effort\n`);
+      for (const model of catalog.models) {
+        const effort = model.reasoningEfforts?.length ? ` · effort: ${model.reasoningEfforts.join(", ")}` : "";
+        io.stdout.write(`  ${model.id.padEnd(width)}  ${model.name}${model.isDefault ? " (runner default)" : ""}${effort}${model.lifecycle && model.lifecycle !== "active" ? ` · ${model.lifecycle}` : ""}\n`);
+      }
+    }
+    if (!parsed.all) io.stdout.write(`\nFull catalog: ${projectExecutable(io.cwd)} models --agent ${parsed.agent} --all\n`);
+    if (catalog.models.some(model => model.compatibility === "provider-catalog")) io.stdout.write("\nProvider-listed models may require a newer Agent CLI; runner compatibility is unverified.\n");
+    io.stdout.write("\nAccount access is checked during execution. Sandbox runner versions can differ.\n");
+    for (const warning of catalog.warnings) io.stdout.write(`${warning}\n`);
+    io.stdout.write(`\nUse ${projectExecutable(io.cwd)} run SUITE --model MODEL\n\n`);
+    return 0;
+  } catch (error) {
+    const code = error instanceof ModelDiscoveryError ? error.code : "models.unavailable";
+    const message = error instanceof ModelDiscoveryError ? error.message : "Model discovery failed. Retry or supply --model MODEL directly.";
+    return modelsError(io, parsed.json, code, message, interrupted === "SIGINT" ? 130 : interrupted === "SIGTERM" ? 143 : 1);
+  } finally {
+    dependencies.processTarget.removeListener("SIGINT", onSigint);
+    dependencies.processTarget.removeListener("SIGTERM", onSigterm);
+  }
 }
 
 function usage(io) {
@@ -689,6 +836,10 @@ function parseRunArguments(args, io, { validation = false } = {}) {
   if (values.agent !== undefined && !Object.hasOwn(FIRST_PARTY_AGENT_ADAPTERS, values.agent)) {
     return argumentError("Agent filter must use 'claude-code' or 'codex'.", io);
   }
+  if (values.model !== undefined) {
+    if (!values.model.trim()) return argumentError("--model requires a nonblank model ID.", io);
+    values.model = values.model.trim();
+  }
   if (!["local", "e2b", "together"].includes(values.environment)) {
     return argumentError("Execution Environment must be 'local', 'e2b', or 'together'.", io);
   }
@@ -845,11 +996,16 @@ async function runCliMain(argv, io, dependencies) {
     }
     return usage(io);
   }
-  if (["init", "suites", "setup", "runtime", "validate", "run", "view"].includes(command) && hasHelpFlag(args)) {
-    return help(command, io);
+  if (["init", "suites", "models", "setup", "runtime", "validate", "run", "view"].includes(command) && hasHelpFlag(args)) {
+    const modelIndex = args.indexOf("--model");
+    if (["run", "validate"].includes(command) && modelIndex >= 0 && ["-h", "--help"].includes(args[modelIndex + 1])) {
+      return modelHelp(command, args, io, dependencies);
+    }
+    return help(command, io, args[0]?.startsWith("-") ? null : args[0]);
   }
 
   if (command === "runtime") return showRuntimeInfo(args, io);
+  if (command === "models") return showModels(args, io, dependencies);
 
   if (command === "suites") {
     let selection, runtimePath, json = false;
@@ -1052,12 +1208,13 @@ async function runCliMain(argv, io, dependencies) {
       }
       if (options.taskIds.length === 0) options.taskIds = [...authoredSuite.defaults.taskIds];
       if (options.conditionIds.length === 0) options.conditionIds = [...authoredSuite.defaults.conditionIds];
-      options.agentSelections = authoredSuite.defaults.agentSelections.filter((agent) =>
-        (options.agent === undefined || agent.adapterId === options.agent)
-        && (options.model === undefined || agent.requestedModel === options.model));
-      if (options.agentSelections.length === 0) {
+      try {
+        options.agentSelections = selectSuiteAgents(authoredSuite.defaults.agentSelections, options);
+      } catch (error) {
+        if (!(error instanceof RunSelectionInputError)) throw error;
+        const models = suiteModelRows(authoredSuite.defaults.agentSelections).join("\n");
         authoredSuite.dispose();
-        return argumentError("No Suite Agent matches the selected agent/model filters. Edit the Suite to change its matrix.", io).exitCode;
+        return argumentError(`${error.message}\n\nSuite Agents:\n${models}`, io).exitCode;
       }
       options.repeat = authoredSuite.defaults.repeat;
       options.concurrency ??= authoredSuite.defaults.concurrency ?? DEFAULT_RUN_CONCURRENCY;
@@ -1600,9 +1757,14 @@ export async function main(argv, io = {
   if (!argv.length || ["runtime", "suites", "ls", "help", "--help", "-h"].includes(argv[0]) || hasHelpFlag(argv.slice(1))) {
     return createFrameworkCli({ env: {} }).main(argv, io);
   }
+  if (argv[0] === "models") {
+    const parsed = parseModelsArguments(argv.slice(1), io);
+    if (!parsed.ok) return parsed.exitCode;
+  }
   let configured;
   try { configured = loadProjectEnvironment(io.cwd); }
   catch (error) {
+    if (argv[0] === "models") return modelsError(io, argv.includes("--json"), "models.environment-unavailable", "Could not read .env.local. Use a readable regular file, then retry.");
     if (argv[0] !== "setup") throw error;
     return createSetupOutput(io, { json: argv.includes("--json") }).finish(1, {
       code: "setup.environment-unavailable",

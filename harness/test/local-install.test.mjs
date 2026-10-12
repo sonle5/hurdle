@@ -323,6 +323,16 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
 
   const customInitialized = cli("init", "custom-evals", "--agent", "codex", "--model", "gpt-6.1-sol", "--effort", "high");
   assert.equal(customInitialized.status, 0, customInitialized.stderr);
+  const modelsHelp = cli("models", "--help");
+  assert.equal(modelsHelp.status, 0, modelsHelp.stderr);
+  assert.match(modelsHelp.stdout, /upstream catalogs/);
+  const modelHelp = cli("run", "custom-evals", "--model", "-h");
+  assert.equal(modelHelp.status, 0, modelHelp.stderr);
+  assert.match(modelHelp.stdout, /Suite defaults \(custom-evals\)/);
+  assert.match(modelHelp.stdout, /npx hurdle models --agent codex/);
+  const overridden = cli("validate", "custom-evals", "--offline", "--model", "future-codex-2099");
+  assert.equal(overridden.status, 0, overridden.stderr);
+  assert.match(overridden.stdout, /future-codex-2099 · high effort/);
   assert.match(cli("validate", "custom-evals/example.suite.mjs", "--offline").stdout, /gpt-6\.1-sol · high effort/);
 
   const missingBackend = spawnSync(process.execPath, [cliPath, "run", "--environment", "e2b"], {
@@ -416,6 +426,14 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   const response = await fetch(`http://127.0.0.1:${port}`);
   assert.equal(response.status, 200);
   await response.body?.cancel();
+
+  const [runId] = readdirSync(join(consumerRoot, "results", "runs"));
+  assert.ok(runId, "the packaged run must save a result");
+  const runResponse = await fetch(`http://127.0.0.1:${port}/s/canonical--${runId}`);
+  const runHtml = await runResponse.text();
+  assert.equal(runResponse.status, 200, runHtml);
+  assert.match(runHtml, /copy-message/, "the packaged Viewer must render the saved run");
+  assert.doesNotMatch(runHtml, /__next_error__/);
 
   child.kill("SIGINT");
   const [exitCode, signal] = await waitForClose(child);

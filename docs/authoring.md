@@ -17,7 +17,42 @@ npx hurdle init --agent codex --model gpt-6.1-sol --effort medium
 ```
 
 `init --model` writes a model into the Suite. `run --model` and
-`validate --model` only filter models already declared by the Suite.
+`validate --model` override the selected runner’s model for that invocation.
+Use any model ID or alias supported by Claude Code or Codex; Hurdle has no
+model allowlist. With both runners in a Suite, select one with `--agent`.
+Effort settings are preserved, and identical selections after the override run
+once. Use `run SUITE --model -h` to see guidance and the Suite defaults.
+The runner/provider determines model availability and account access.
+
+Discover copyable model IDs and reported reasoning settings:
+
+```sh
+npx hurdle models --agent claude-code
+npx hurdle models --agent codex --json
+npx hurdle models --agent codex --all
+```
+
+By default, discovery shows up to 10 recent text/code choices, newest first by
+the provider's catalog date (Anthropic release date or OpenAI creation time).
+Undated entries retain upstream order. Duplicate dated snapshots are omitted
+when a shorter ID is present, and deprecated models are omitted. Add `--all`
+for the full catalog, including older models and other model types. `--json`
+uses the same selection; combine it with `--all` to retrieve every entry.
+
+Discovery performs no inference and refreshes upstream catalogs each time.
+Claude uses the Anthropic Models API with `ANTHROPIC_API_KEY`; OAuth-only
+catalog discovery is unavailable. Codex reads the local CLI catalog and also
+queries OpenAI's live Models API when an API key is selected. The CLI catalog
+may be cached, and provider-only entries have unverified runner compatibility;
+OpenAI's provider catalog lacks coding/modality metadata, so its default
+shortlist uses a conservative naming heuristic to omit obvious audio, image,
+search, embedding and fine-tuned IDs. This is not a compatibility check;
+unfamiliar provider IDs remain discoverable with `--all`. An explicit
+`CODEX_ACCESS_TOKEN` takes precedence, so discovery does not query a different
+API-key account in that case. Catalog entries do not verify execution access.
+New releases may require updating the Agent CLI or sandbox image. Discovery
+never changes the pinned Suite defaults or restricts an explicit `--model` ID.
+`models --help` and `run SUITE --model -h` remain offline.
 
 An evaluation has two parts: a **Suite** selects what to run, and each **Task**
 defines a prompt and its checks.
@@ -45,7 +80,7 @@ reported as unverified; these checks do not prove model access or billing
 readiness. `run` repeats the same checks before opening a result store or
 launching an agent. A rejected credential stops the command with recovery steps.
 
-Use the same `--runtime FILE` and agent/model filters as your run to check the
+Use the same `--runtime FILE` and Agent filter and model override as your run to check the
 configuration you intend to execute.
 
 Use `npx hurdle setup` to configure the project Runtime: execution, result
@@ -245,8 +280,11 @@ Results stay distinct:
 npx hurdle run --view
 ```
 
-Use `--task`, `--condition`, `--agent`, or `--model` to narrow selections already
-defined by the Suite. These flags do not add new Suite entries.
+Use `--task`, `--condition`, or `--agent` to narrow the Suite matrix.
+Use `--model MODEL` to override the selected runner’s model without editing
+the Suite. With no override, all declared model configurations run.
+Different effort configurations remain separate; identical overridden
+configurations run once. The effective model is saved in each Run snapshot.
 
 Override the Suite concurrency for one invocation:
 

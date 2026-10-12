@@ -87,6 +87,17 @@ must agree. Init must report the generated model and effort. Offline validation
 must show the correct Agent configuration and explicitly skip readiness.
 No agent, judge, E2B resource, or model inference should run.
 
+## Model discovery and overrides
+
+- [ ] `hurdle run together-api --model -h` — concise model guidance, the selected Suite defaults and a discovery command; no credentials or provider calls.
+- [ ] `hurdle models --agent claude-code` — up to 10 recent active models, newest first, with one provider compatibility note; no inference.
+- [ ] `hurdle models --agent codex --json` — up to 10 recent text/code choices in one JSON result; native/provider compatibility metadata remains available. A working API key should include newer provider IDs even if the native list is stale.
+- [ ] `hurdle models --agent codex --all` and `hurdle models --agent claude-code --all --json` — retrieve the full catalogs, including older models, dated snapshots and other model types.
+- [ ] A rejected OpenAI key identifies the authentication failure and warns that the fallback catalog may omit newer models.
+- [ ] `hurdle validate codex-evals --offline --model arbitrary-new-model-id` — accepts a nonblank override without a model allowlist or inference.
+- [ ] With both runners in a Suite, `hurdle validate --offline --model arbitrary-new-model-id` exits 2 and asks for `--agent`; selecting the declared runner accepts the override.
+- [ ] Discovery failure does not prevent using an explicit model ID. Actual support/account access is checked during execution.
+
 ## Expected errors
 
 Run each command separately, followed immediately by `echo $?`:
@@ -98,7 +109,7 @@ hurdle init bad-evals --model
 hurdle run --task missing
 hurdle run --condition missing
 hurdle run --agent codex
-hurdle run --model missing
+hurdle run --model
 hurdle run --environment-settings '[]'
 hurdle view --store one --runtime two
 hurdle setup --json --interactive

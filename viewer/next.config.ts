@@ -3,6 +3,8 @@ import path from "node:path";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Bundle Shiki: the portable npm runtime relocates external dependencies.
+  transpilePackages: ["shiki"],
   outputFileTracingRoot: path.join(__dirname, ".."),
   experimental: { externalDir: true },
   webpack(config) {
