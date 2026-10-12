@@ -1,5 +1,6 @@
 "use client";
 
+import { RunCost } from "@/components/RunCost";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ChevronRight, ArrowUp, ArrowDown } from "lucide-react";
@@ -40,7 +41,8 @@ type SessionRow = {
   createdAt?: string;
   toolCalls: number | null;
   totalTokensIn: number;
-  costUsd: number;
+  costUsd: number | null;
+  costSource?: "reported" | "estimated" | "unavailable";
   needsFollowup?: boolean;
   followupReason?: string | null;
   failureAnalysis?: unknown;
@@ -79,7 +81,7 @@ export function TaskTable({ sessions }: { sessions: SessionRow[] }) {
     if (av < bv) return sortAsc ? -1 : 1;
     if (av > bv) return sortAsc ? 1 : -1;
     if (a.durationSec !== b.durationSec) return a.durationSec - b.durationSec;
-    return a.costUsd - b.costUsd;
+    return (a.costUsd ?? Infinity) - (b.costUsd ?? Infinity);
   });
 
   const toggleSort = (key: SortKey) => {
@@ -158,7 +160,7 @@ export function TaskTable({ sessions }: { sessions: SessionRow[] }) {
                 {formatTokens(s.totalTokensIn)}
               </TableCell>
               <TableCell className="text-right tabular-nums text-fg-muted py-3 w-24">
-                ${s.costUsd.toFixed(2)}
+                <RunCost value={s.costUsd} source={s.costSource} />
               </TableCell>
               <TableCell className="py-3 w-8">
                 <Link href={`/s/${s.id}`} className="text-fg-faint hover:text-foreground transition-colors">

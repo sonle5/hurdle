@@ -1,3 +1,4 @@
+import { RunCost } from "@/components/RunCost";
 import { Clock3, Database, Gauge, ShieldCheck } from "lucide-react";
 import { StatusBadge, type StatusKind } from "@/components/ui/StatusBadge";
 type DeterministicOverall = "consistent" | "violated" | "insufficient_evidence" | "not_applicable";
@@ -103,6 +104,7 @@ export function SessionReviewSummary({
   duration,
   toolCalls,
   costUsd,
+  costSource,
 }: {
   statusKind: StatusKind;
   corrections: number | null | undefined;
@@ -114,7 +116,8 @@ export function SessionReviewSummary({
   startedAt: string;
   duration: string;
   toolCalls: number;
-  costUsd: number;
+  costUsd: number | null;
+  costSource?: "reported" | "estimated" | "unavailable";
 }) {
   const deterministicLabel = deterministicOverall ? DETERMINISTIC_LABEL[deterministicOverall] : "Not checked";
   const deterministicTone = deterministicOverall ? DETERMINISTIC_TONE[deterministicOverall] : "text-fg-muted";
@@ -177,7 +180,7 @@ export function SessionReviewSummary({
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-fg-muted tabular-nums">
             <span>{runStart.zone && `${runStart.zone} · `}{duration}</span>
-            <span>{toolCalls} tools · ${costUsd.toFixed(2)}</span>
+            <span>{toolCalls} tools · <RunCost value={costUsd} source={costSource} /></span>
           </div>
         </div>
       </div>

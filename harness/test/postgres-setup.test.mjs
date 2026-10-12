@@ -1,3 +1,4 @@
+import { cliExecutable } from "../lib/terminal-output.mjs";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,6 +12,8 @@ import { PostgresMigrationError } from "../lib/postgres-migration-error.mjs";
 
 const credentialName = "HURDLE_RESULT_STORE_DATABASE_URL";
 const secret = "postgresql://example:private-password@example.test/results?sslmode=require";
+
+const sourceExecutable = cliExecutable();
 
 function fixture(t, { config, legacy = false, env = { [credentialName]: secret } } = {}) {
   const root = mkdtempSync(join(tmpdir(), "hurdle-postgres-setup-"));
@@ -77,6 +80,46 @@ test("storage setup preserves E2B, custom settings, and legacy paths without mov
   assert.deepEqual(f.runtime(), saved);
 });
 
+test("Postgres setup preserves Together and guides a selected Suite or lists ambiguous choices", async t => {
+  const config = { schemaVersion: 1, environment: { kind: "together", apiKeyEnv: "TOGETHER_API_KEY", settings: { snapshotAlias: "synthetic@v1" } }, resultStore: { kind: "local", root: "../results" } };
+  for (const json of [false, true]) for (const selected of [true, false]) {
+    const f = fixture(t, { config });
+    for (const name of ["selected", "another"]) {
+      mkdirSync(join(f.root, "evals", name), { recursive: true });
+      writeFileSync(join(f.root, "evals", name, "example.suite.mjs"), 'throw Error("Storage must not import Suites");');
+    }
+    assert.equal(await createFrameworkCli(f.dependencies).main(["setup", ...(selected ? ["selected"] : []), "--store", "postgres", ...(json ? ["--json"] : [])], f.io), 0, f.output());
+    assert.deepEqual(f.runtime().environment, config.environment);
+    const next = selected ? [`${sourceExecutable} run evals/selected/example.suite.mjs --view`] : [`${sourceExecutable} suites`];
+    if (json) assert.deepEqual(JSON.parse(f.output()).nextCommands, next);
+    else {
+      assert.match(f.output(), /Execution\s+Together sandbox/);
+      for (const command of next) assert.ok(f.output().includes(command));
+    }
+    assert.equal(f.output().includes(`${sourceExecutable} init`), false);
+  }
+});
+test("bare storage setup uses a sole Suite, lists bundled examples, or initializes a fresh folder", async t => {
+  for (const scenario of ["sole", "bundled", "empty", "occupied"]) {
+    const f = fixture(t);
+    if (scenario === "sole" || scenario === "bundled") {
+      const directory = scenario === "sole" ? "evals/smoke" : "examples/copy-message";
+      mkdirSync(join(f.root, directory), { recursive: true });
+      writeFileSync(join(f.root, directory, "example.suite.mjs"), 'throw Error("Storage must not import Suites");');
+    }
+    if (scenario === "occupied") mkdirSync(join(f.root, "evals/my-eval"), { recursive: true });
+    const cli = createFrameworkCli(f.dependencies);
+    assert.equal(await cli.main(["setup", "--store", "postgres", "--json"], f.io), 0);
+    const next = JSON.parse(f.output()).nextCommands;
+    const expected = { sole: `${sourceExecutable} run evals/smoke/example.suite.mjs --view`, bundled: `${sourceExecutable} suites`,
+      empty: `${sourceExecutable} init`, occupied: `${sourceExecutable} init evals/my-eval-2` };
+    assert.deepEqual(next, [expected[scenario]]);
+    if (scenario === "empty" || scenario === "occupied") {
+      assert.equal(await cli.main(next[0].split(" ").slice(2), f.io), 0, f.output());
+      assert.equal(await cli.main(["validate", "--offline"], f.io), 0, f.output());
+    }
+  }
+});
 test("rerunning setup preserves a custom Postgres credential name and artifact root", async t => {
   const config = { schemaVersion: 1, environment: { kind: "local" }, resultStore: { kind: "postgres", databaseUrlEnv: "CUSTOM_DB_URL", artifactRoot: "../../custom-artifacts" } };
   const f = fixture(t, { config, env: { CUSTOM_DB_URL: secret } });
@@ -105,6 +148,7 @@ test("a blank canonical database credential blocks legacy fallback before any da
   const report = JSON.parse(f.output());
   assert.equal(report.error.code, "setup.credentials-missing");
   assert.deepEqual(report.missingCredentials, [{ label: "Postgres", anyOf: [credentialName] }]);
+  assert.match(report.error.message, /Source\s+environment \(blank value\)/);
   assert.deepEqual(f.calls, []);
   assert.equal(existsSync(f.path), false);
 });
@@ -155,7 +199,10 @@ test("Postgres setup is noninteractive on a terminal and JSON exposes names with
     assert.deepEqual(report.requiredCredentials, [{ label: "Postgres", anyOf: [credentialName] }]);
     assert.equal(report.missingCredentials.length, hasCredential ? 0 : 1);
     if (hasCredential) assert.equal(report.executionEnvironment, "local");
-    else assert.equal(report.error.code, "setup.credentials-missing");
+    else {
+      assert.equal(report.error.code, "setup.credentials-missing");
+      assert.deepEqual(report.nextCommands, [`${sourceExecutable} setup --store postgres`, `${sourceExecutable} setup --store postgres --interactive`]);
+    }
     assert.doesNotMatch(f.output(), /private-password|example\.test/);
   }
 });
@@ -215,6 +262,8 @@ test("missing, invalid, or cancelled database credentials stop before connecting
     assert.equal(existsSync(f.path), false);
     assert.doesNotMatch(f.output(), /private-password/);
     assert.match(f.output(), scenario === "cancelled" ? /setup.cancelled/ : scenario === "invalid" ? /setup.database-url/ : /setup.credentials-missing/);
+    if (scenario !== "cancelled") assert.match(f.output(), /postgresql:\/\/USER:PASSWORD@HOST:5432\/DATABASE/);
+    if (scenario === "blank") assert.match(f.output(), /Source\s+\.env\.local \(blank value\)/);
   }
 });
 
@@ -231,6 +280,43 @@ test("connection and migration failures preserve the active runtime and suppress
     assert.equal(existsSync(join(f.root, ".env.local")), false);
     assert.doesNotMatch(f.output(), /private-password|example\.test/);
     assert.match(f.output(), /Project Runtime was not changed/);
+    if (failedStep === "connection") assert.ok(f.output().includes(`${sourceExecutable} setup --store postgres`));
+  }
+});
+
+test("Postgres recovery reports the selected file, environment, custom or hidden-input source", async t => {
+  const legacy = "TAE_RESULT_STORE_DATABASE_URL";
+  const cases = [
+    { env: { [credentialName]: "old-shell-value" }, file: { [credentialName]: secret }, source: ".env.local", sourceCheckout: true },
+    { env: { [credentialName]: secret }, file: { [legacy]: "unused-file-value" }, source: "environment" },
+    { env: { [legacy]: "old-shell-value" }, file: { [legacy]: secret }, source: ".env.local" },
+    { env: { CUSTOM_DB_URL: "old-shell-value" }, file: { CUSTOM_DB_URL: secret }, source: ".env.local", name: "CUSTOM_DB_URL" },
+    { env: {}, file: {}, source: "hidden terminal input", interactive: true },
+    { env: {}, file: {}, source: "hidden terminal input", interactive: true, input: "invalid input" },
+  ];
+  for (const entry of cases) {
+    const name = entry.name ?? credentialName;
+    const config = { schemaVersion: 1, environment: { kind: "local" }, resultStore: { kind: "postgres", databaseUrlEnv: name, artifactRoot: "../keep-artifacts" } };
+    const f = fixture(t, { config, env: entry.env });
+    writeFileSync(join(f.root, ".env.local"), Object.entries(entry.file).map(([key,value]) => `${key}=${value}\n`).join(""));
+    const original = readFileSync(join(f.root, ".env.local"), "utf8");
+    if (entry.sourceCheckout) {
+      mkdirSync(join(f.root, "harness/bin"), { recursive: true });
+      writeFileSync(join(f.root, "harness/bin/hurdle.mjs"), "");
+    }
+    if (entry.interactive) { f.io.stdin = { isTTY: true }; f.io.stdout.isTTY = true; }
+    const cli = createFrameworkCli({ ...f.dependencies, promptSetup: async () => entry.input ?? secret, loadPostgresSetupBackend: async () => ({
+      checkConnection(value) { assert.equal(value, secret); throw Error(secret); },
+      migrate() { assert.fail("Failed connection must never migrate"); },
+    }) });
+    assert.equal(await cli.main(["setup", "--store", "postgres", ...(entry.interactive ? ["--interactive"] : ["--json"])], f.io), 1);
+    const message = entry.interactive ? f.output() : JSON.parse(f.output()).error.message;
+    assert.ok(message.includes(`Source    ${entry.source}`), message);
+    assert.ok(message.includes(`${entry.sourceCheckout ? "node harness/bin/hurdle.mjs" : sourceExecutable} setup --store postgres`));
+    assert.ok(message.includes(`${name}="postgresql://USER:PASSWORD@HOST:5432/DATABASE"`), message);
+    assert.equal(readFileSync(join(f.root, ".env.local"), "utf8"), original);
+    assert.deepEqual(f.runtime(), config);
+    assert.doesNotMatch(f.output(), /private-password|example\.test|old-shell-value|unused-file-value/);
   }
 });
 
@@ -252,6 +338,7 @@ test("storage help and invalid combinations do not connect or configure a sandbo
   const f = fixture(t); const cli = createFrameworkCli(f.dependencies);
   assert.equal(await cli.main(["help", "setup"], f.io), 0);
   assert.match(f.output(), /--store postgres/);
+  assert.match(f.output(), /HURDLE_RESULT_STORE_DATABASE_URL="postgresql:\/\/USER:PASSWORD@HOST:5432\/DATABASE"/);
   for (const args of [["--store"], ["--store", "local"], ["--store", "postgres", "--store", "postgres"], ["--store", "postgres", "--sandbox", "e2b"], ["--store", "postgres", "--template", "custom:v1"]]) {
     assert.equal(await cli.main(["setup", ...args], f.io), 2, f.output());
   }

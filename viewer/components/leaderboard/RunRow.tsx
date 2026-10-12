@@ -1,5 +1,6 @@
 "use client";
 
+import { RunCost } from "@/components/RunCost";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { cn, formatModel } from "@/lib/utils";
@@ -21,7 +22,8 @@ export type RunRowData = {
   durationSec: number;
   toolCalls: number | null;
   totalTokensIn: number;
-  costUsd: number;
+  costUsd: number | null;
+  costSource?: "reported" | "estimated" | "unavailable";
   corrections: number;
   createdAt?: string;
   needsFollowup?: boolean;
@@ -103,7 +105,7 @@ export function RunRow({ s, showTask = true, density = "comfortable", className 
           {isRunning && s.createdAt ? <ElapsedTimer startedAt={s.createdAt} /> : fmtDuration(s.durationSec)}
         </span>
         <span className="w-12 text-right hidden md:inline">{fmtTokens(s.totalTokensIn)}</span>
-        <span className="w-14 text-right">{s.costUsd > 0 ? `$${s.costUsd.toFixed(2)}` : "—"}</span>
+        <span className="w-14 text-right"><RunCost value={s.costUsd} source={s.costSource} /></span>
       </div>
 
       {s.needsFollowup && <StatusBadge kind="followup" size="sm" label="followup" />}

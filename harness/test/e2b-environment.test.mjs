@@ -284,7 +284,7 @@ test("E2B runs one canonical cell with Guardian-only Target credentials and term
   assert.ok(runtime.resources.every(({ apiKey, disposed }) => (
     apiKey === "e2b-test-key" && disposed
   )));
-  assert.deepEqual(progressEvents, [
+  assert.deepEqual(progressEvents.filter(event => event.kind === "environment-resource-allocated"), [
     {
       kind: "environment-resource-allocated",
       executionId: result.runs[0].id,
@@ -297,6 +297,10 @@ test("E2B runs one canonical cell with Guardian-only Target credentials and term
       environmentId: "e2b",
       resource: { provider: "e2b", role: "agent", id: "sandbox-execution-2" },
     },
+  ]);
+  assert.deepEqual(progressEvents.filter(event => event.kind === "environment-status").map(event => event.status), [
+    "starting-guardian", "guardian-started", "starting-sandbox", "sandbox-started",
+    "preparing-environment", "preparing-workspace", "agent-running", "collecting-results", "stopping-sandboxes",
   ]);
   assert.doesNotMatch(JSON.stringify(record), new RegExp(secret));
   assert.equal(record.evidence.egress[0].provenance.producer, "e2b-guardian");
@@ -1007,7 +1011,8 @@ test("E2B cancellation during allocation disposes a late resource", async (t) =>
 
   assert.equal(result.status, "complete", JSON.stringify(result));
   assert.equal(resource.disposed, true);
-  assert.deepEqual(progressEvents, []);
+  assert.deepEqual(progressEvents.map(event => event.status), ["starting-guardian", "stopping-sandboxes"]);
+  assert.ok(progressEvents.every(event => event.kind === "environment-status"));
   const record = await store.getRun(result.runs[0].id);
   assert.equal(record.verdict, "incomplete");
   assert.ok(record.integrityIssues.some(({ code }) => code === "environment.cancelled"));

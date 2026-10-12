@@ -6,14 +6,14 @@ import { resolveRuntimeProfile, describeRuntimeJudgeCapability } from "./runtime
 import { resolveAuthoritySelections } from "./authority-profile.mjs";
 import { createTerminalProgress } from "./terminal-progress.mjs";
 import { promptSetup } from "./setup-prompts.mjs";
-import { createSetupOutput } from "./setup-output.mjs";
+import { createSetupOutput, missingSuiteSetupGuidance } from "./setup-output.mjs";
 import { ensureSetupCredentials } from "./setup-credentials.mjs";
 import { regularFileContents, atomicWrite, saveCredentials } from "./setup-project-files.mjs";
 import { normalizeE2BSettings } from "./execution-environments/e2b.mjs";
 import { DEFAULT_PROJECT_RUNTIME, projectRuntimePath } from "./project-paths.mjs";
 import {
   terminalUsesColor, terminalFact, terminalHeader,
-  terminalNote, terminalNext, suiteCommand,
+  terminalNote, terminalNext, suiteCommand, runtimeSummaryRows,
 } from "./terminal-output.mjs";
 
 export { DEFAULT_PROJECT_RUNTIME, projectRuntimePath } from "./project-paths.mjs";
@@ -55,7 +55,7 @@ export async function inspectSetupTemplate(client, name) {
     : [...builds].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
   if (tagged && !selected) throw setupError("setup.template-details", "The tagged build's details were not returned by E2B. Check the template in your E2B dashboard; setup will not rebuild an existing tag.");
   if (!selected || selected.status === "error") return false;
-  if (selected.status !== "ready") throw setupError("setup.template-building", "The E2B template is still building. Wait for it to finish, then rerun setup.");
+  if (selected.status !== "ready") throw setupError("setup.template-building", "The E2B template is still building. Wait for it to finish, then rerun setup --sandbox e2b.");
   if (![selected.cpuCount, selected.memoryMB].every(value => Number.isSafeInteger(value) && value > 0)) throw setupError("setup.template-capacity", "E2B returned an unsupported template capacity.");
   return { cpuCount: selected.cpuCount, memoryMB: selected.memoryMB };
 }
@@ -75,12 +75,16 @@ export async function setupSandbox({ suite, template, yes = false, interactive =
   const fact = (label, value) => terminalFact(label, value, { useColor });
   const line = (status, text, code = null) => output.check(status, text, code);
   const prompt = dependencies.promptSetup ?? promptSetup;
-  io.stdout.write(terminalHeader(io.stdout) + fact("Sandbox", "E2B") + "\n");
+  io.stdout.write(terminalHeader(io.stdout) + fact("Execution", "E2B sandbox") + "\n");
   let authored;
   try {
-    if (!existsSync(resolve(io.cwd, suite))) throw setupError("setup.suite-missing", "Create an evaluation first: npx hurdle init (or npx hurdle init --example together-api).");
+    if (!existsSync(resolve(io.cwd, suite))) {
+      const guidance = missingSuiteSetupGuidance(io.cwd, "e2b", suite);
+      output.result.nextCommands = guidance.nextCommands;
+      throw setupError("setup.suite-missing", guidance.message);
+    }
     authored = await dependencies.resolveV1Suite({ suitePath: resolve(io.cwd, suite) });
-    if (!authored.ok) throw setupError("setup.suite-invalid", `The Suite is invalid. Run ${suiteCommand("validate", suite)} --offline to inspect its diagnostics.`);
+    if (!authored.ok) throw setupError("setup.suite-invalid", `The Suite is invalid. Run ${suiteCommand("validate", suite, { cwd: io.cwd })} --offline to inspect its diagnostics.`);
     dependencies.assertRuntimeDependencies({ environment: { kind: "e2b" } });
     const ids = [...new Set(authored.defaults.agentSelections.map(agent => agent.adapterId))].sort();
     const selectedTasks = authored.defaults.taskIds;
@@ -107,7 +111,7 @@ export async function setupSandbox({ suite, template, yes = false, interactive =
     const profile = resolveRuntimeProfile({ runtimePath, cwd: io.cwd }, { readFile: () => JSON.stringify(config) });
     let settings;
     try { settings = normalizeE2BSettings(config.environment.settings); }
-    catch { throw setupError("setup.runtime-settings", `E2B Runtime settings are invalid. Check the templates, cpuCount, memoryMiB, and maxLifetimeMs in ${runtimePath} before rerunning setup.`); }
+    catch { throw setupError("setup.runtime-settings", `E2B Runtime settings are invalid. Check the templates, cpuCount, memoryMiB, and maxLifetimeMs in ${runtimePath} before rerunning setup --sandbox e2b.`); }
     const authority = resolveAuthoritySelections({ definition: authored.value.definition, selectedTaskIds: selectedTasks, judgeCapability: describeRuntimeJudgeCapability(profile) });
     if (!authority.ok) throw setupError("setup.authority", authority.diagnostics.map(d => d.message).join(" "));
     const judgeRequired = Object.values(authority.value.byTaskId).some(a => a.judge?.availability === "required");
@@ -125,15 +129,15 @@ export async function setupSandbox({ suite, template, yes = false, interactive =
       ...(profile.resultStore.kind === "postgres" ? [{ label: "Postgres", anyOf: [profile.resultStore.databaseUrlEnv] }] : []),
     ];
     const entered = await ensureSetupCredentials({ requirements, environment: env, interactive, prompt, io, report: output.result });
-    const readiness = await dependencies.checkAgentReadiness({ agentSelections: authored.defaults.agentSelections, runtimeProfile: profile, runtimeEnv: env, requiredCredentials: taskCredentials, judgeCredentialName: judgeRequired ? profile.judge.credentialEnv : null });
+    const readiness = await dependencies.checkAgentReadiness({ agentSelections: authored.defaults.agentSelections, runtimeProfile: profile, runtimeEnv: env, requiredCredentials: taskCredentials, judgeCredentialName: judgeRequired ? profile.judge.credentialEnv : null, allowResultStoreSetup: true });
     for (const check of readiness.checks) line(check.status, check.message, check.code ?? null);
-    if (!readiness.ok) throw setupError("setup.not-ready", "Resolve the credential errors above and rerun npx hurdle setup. No template build or evaluation started.");
+    if (!readiness.ok) throw setupError("setup.not-ready", "Resolve the setup errors above and rerun npx hurdle setup --sandbox e2b. No template build or evaluation started.");
     const backend = await (dependencies.loadSetupBackend ?? loadSetupBackend)();
     let available;
     try { available = await backend.exists(name, env[profile.environment.apiKeyEnv]); }
     catch (error) {
       if (error.code?.startsWith("setup.")) throw error;
-      throw setupError("setup.template-unavailable", "Could not check the E2B template. Check account access and retry setup.");
+      throw setupError("setup.template-unavailable", "Could not check the E2B template. Check account access and retry setup --sandbox e2b.");
     }
     if (!available && template) throw setupError("setup.template-missing", "The selected template is not available. Check --template NAME, or omit it to build the Hurdle template.");
     if (available && typeof available === "object") {
@@ -141,7 +145,7 @@ export async function setupSandbox({ suite, template, yes = false, interactive =
         config.environment.settings.cpuCount = available.cpuCount;
         config.environment.settings.memoryMiB = available.memoryMB;
       } else if (settings.cpuCount !== available.cpuCount || settings.memoryMiB !== available.memoryMB) {
-        throw setupError("setup.template-capacity", `Template capacity does not match the saved Runtime. Update cpuCount and memoryMiB in ${runtimePath}, then rerun setup.`);
+        throw setupError("setup.template-capacity", `Template capacity does not match the saved Runtime. Update cpuCount and memoryMiB in ${runtimePath}, then rerun setup --sandbox e2b.`);
       }
       try { normalizeE2BSettings(config.environment.settings); }
       catch { throw setupError("setup.template-capacity", "Template capacity is not supported by the E2B Runtime. Choose a template with at least 512 MB of memory."); }
@@ -153,11 +157,11 @@ export async function setupSandbox({ suite, template, yes = false, interactive =
         + fact("Usage", "Template build may be billed") + "\n");
       if (!yes) {
         if (!interactive) {
-          output.result.nextCommands = [`${suiteCommand("setup", suite)} --yes${json ? " --json" : ""}`];
-          throw setupError("setup.build-required", "Template build required. Rerun setup --yes to accept E2B build usage, or use --interactive to review it. No template was built and Project Runtime was not changed.");
+          output.result.nextCommands = [`${suiteCommand("setup", suite, { cwd: io.cwd })} --sandbox e2b --yes${json ? " --json" : ""}`];
+          throw setupError("setup.build-required", "Template build required. Rerun setup --sandbox e2b --yes to accept E2B build usage, or add --interactive to review it. No template was built and Project Runtime was not changed.");
         }
         const answer = await prompt({ message: "  Build this template? [y/N]: " }, io);
-        if (!answer || !["y", "yes"].includes(answer.trim().toLowerCase())) throw setupError("setup.build-required", "Template build not started. Rerun setup to confirm, or use --yes to accept build usage without a prompt.");
+        if (!answer || !["y", "yes"].includes(answer.trim().toLowerCase())) throw setupError("setup.build-required", "Template build not started. Rerun setup --sandbox e2b --interactive to confirm, or use --yes to accept build usage without a prompt.");
       }
       // Verify credential/ignore-file writes before starting a paid build.
       await saveCredentials(io.cwd, entered);
@@ -165,19 +169,21 @@ export async function setupSandbox({ suite, template, yes = false, interactive =
       progress?.start("Building E2B template");
       if (!progress) io.stdout.write(terminalNote("Building E2B template…", io.stdout));
       try { await backend.build(name, ids, env[profile.environment.apiKeyEnv], capacity); }
-      catch { throw setupError("setup.build-failed", "E2B template build failed. Inspect the build in your E2B dashboard, then rerun setup. Project Runtime was not changed."); }
+      catch { throw setupError("setup.build-failed", "E2B template build failed. Inspect the build in your E2B dashboard, then rerun setup --sandbox e2b. Project Runtime was not changed."); }
       finally { progress?.stop(); }
       line("pass", "E2B template built.");
     } else line("pass", `E2B template available · ${name}`);
     // Keep existing stores, Judge settings, and user limits when reusing setup.
     if (available) await saveCredentials(io.cwd, entered);
     await atomicWrite(runtimeFile, `${JSON.stringify(config, null, 2)}\n`, 0o600);
-    line("pass", "Project sandbox configured.");
-    io.stdout.write("\n" + fact("Runtime", runtimePath) + fact("Suite", suite)
+    const needsStorageSetup = readiness.checks.some(check => check.code === "runtime.postgres-setup-required");
+    const nextCommands = [...(needsStorageSetup ? [`${suiteCommand("setup", suite, { cwd: io.cwd })} --store postgres`] : []), suiteCommand("run", suite, { view: true, cwd: io.cwd })];
+    line("pass", needsStorageSetup ? "E2B sandbox configured." : "Setup complete · E2B sandbox configured.");
+    io.stdout.write("\n" + runtimeSummaryRows(profile, io.cwd).map(([label, value]) => fact(label, value)).join("") + fact("Suite", suite)
       + "\n" + terminalNote("Model access, remote tools, and billing are checked during execution.", io.stdout)
-      + terminalNext([suiteCommand("run", suite, { view: true })], io.stdout));
+      + terminalNext(nextCommands, io.stdout));
     Object.assign(output.result, { runtimePath, executionEnvironment: "e2b", resultStore: config.resultStore.kind,
-      nextCommands: [suiteCommand("run", suite, { view: true })] });
+      nextCommands });
     return output.finish(0);
   } catch (error) {
     const known = error.code?.startsWith("setup.") || error.code?.startsWith("runtime.") || error.code === "backend-not-installed";

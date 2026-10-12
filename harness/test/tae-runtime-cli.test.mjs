@@ -1,3 +1,4 @@
+import { cliExecutable } from "../lib/terminal-output.mjs";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import {
@@ -17,6 +18,8 @@ import { createFrameworkCli } from "../bin/hurdle.mjs";
 import { createE2BExecutionEnvironment } from "../lib/execution-environments/e2b.mjs";
 import { reportExecutionProgress } from "../lib/execution-progress.mjs";
 import { resolveV1Suite } from "../lib/v1-authoring.mjs";
+
+const sourceExecutable = cliExecutable();
 
 function writeJudgePack(root, model = "judge-model", verdict = "hybrid") {
   mkdirSync(join(root, "tasks", "sample"), { recursive: true });
@@ -104,7 +107,31 @@ test("hurdle run displays live cell progress in terminals and stable lines in lo
             reportExecutionProgress(progressObserver, { kind: "cell-started", cell, secret: "must-not-display" });
             assert.ok(output().includes(`[${index + 1}/2] sample · baseline`), "progress must appear before the run returns");
             assert.match(output(), /Evaluating/);
+            if (index === 0) {
+              for (const [provider, role, id] of [["e2b", "guardian", "guardian-one"], ["e2b", "agent", "agent-one"], ["together", "guardian", "together-guardian-one"], ["together", "agent", "together-one"]]) {
+                reportExecutionProgress(progressObserver, {
+                  kind: "environment-resource-allocated", executionId: "execution-one", environmentId: provider,
+                  resource: { provider, role, id, agentToken: "must-not-display" },
+                });
+              }
+              assert.doesNotMatch(output(), /guardian-one|agent-one|together-one|together-guardian-one|Dashboard|Inspect|together-sandbox sandboxes get/);
+              for (const provider of ["e2b", "together"]) {
+                for (const [status, label] of [
+                  ["starting-guardian", "Starting Guardian"], ["guardian-started", "Guardian started"],
+                  ["starting-sandbox", "Starting sandbox"], ["sandbox-started", "Sandbox started"],
+                  ["preparing-environment", "Preparing environment"], ["preparing-workspace", "Preparing workspace"],
+                  ["agent-running", "Agent running"], ["collecting-results", "Collecting results"],
+                  ["stopping-sandboxes", "Stopping sandboxes"],
+                ]) {
+                  reportExecutionProgress(progressObserver, { kind: "environment-status",
+                    executionId: "execution-one", environmentId: provider, status, token: "must-not-display" });
+                  assert.ok(output().includes(label), "status appears before execution completes");
+                }
+              }
+            }
             t.mock.timers.tick(160);
+            reportExecutionProgress(progressObserver, { kind: "cell-finalizing", cell });
+            assert.match(output(), /Finalizing results/);
             reportExecutionProgress(progressObserver, {
               kind: "cell-completed", cell,
               terminal: {
@@ -142,7 +169,7 @@ test("hurdle run displays live cell progress in terminals and stable lines in lo
     assert.match(output(), /! \[2\/2\] sample · baseline · Codex · incomplete/);
     assert.equal(output().match(/environment\.nonzero-exit/g)?.length, 1, "passing cells omit reasons and the summary does not duplicate live reasons");
     assert.doesNotMatch(output(), /must-not-display|Observer failure/);
-    assert.equal(events.length, 5, "the existing observer still receives every event");
+    assert.equal(events.length, 29, "the existing observer still receives every event");
     if (!isTTY) {
       assert.equal(streams.read().stderr, "");
       assert.doesNotMatch(streams.read().stdout, /\u001b|\r|[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
@@ -158,19 +185,29 @@ test("hurdle run stops its startup spinner when the Result Store cannot open", a
   const root = mkdtempSync(join(tmpdir(), "tae-store-progress-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeJudgePack(root, "unused", "code");
-  const streams = ttyIo(root);
-  const cli = createFrameworkCli({
-    async checkAgentReadiness() { return { ok: true, checks: [] }; },
-    env: {},
-    async openLocalResultStore() { throw new Error("private-store-error"); },
-  });
-  assert.equal(await cli.main(["run", "example.suite.mjs"], streams), 1);
-  assert.match(streams.read().stderr, /Opening result store/);
-  assert.match(streams.read().stderr, /store-unavailable/);
-  assert.doesNotMatch(streams.read().stderr, /private-store-error/);
-  const stopped = streams.read();
-  t.mock.timers.tick(1000);
-  assert.deepEqual(streams.read(), stopped);
+  for (const code of [null, "store.schema-not-ready"]) {
+    const streams = ttyIo(root);
+    const failure = async () => { throw Object.assign(new Error("private-store-error"), { code }); };
+    const cli = createFrameworkCli({
+      async checkAgentReadiness() { return { ok: true, checks: [] }; },
+      env: { TEST_DATABASE_URL: "synthetic" },
+      openLocalResultStore: failure, openPostgresResultStore: failure,
+    });
+    const args = ["run", "example.suite.mjs"];
+    if (code) {
+      writeFileSync(join(root, "runtime.json"), JSON.stringify({ schemaVersion: 1, environment: { kind: "local" },
+        resultStore: { kind: "postgres", databaseUrlEnv: "TEST_DATABASE_URL", artifactRoot: "artifacts" } }));
+      args.push("--runtime", "runtime.json");
+    }
+    assert.equal(await cli.main(args, streams), 1);
+    assert.match(streams.read().stderr, /Opening result store/);
+    assert.ok(streams.read().stderr.includes(code ?? "store-unavailable"));
+    if (code) assert.ok(streams.read().stdout.includes(`${sourceExecutable} setup example.suite.mjs --store postgres`));
+    assert.doesNotMatch(streams.read().stderr, /private-store-error/);
+    const stopped = streams.read();
+    t.mock.timers.tick(1000);
+    assert.deepEqual(streams.read(), stopped);
+  }
 });
 
 test("E2B template placeholders are rejected before execution or Judge requests", async (t) => {
@@ -319,7 +356,8 @@ test("hurdle run composes Postgres sidecar and the required Judge after prefligh
   assert.equal(calls[2][1].judge, judge);
   assert.deepEqual(calls.at(-1), ["close", store]);
   assert.doesNotMatch(`${streams.read().stdout}\n${streams.read().stderr}`, /secret/);
-  assert.match(streams.read().stdout, /^  Store\s+Postgres · artifacts artifacts$/m);
+  assert.match(streams.read().stdout, /^  Runtime\s+config\/runtime.json\n  Execution\s+Local\n  Store\s+Postgres$/m);
+  assert.match(streams.read().stdout, /^  Artifacts\s+artifacts$/m);
 });
 
 test("a configured but disabled Judge does not read credentials or create a provider", async (t) => {
@@ -547,8 +585,7 @@ test("hurdle run --view opens the recorded Local store and preserves a non-pass"
     HURDLE_RESULT_STORE_ROOT: join(root, "results"),
   });
   assert.equal(calls[0].onboarding.projectDirectory, root);
-  assert.match(calls[0].onboarding.commands, /hurdle validate --environment local --store results/);
-  assert.match(calls[0].onboarding.commands, /hurdle run --environment local --store results/);
+  assert.equal(calls[0].onboarding.commands, "npx hurdle run --environment local --store results --view");
   assert.match(streams.read().stdout, /^  Result\s+Needs attention$/m);
   assert.match(streams.read().stdout, /^  Runs\s+1 incomplete$/m);
   assert.match(streams.read().stdout, /^  Reason\s+E2B execution failed before evidence capture\.$/m);
@@ -663,11 +700,13 @@ test("hurdle view shows one live readiness status in an interactive terminal", a
   assert.match(stripVTControlCharacters(streams.read().stdout), /✓ Viewer ready/);
   assert.equal(
     stripVTControlCharacters(streams.read().stdout),
-    "\nHurdle\n\n✓ Viewer ready\n\n  URL       http://127.0.0.1:3000\n  Store     .hurdle/results-v1\n\n  Press Ctrl+C to stop.\n",
+    "\nHurdle\n\n✓ Viewer ready\n\n  URL       http://127.0.0.1:3000\n  Runtime   Built-in Local default\n  Execution Local\n  Store     Filesystem\n  Results   .hurdle/results-v1\n\n  Press Ctrl+C to stop.\n",
   );
 });
 
-test("hurdle view reports unconfirmed shutdown without claiming success", async () => {
+test("hurdle view reports unconfirmed shutdown without claiming success", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-view-disposal-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   const cli = createFrameworkCli({
     async checkAgentReadiness() { return { ok: true, checks: [] }; },
     env: {},
@@ -675,7 +714,7 @@ test("hurdle view reports unconfirmed shutdown without claiming success", async 
       return { kind: "failed", exitCode: 1, reason: "disposal-unconfirmed" };
     },
   });
-  const streams = io(process.cwd());
+  const streams = io(root);
   assert.equal(await cli.main(["view"], streams), 1);
   assert.equal(streams.read().stderr,
     "✗ hurdle [viewer-disposal-unconfirmed] Viewer shutdown could not be confirmed. Check for a surviving Viewer process before restarting.\n");
@@ -771,5 +810,98 @@ test("constructor failures close Postgres and dispose the compiled Suite without
     const stopped = streams.read();
     t.mock.timers.tick(1000);
     assert.deepEqual(streams.read(), stopped, "no spinner survives a constructor failure");
+  }
+});
+
+
+test("run concurrency uses the Suite setting or default three, with a CLI override", async t => {
+  const root = mkdtempSync(join(tmpdir(), "hurdle-cli-concurrency-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const [suiteLimit, args, expected] of [
+    [undefined, [], 3], [2, [], 2], [2, ["--concurrency", "3"], 3], [undefined, ["--concurrency", "1"], 1],
+  ]) {
+    writeJudgePack(root, "unused", "code");
+    const suitePath = join(root, "example.suite.mjs");
+    if (suiteLimit !== undefined) writeFileSync(suitePath, readFileSync(suitePath, "utf8").replace('"repeats":1', `"repeats":1,"concurrency":${suiteLimit}`));
+    const streams = io(root);
+    streams.stdout.isTTY = args.length > 0;
+    const cli = createFrameworkCli({
+      env: {}, processTarget: new EventEmitter(),
+      async checkAgentReadiness() { return { ok: true, checks: [] }; },
+      async openLocalResultStore() { return {}; },
+      createAgentAdapter() { return {}; }, createLocalExecutionEnvironment() { return {}; },
+      createRunEngine() { return { async run(request) { assert.equal(request.concurrency, expected); return completedResult(); } }; },
+    });
+    assert.equal(await cli.main(["run", "example.suite.mjs", ...args], streams), 0);
+    const output = stripVTControlCharacters(streams.read().stdout);
+    assert.match(output, new RegExp(`^  Concurrency  ${expected}$`, "m"));
+  }
+});
+
+test("invalid or repeated concurrency flags fail before Suite import, credentials or store access", async t => {
+  const root = mkdtempSync(join(tmpdir(), "hurdle-cli-concurrency-invalid-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const args of [
+    ["--concurrency", "0"], ["--concurrency", "101"], ["--concurrency", "1.5"], ["--concurrency", "five"],
+    ["--concurrency"], ["--concurrency", "5", "--concurrency", "2"],
+  ]) {
+    const streams = io(root);
+    const cli = createFrameworkCli({ env: {}, processTarget: new EventEmitter(), resolveV1Suite() { assert.fail("must not import the Suite"); }, openLocalResultStore() { assert.fail("must not open store"); } });
+    assert.equal(await cli.main(["run", "missing.suite.mjs", ...args], streams), 2);
+    assert.match(streams.read().stderr, /concurrency/);
+  }
+  const streams = io(root);
+  assert.equal(await createFrameworkCli({ env: {} }).main(["help", "run"], streams), 0);
+  assert.match(streams.read().stdout, /--concurrency N.*default: 3/);
+});
+
+test("interleaved cell progress tracks lifecycle and elapsed time independently", async t => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"] });
+  const root = mkdtempSync(join(tmpdir(), "hurdle-cli-parallel-progress-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeJudgePack(root, "unused", "code");
+  for (const isTTY of [true, false]) {
+    const streams = isTTY ? ttyIo(root) : io(root);
+    const output = () => stripVTControlCharacters(streams.read().stderr + streams.read().stdout);
+    const cli = createFrameworkCli({
+      env: {}, processTarget: new EventEmitter(),
+      async checkAgentReadiness() { return { ok: true, checks: [] }; },
+      async openLocalResultStore() { return {}; },
+      createAgentAdapter() { return {}; }, createLocalExecutionEnvironment() { return {}; },
+      createRunEngine({ progressObserver }) { return { async run() {
+        const emit = event => reportExecutionProgress(progressObserver, event);
+        const cells = [1, 2].map(ordinal => ({ ordinal, total: 2, taskId: "sample", conditionId: "baseline", adapterId: ordinal === 1 ? "claude-code" : "codex", repeatOrdinal: 1, repeatTotal: 1 }));
+        emit({ kind: "matrix-ready", total: 2 });
+        emit({ kind: "cell-started", cell: cells[0] });
+        emit({ kind: "cell-attempt-started", cell: cells[0], executionId: "private-run-one" });
+        t.mock.timers.tick(3000);
+        emit({ kind: "cell-started", cell: cells[1] });
+        emit({ kind: "cell-attempt-started", cell: cells[1], executionId: "private-run-two" });
+        emit({ kind: "environment-status", executionId: "private-run-one", environmentId: "together", status: "agent-running" });
+        emit({ kind: "environment-status", executionId: "private-run-two", environmentId: "together", status: "starting-guardian" });
+        assert.match(output(), /2 active · 0\/2 done · 1 Agent running · 1 Starting Guardian/);
+        t.mock.timers.tick(2000);
+        emit({ kind: "cell-finalizing", cell: cells[1] });
+        emit({ kind: "cell-completed", cell: cells[1], terminal: { id: "private-run-two", verdict: "pass" } });
+        assert.match(output(), /\[2\/2\] sample · baseline · Codex · pass +2s/);
+        assert.match(output(), /\[1\/2\] sample · baseline · Claude Code · Agent running/);
+        // A stale retry status must never overwrite another cell's lifecycle.
+        emit({ kind: "cell-attempt-started", cell: cells[0], executionId: "private-run-retry" });
+        emit({ kind: "environment-status", executionId: "private-run-retry", environmentId: "together", status: "sandbox-started" });
+        const beforeStaleStatus = streams.read();
+        emit({ kind: "environment-status", executionId: "private-run-one", environmentId: "together", status: "agent-running" });
+        assert.deepEqual(streams.read(), beforeStaleStatus);
+        t.mock.timers.tick(2000);
+        emit({ kind: "cell-finalizing", cell: cells[0] });
+        emit({ kind: "cell-completed", cell: cells[0], terminal: { id: "private-run-retry", verdict: "pass" } });
+        assert.match(output(), /\[1\/2\] sample · baseline · Claude Code · pass +7s/);
+        return completedResult();
+      } }; },
+    });
+    assert.equal(await cli.main(["run", "example.suite.mjs"], streams), 0);
+    assert.doesNotMatch(output(), /private-run/);
+    const before = streams.read();
+    t.mock.timers.tick(1000);
+    assert.deepEqual(streams.read(), before, "spinner is stopped after completion");
   }
 });

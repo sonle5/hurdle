@@ -14,6 +14,7 @@ export type MatrixCell = {
   total: number;
   avgDurationSec: number;
   avgCostUsd: number;
+  costCount?: number;
   topFails?: string[];
 };
 
@@ -27,54 +28,63 @@ export type MatrixData = {
 type SortKey = "name" | "overall" | string; // string ⇒ a config id
 
 function aggregateRow(d: MatrixData, task: string): MatrixCell {
-  let pass = 0, total = 0, dur = 0, cost = 0;
+  let pass = 0, total = 0, dur = 0, cost = 0, costCount = 0;
   for (const c of d.configs) {
     const cell = d.grid.get(`${task}|${c.id}`);
     if (!cell) continue;
     pass += cell.pass;
     total += cell.total;
     dur += cell.avgDurationSec * cell.total;
-    cost += cell.avgCostUsd * cell.total;
+    const known = cell.costCount ?? cell.total;
+    cost += cell.avgCostUsd * known;
+    costCount += known;
   }
   return {
     pass,
     total,
     avgDurationSec: total ? Math.round(dur / total) : 0,
-    avgCostUsd: total ? cost / total : 0,
+    avgCostUsd: costCount ? cost / costCount : 0,
+    costCount,
   };
 }
 
 function aggregateCol(d: MatrixData, configId: string): MatrixCell {
-  let pass = 0, total = 0, dur = 0, cost = 0;
+  let pass = 0, total = 0, dur = 0, cost = 0, costCount = 0;
   for (const t of d.tasks) {
     const cell = d.grid.get(`${t.slug}|${configId}`);
     if (!cell) continue;
     pass += cell.pass;
     total += cell.total;
     dur += cell.avgDurationSec * cell.total;
-    cost += cell.avgCostUsd * cell.total;
+    const known = cell.costCount ?? cell.total;
+    cost += cell.avgCostUsd * known;
+    costCount += known;
   }
   return {
     pass,
     total,
     avgDurationSec: total ? Math.round(dur / total) : 0,
-    avgCostUsd: total ? cost / total : 0,
+    avgCostUsd: costCount ? cost / costCount : 0,
+    costCount,
   };
 }
 
 function aggregateAll(d: MatrixData): MatrixCell {
-  let pass = 0, total = 0, dur = 0, cost = 0;
+  let pass = 0, total = 0, dur = 0, cost = 0, costCount = 0;
   for (const cell of d.grid.values()) {
     pass += cell.pass;
     total += cell.total;
     dur += cell.avgDurationSec * cell.total;
-    cost += cell.avgCostUsd * cell.total;
+    const known = cell.costCount ?? cell.total;
+    cost += cell.avgCostUsd * known;
+    costCount += known;
   }
   return {
     pass,
     total,
     avgDurationSec: total ? Math.round(dur / total) : 0,
-    avgCostUsd: total ? cost / total : 0,
+    avgCostUsd: costCount ? cost / costCount : 0,
+    costCount,
   };
 }
 

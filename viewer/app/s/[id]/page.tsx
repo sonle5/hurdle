@@ -1,3 +1,4 @@
+import { RunCost } from "@/components/RunCost";
 import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
@@ -11,17 +12,11 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { TokensDisplay } from "@/components/TokensDisplay";
 import { ConversationView } from "@/components/ConversationView";
 import { ResizableSessionShell } from "@/components/ResizableSessionShell";
-import {
-  DEFAULT_TRANSCRIPT_RAIL_WIDTH,
-  MAX_TRANSCRIPT_RAIL_WIDTH,
-  MIN_TRANSCRIPT_RAIL_WIDTH,
-  parseStoredWidth,
-  TRANSCRIPT_RAIL_WIDTH_STORAGE_KEY,
-} from "@/lib/browser-layout-storage";
+import { readSidebarLayout } from "@/lib/browser-layout-storage";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { ScrollToHash } from "@/components/ScrollToHash";
 import { CopyButton } from "@/components/ui/CopyButton";
-import { getSessionById, getAllSessions } from "@/lib/queries";
+import { getSessionById, getAllSessions, type SessionSummary } from "@/lib/queries";
 import { StatusBadge, statusFromResult } from "@/components/ui/StatusBadge";
 import {
   CanonicalSessionReview,
@@ -165,6 +160,23 @@ function ToolVersionBadges({ items }: { items: ToolVersionItem[] }) {
     </div>
   );
 }
+
+function ExecutionDetails({ runtime }: { runtime: SessionSummary["runtime"] }) {
+  return (
+    <span className="inline-flex flex-wrap items-baseline gap-x-2 gap-y-1">
+      <span className="inline-flex items-center gap-1.5">
+        {runtime?.provider === "together" && (
+          // Show only the three-circle mark from the existing Together asset.
+          <span aria-hidden="true" className="inline-flex h-3.5 w-[0.94rem] shrink-0 overflow-hidden">
+            <img src="/together-logo.png" alt="" className="block h-full w-auto max-w-none" />
+          </span>
+        )}
+        {runtime?.label ?? "Not recorded"}
+      </span>
+      {runtime?.template && <span className="font-mono text-xs text-fg-muted break-all">{runtime.template}</span>}
+    </span>
+  );
+}
 export default async function SessionPage({
   params,
 }: {
@@ -173,13 +185,7 @@ export default async function SessionPage({
   const { id: rawId } = await params;
   const id = decodeURIComponent(rawId);
   const cookieStore = await cookies();
-  const initialTranscriptRailWidth = parseStoredWidth(
-    cookieStore.get(TRANSCRIPT_RAIL_WIDTH_STORAGE_KEY)?.value
-      ?? cookieStore.get("tae-transcript-rail-width")?.value,
-    DEFAULT_TRANSCRIPT_RAIL_WIDTH,
-    MIN_TRANSCRIPT_RAIL_WIDTH,
-    MAX_TRANSCRIPT_RAIL_WIDTH,
-  );
+  const sidebarLayout = readSidebarLayout({ getItem: key => cookieStore.get(key)?.value ?? null });
   const dbSession = await getSessionById(id);
   if (!dbSession) notFound();
   const toolVersions = toolVersionItems(dbSession.toolVersions);
@@ -207,9 +213,10 @@ export default async function SessionPage({
             <div className="flex items-center gap-2">
               <StatusBadge kind={statusKind} size="md" />
             </div>
+            <div className="text-sm"><span className="text-fg-muted mr-2">Execution:</span><ExecutionDetails runtime={dbSession.runtime} /></div>
             {dbSession.durationSec > 0 && <p className="text-sm text-fg-muted">Duration: {Math.floor(dbSession.durationSec / 60)}m {dbSession.durationSec % 60}s</p>}
             {dbSession.toolCalls != null && <p className="text-sm text-fg-muted">Tool calls: {dbSession.toolCalls}</p>}
-            {dbSession.costUsd > 0 && <p className="text-sm text-fg-muted">Cost: ${dbSession.costUsd.toFixed(2)}</p>}
+            <p className="text-sm text-fg-muted">Cost: <RunCost value={dbSession.costUsd} source={dbSession.costSource} /></p>
             <ToolVersionBadges items={toolVersions} />
             {dbSession.note && <p className="text-sm text-fg-muted">{dbSession.note}</p>}
             <CanonicalSessionReview prompt={dbSession.prompt} checks={canonicalStoredChecks(dbSessionRecord.storedChecks)} judge={canonicalJudgeReview(dbSessionRecord.deepAudit)} runId={readString(dbSessionRecord.canonicalRunId)} evaluatorSources={canonicalEvaluatorSources(dbSessionRecord.evaluatorSources)} />
@@ -256,7 +263,7 @@ export default async function SessionPage({
         if (e.type === "turn.completed" && e.usage) {
           input = (e.usage.input_tokens || 0) - (e.usage.cached_input_tokens || 0);
           cacheRead = e.usage.cached_input_tokens || 0;
-          output = (e.usage.output_tokens || 0) + (e.usage.reasoning_output_tokens || 0);
+          output = (e.usage.output_tokens || 0);
         }
         if (e.type === "item.completed") {
           const t = e.item?.type;
@@ -276,7 +283,7 @@ export default async function SessionPage({
     session.stats.mcpCalls = dbSession.mcpCalls || 0;
     session.stats.mcpMethods = Array.from(mcpMethods);
     session.stats.tokens = { input, output, cacheRead, cacheCreate: 0, totalIn: input + cacheRead };
-    session.stats.costUsd = (input * 1.25 + cacheRead * 0.125 + output * 10) / 1_000_000;
+    session.stats.costUsd = dbSession.costUsd;
     session.stats.firstTimestamp = dbSession.createdAt?.toISOString() ?? "";
     session.stats.lastTimestamp = dbSession.createdAt?.toISOString() ?? "";
     session.stats.harnessVersion = dbSession.agentVersion ?? "codex-cli";
@@ -342,7 +349,7 @@ export default async function SessionPage({
       cacheCreate,
       totalIn: input + cacheRead + cacheCreate,
     };
-    session.stats.costUsd = dbSession.costUsd || cost;
+    session.stats.costUsd = dbSession.costUsd ?? cost;
     session.stats.firstTimestamp = dbSession.createdAt?.toISOString() ?? "";
     session.stats.lastTimestamp = dbSession.createdAt?.toISOString() ?? "";
     session.stats.harnessVersion = dbSession.agentVersion ?? "opencode";
@@ -361,6 +368,8 @@ export default async function SessionPage({
 
   const { stats } = session;
   const toolsUsed = Object.entries(stats.toolBreakdown).sort((a, b) => b[1] - a[1]);
+
+  session.stats.costUsd = dbSession.costUsd;
 
   const canonicalJudge = canonicalJudgeReview(dbSessionRecord.deepAudit);
   const storedChecks = canonicalStoredChecks(dbSessionRecord.storedChecks);
@@ -395,7 +404,7 @@ export default async function SessionPage({
     : null;
 
   return (
-    <ResizableSessionShell messages={session.messages} initialRailWidth={initialTranscriptRailWidth}>
+    <ResizableSessionShell messages={session.messages} initialRailWidth={sidebarLayout.width} initialRailCollapsed={sidebarLayout.collapsed}>
       <div id="main-scroll" className="relative h-full overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-8 sm:px-8 sm:py-10">
           {/* Breadcrumb + nav */}
@@ -454,6 +463,7 @@ export default async function SessionPage({
             duration={formatDuration(stats.durationSec)}
             toolCalls={stats.toolCalls}
             costUsd={stats.costUsd}
+            costSource={dbSession.costSource}
           />
 
           <SessionDetailTabs
@@ -487,6 +497,10 @@ export default async function SessionPage({
                             )}
                           </span>
                         </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="text-fg-muted w-36 font-medium">Execution</TableCell>
+                        <TableCell className="text-sm"><ExecutionDetails runtime={dbSession.runtime} /></TableCell>
                       </TableRow>
                       {stats.model && (
                         <TableRow>
@@ -614,7 +628,7 @@ export default async function SessionPage({
                       </TableRow>
                       <TableRow>
                         <TableCell className="text-fg-muted font-medium">Cost</TableCell>
-                        <TableCell className="tabular-nums">${stats.costUsd.toFixed(2)}</TableCell>
+                        <TableCell className="tabular-nums"><RunCost value={stats.costUsd} source={dbSession.costSource} /></TableCell>
                       </TableRow>
                     </TableBody>
                   </Table>

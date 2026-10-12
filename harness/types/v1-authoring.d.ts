@@ -29,6 +29,8 @@ export interface V1SuiteBase {
   readonly agents: readonly V1Agent[];
   readonly conditions?: Readonly<Record<string, V1ConditionResources>>;
   readonly repeats?: number;
+  /** Maximum concurrent evaluation cells, from 1 to 100. Default: 3. */
+  readonly concurrency?: number;
 }
 
 export type V1Suite = V1SuiteBase & (

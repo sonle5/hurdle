@@ -27,6 +27,7 @@
     "docs/assets/readme-hero.png",
     "examples/copy-message",
     "examples/together-api",
+    "examples/concurrency-smoke",
     "docs/sandbox-setup.md",
     "harness/bin",
     "harness/index.mjs",
@@ -93,6 +94,7 @@
   "optionalDependencies": {
     "e2b": "^2.38.2",
     "https-proxy-agent": "7.0.6",
+    "together-sandbox": "4.1.1",
     "ws": "8.21.1"
   },
   "license": "MIT"

@@ -1,9 +1,19 @@
 import { readStoredPreference } from "./browser-preference-storage.mjs";
 
-export const DEFAULT_TRANSCRIPT_RAIL_WIDTH = 320;
-export const MIN_TRANSCRIPT_RAIL_WIDTH = 288;
-export const MAX_TRANSCRIPT_RAIL_WIDTH = 480;
-export const TRANSCRIPT_RAIL_WIDTH_STORAGE_KEY = "hurdle-transcript-rail-width";
+export const DEFAULT_SIDEBAR_WIDTH = 256;
+export const MIN_SIDEBAR_WIDTH = 224;
+export const MAX_SIDEBAR_WIDTH = 480;
+export const COLLAPSED_SIDEBAR_WIDTH = 56;
+export const SIDEBAR_WIDTH_STORAGE_KEY = "hurdle-sidebar-width";
+export const SIDEBAR_COLLAPSED_STORAGE_KEY = "hurdle-sidebar-collapsed";
+
+export function readSidebarLayout(storage: Pick<Storage, "getItem">, defaultCollapsed = false) {
+  const collapsed = readStoredPreference(storage, SIDEBAR_COLLAPSED_STORAGE_KEY);
+  return {
+    width: parseStoredWidth(readStoredPreference(storage, SIDEBAR_WIDTH_STORAGE_KEY), DEFAULT_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH),
+    collapsed: collapsed === "true" ? true : collapsed === "false" ? false : defaultCollapsed,
+  };
+}
 
 export function parseStoredWidth(value: string | null | undefined, fallback: number, minimum: number, maximum: number) {
   const parsed = Number(value);
@@ -43,6 +53,7 @@ export function writeStoredBoolean(key: string, value: boolean) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(key, String(value));
+    document.cookie = `${encodeURIComponent(key)}=${String(value)}; Path=/; Max-Age=31536000; SameSite=Lax`;
   } catch {
     // Layout persistence is an enhancement; collapsing still works without it.
   }

@@ -441,13 +441,82 @@ function runServer() {
   });
 }
 
-function runClient() {
+// Together guests cannot reach their public preview routes. A controller
+// claims each paused TCP flow over an authenticated inbound WebSocket instead.
+// The Agent never receives this token or access to the Guardian journal.
+function createReverseRoute(cellToken) {
+  const port = integer("EGRESS_BRIDGE_PUBLIC_LISTEN_PORT", 18083);
+  const pending = new Map();
+  let controller = null;
+  const server = http.createServer((_request, response) => {
+    response.writeHead(404); response.end();
+  });
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_FRAME_BYTES });
+  function reject(socket, status) {
+    socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+  }
+  server.on("upgrade", (request, socket, head) => {
+    if (!tokenMatches(cellToken, request.headers["x-together-egress-cell-token"])) return reject(socket, 401);
+    if (request.url === "/control") {
+      if (controller) return reject(socket, 409);
+      wss.handleUpgrade(request, socket, head, websocket => {
+        controller = websocket;
+        websocket.on("error", () => websocket.terminate());
+        websocket.on("message", () => websocket.terminate());
+        websocket.once("close", () => {
+          controller = null;
+          for (const flow of pending.values()) flow.fail();
+          for (const peer of wss.clients) peer.terminate();
+        });
+      });
+      return;
+    }
+    const match = /^\/relay\/([a-f0-9]{32})$/.exec(request.url ?? "");
+    const flow = match && pending.get(match[1]);
+    if (!controller || !flow) return reject(socket, 404);
+    pending.delete(match[1]);
+    clearTimeout(flow.timer);
+    wss.handleUpgrade(request, socket, head, websocket => {
+      flow.downstream.removeListener("close", flow.fail);
+      flow.downstream.removeListener("error", flow.fail);
+      if (flow.initialBytes?.length) flow.downstream.unshift(flow.initialBytes);
+      couple(flow.downstream, websocket, flow.release);
+      flow.downstream.resume();
+    });
+  });
+  server.on("clientError", (_error, socket) => socket.destroy());
+  server.on("error", () => { process.exitCode = 1; server.close(); });
+  server.listen(port, "0.0.0.0", () => process.stdout.write(`READY reverse ${port}\n`));
+  installShutdown(() => {
+    server.close();
+    for (const flow of pending.values()) flow.fail();
+    for (const peer of wss.clients) peer.terminate();
+  });
+  return (downstream, initialBytes, release) => {
+    if (!controller || controller.readyState !== WebSocket.OPEN || pending.size >= 128) return release();
+    const id = require("node:crypto").randomBytes(16).toString("hex");
+    const fail = () => { clearTimeout(flow.timer); pending.delete(id); release(); };
+    const flow = { downstream, initialBytes, release, fail, timer: setTimeout(fail, 10000).unref() };
+    pending.set(id, flow);
+    downstream.once("close", fail); downstream.once("error", fail);
+    controller.send(JSON.stringify({ kind: "open", id }), error => { if (error) fail(); });
+  };
+}
+
+function runClient(reverse = false) {
   loadWebSocketRuntime();
   const listenPort = integer("EGRESS_BRIDGE_LISTEN_PORT", 8080);
   const guardianUrl = required("EGRESS_BRIDGE_URL");
-  const trafficToken = required("EGRESS_BRIDGE_TRAFFIC_TOKEN");
+  // Together's application port is protected by the per-cell bridge token.
+  // Its SDK/management bearer token must never enter the workload VM.
+  const trafficHeader = process.env.EGRESS_BRIDGE_TRAFFIC_HEADER ?? "e2b-traffic-access-token";
+  if (!["none", "e2b-traffic-access-token"].includes(trafficHeader)) {
+    throw new Error("unsupported bridge traffic header");
+  }
+  const trafficToken = trafficHeader === "none" ? null : required("EGRESS_BRIDGE_TRAFFIC_TOKEN");
   const cellToken = required("EGRESS_BRIDGE_CELL_TOKEN");
   const selectiveProxy = process.env.EGRESS_BRIDGE_SELECTIVE_PROXY === "1";
+  const reverseRoute = reverse ? createReverseRoute(cellToken) : null;
 
   const server = net.createServer({ allowHalfOpen: false }, (downstream) => {
     downstream.pause();
@@ -460,9 +529,10 @@ function runClient() {
     };
 
     function connectGuardian(initialBytes = null) {
+      if (reverseRoute) return reverseRoute(downstream, initialBytes, release);
       const websocket = new WebSocket(guardianUrl, {
         headers: {
-          "e2b-traffic-access-token": trafficToken,
+          ...(trafficHeader === "none" ? {} : { [trafficHeader]: trafficToken }),
           "x-together-egress-cell-token": cellToken,
         },
         handshakeTimeout: 10_000,
@@ -584,5 +654,6 @@ module.exports = {
 if (require.main === module) {
   if (MODE === "server") runServer();
   else if (MODE === "client") runClient();
-  else throw new Error("usage: node tcp_ws_bridge.cjs <server|client>");
+  else if (MODE === "reverse-client") runClient(true);
+  else throw new Error("usage: node tcp_ws_bridge.cjs <server|client|reverse-client>");
 }

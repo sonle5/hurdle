@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { codeToHtml } from "shiki/bundle/web";
+import { cn } from "@/lib/utils";
 
 function isDarkActive(): boolean {
   if (typeof document === "undefined") return false;
@@ -11,9 +12,11 @@ function isDarkActive(): boolean {
 export function CodeBlock({
   code,
   lang = "json",
+  className,
 }: {
   code: string;
   lang?: string;
+  className?: string;
 }) {
   const [html, setHtml] = useState<string | null>(null);
   const [dark, setDark] = useState<boolean>(isDarkActive);
@@ -35,13 +38,13 @@ export function CodeBlock({
 
   if (!html) {
     return (
-      <pre className="text-xs text-fg-muted overflow-x-auto bg-surface p-2 rounded whitespace-pre-wrap">{code}</pre>
+      <pre className={cn("text-xs text-fg-muted overflow-x-auto bg-surface p-2 rounded whitespace-pre-wrap", className)}>{code}</pre>
     );
   }
 
   return (
     <div
-      className="text-xs overflow-x-auto rounded [&_pre]:p-2 [&_pre]:bg-surface [&_pre]:rounded [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap"
+      className={cn("text-xs overflow-x-auto rounded [&_pre]:p-2 [&_pre]:bg-surface [&_pre]:rounded [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap", className)}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

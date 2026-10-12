@@ -1,5 +1,6 @@
 import "server-only";
 import { getCanonicalDashboardSource } from "./canonical-dashboard-results.server";
+import type { CanonicalDashboardRuntime } from "./canonical-dashboard-projection.mjs";
 
 export type EvalVersionOption = {
   id: string;
@@ -58,6 +59,7 @@ export type SessionSummary = {
   configDir: string;
   model: string;                // alias identity: "opus" | "sonnet" | "gpt-5.5" | "" (legacy)
   modelResolved: string | null; // concrete version, e.g. "claude-opus-4-7"
+  runtime?: CanonicalDashboardRuntime | null;
   task: string;
   taskName: string;
   durationSec: number;
@@ -70,7 +72,8 @@ export type SessionSummary = {
   manualOverride?: { reason: string } | null;
   toolCalls: number | null;
   totalTokensIn: number;
-  costUsd: number;
+  costUsd: number | null;
+  costSource?: "reported" | "estimated" | "unavailable";
   mcpCalls: number;
   skillInjections: number;
   injectedSkills: string[];

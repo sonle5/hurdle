@@ -1,6 +1,7 @@
+import { cliExecutable } from "../lib/terminal-output.mjs";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseEnv, stripVTControlCharacters } from "node:util";
@@ -35,6 +36,8 @@ async function fixture(t, example = "copy-message") {
   return { root, io, dependencies, calls, output: () => stripVTControlCharacters(output), runtime: () => JSON.parse(readFileSync(join(root, ".hurdle/runtime/default.json"), "utf8")) };
 }
 
+const sourceExecutable = cliExecutable();
+
 test("setup builds once, saves a default, and validate/view discover it without execution", async t => {
   const f = await fixture(t, "together-api");
   let available = false, builds = 0;
@@ -45,7 +48,7 @@ test("setup builds once, saves a default, and validate/view discover it without 
     } }; },
     async launchViewer({ storeEnvironment }) { assert.equal(storeEnvironment.HURDLE_RESULT_STORE_ROOT, join(f.root, ".hurdle/e2b-results-v1")); return { kind: "stopped" }; },
   });
-  assert.equal(await cli.main(["setup", "--yes"], f.io), 0, f.output());
+  assert.equal(await cli.main(["setup", "--sandbox", "e2b", "--yes"], f.io), 0, f.output());
   assert.equal(builds, 1);
   const config = f.runtime();
   assert.equal(config.environment.kind, "e2b");
@@ -57,12 +60,61 @@ test("setup builds once, saves a default, and validate/view discover it without 
   assert.equal(checked.runtimeProfile.environment.kind, "e2b");
   assert.deepEqual(checked.requiredCredentials, ["TOGETHER_API_KEY"]);
   assert.equal(await cli.main(["view"], f.io), 0);
-  assert.equal(await cli.main(["setup", "--yes"], f.io), 0);
+  assert.equal(await cli.main(["setup", "--sandbox", "e2b", "--yes"], f.io), 0);
   assert.equal(builds, 1, "An available template must be reused without build usage");
   assert.equal(readFileSync(join(f.root, ".gitignore"), "utf8"), "/.env.local\n/.hurdle/\n/.tae/\n");
   assert.doesNotMatch(f.output(), /test-e2b-secret|test-agent-secret|test-target-secret/);
 });
 
+test("sandbox setup guides pending Postgres migrations and run blocks until explicit storage setup", async t => {
+  for (const provider of ["e2b", "together"]) for (const json of [false, true]) {
+    const f = await fixture(t, "together-api");
+    const suite = "examples/together-api/example.suite.mjs";
+    mkdirSync(join(f.root, "examples"));
+    renameSync(join(f.root, "evals"), join(f.root, "examples/together-api"));
+    for (const name of ["one", "two"]) {
+      mkdirSync(join(f.root, "evals", name), { recursive: true });
+      writeFileSync(join(f.root, "evals", name, "example.suite.mjs"), 'throw Error("Must not select another Suite");');
+    }
+    const environment = { kind: provider, apiKeyEnv: provider === "e2b" ? "E2B_API_KEY" : "TOGETHER_API_KEY", settings: provider === "e2b"
+      ? { workloadTemplate: "existing:v1" } : { snapshotAlias: "existing@v1" } };
+    mkdirSync(join(f.root, ".hurdle/runtime"), { recursive: true });
+    writeFileSync(join(f.root, ".hurdle/runtime/default.json"), JSON.stringify({ schemaVersion: 1, environment,
+      resultStore: { kind: "postgres", databaseUrlEnv: "DATABASE_URL", artifactRoot: "../artifacts" } }));
+    let ready = false, migrations = 0;
+    const cli = createFrameworkCli({ ...f.dependencies, env: { ...f.dependencies.env, DATABASE_URL: "postgresql://synthetic:synthetic@invalid.test/results" },
+      checkAgentReadiness: input => checkAgentReadiness(input, { fetch: async () => new Response("{}"),
+        checkE2b: async () => ({ status: "pass", message: "verified" }),
+        checkTogetherSandbox: async () => ({ status: "pass", message: "verified" }),
+        checkPostgres: async () => ready ? { status: "pass", message: "schema ready" }
+          : { status: "warning", code: "postgres.setup-required", message: "result schema needs upgrading" } }),
+      loadSetupBackend: async () => ({ exists: async () => true }),
+      loadTogetherSetupBackend: async () => ({ exists: async () => true }),
+      loadPostgresSetupBackend: async () => ({ checkConnection: async () => {}, migrate: async () => { ready = true; migrations++; } }),
+      openPostgresResultStore() { assert.fail("Unready storage must block before opening a store"); },
+    });
+    assert.equal(await cli.main(["setup", suite, "--sandbox", provider, ...(json ? ["--json"] : [])], f.io), 0, f.output());
+    const next = [`${sourceExecutable} setup ${suite} --store postgres`, `${sourceExecutable} run ${suite} --view`];
+    if (json) assert.deepEqual(JSON.parse(f.output()).nextCommands, next);
+    else { assert.doesNotMatch(f.output(), /Setup complete/); assert.ok(f.output().indexOf(next[0]) < f.output().indexOf(next[1])); }
+    assert.equal(migrations, 0);
+    let blocked = "";
+    const io = { cwd: f.root, stdout: { write(v) { blocked += v; } }, stderr: { write(v) { blocked += v; } } };
+    assert.equal(await cli.main(["run", suite, "--view"], io), 1, blocked);
+    assert.match(blocked, /\[runtime.postgres-setup-required\]/);
+    assert.ok(blocked.includes(next[0]));
+    assert.doesNotMatch(blocked, /store-unavailable|Plan\s|Ready to run/);
+    assert.equal(migrations, 0);
+    let storageOutput = "";
+    const storageIo = { ...io, stdout: { write(v) { storageOutput += v; } } };
+    assert.equal(await cli.main([...next[0].split(" ").slice(2), "--json"], storageIo), 0);
+    assert.deepEqual(JSON.parse(storageOutput).nextCommands, [next[1]]);
+    assert.equal(migrations, 1);
+    blocked = "";
+    assert.equal(await cli.main(["validate", suite], io), 0, blocked);
+    assert.match(blocked, /Ready to run/);
+  }
+});
 test("setup, validate, and view reuse an existing .tae Runtime and preserve its store", async t => {
   const f = await fixture(t, "together-api");
   const path = join(f.root, ".tae/runtime/default.json");
@@ -74,7 +126,7 @@ test("setup, validate, and view reuse an existing .tae Runtime and preserve its 
     loadSetupBackend: async () => ({ exists: async () => true, build() { assert.fail("Existing template must be reused"); } }),
     async launchViewer({ storeEnvironment }) { stores.push(storeEnvironment.HURDLE_RESULT_STORE_ROOT); return { kind: "stopped" }; },
   });
-  assert.equal(await cli.main(["setup"], f.io), 0, f.output());
+  assert.equal(await cli.main(["setup", "--sandbox", "e2b"], f.io), 0, f.output());
   assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), config);
   assert.equal(existsSync(join(f.root, ".hurdle")), false);
   assert.match(f.output(), /Runtime\s+\.tae\/runtime\/default\.json/);
@@ -88,14 +140,14 @@ test("setup, validate, and view reuse an existing .tae Runtime and preserve its 
 test("setup adopts existing template capacity and rejects invalid Runtime limits before provider requests", async t => {
   const f = await fixture(t);
   const cli = createFrameworkCli({ ...f.dependencies, loadSetupBackend: async () => ({ exists: async () => ({ cpuCount: 1, memoryMB: 1024 }) }) });
-  assert.equal(await cli.main(["setup", "--template", "my-template:v1"], f.io), 0, f.output());
+  assert.equal(await cli.main(["setup", "--sandbox", "e2b", "--template", "my-template:v1"], f.io), 0, f.output());
   const config = f.runtime();
   assert.equal(config.environment.settings.cpuCount, 1);
   assert.equal(config.environment.settings.memoryMiB, 1024);
   config.environment.settings.maxLifetimeMs = -1;
   writeFileSync(join(f.root, ".hurdle/runtime/default.json"), JSON.stringify(config));
   const before = f.calls.length;
-  assert.equal(await cli.main(["setup"], f.io), 1);
+  assert.equal(await cli.main(["setup", "--sandbox", "e2b"], f.io), 1);
   assert.equal(f.calls.length, before);
   assert.match(f.output(), /maxLifetimeMs.*integer/);
 });
@@ -113,7 +165,7 @@ test("missing/rejected credentials, declined builds, and missing custom template
   for (const scenario of ["missing", "rejected", "declined", "custom", "cancelled"]) {
     const f = await fixture(t);
     const deps = { ...f.dependencies };
-    const args = ["setup"];
+    const args = ["setup", "--sandbox", "e2b"];
     if (scenario === "missing") deps.env = {};
     if (scenario === "rejected") deps.checkAgentReadiness = async () => ({ ok: false, checks: [{ status: "fail", message: "Credential rejected." }] });
     if (scenario === "custom") args.push("--template", "my-agent:v1", "--yes");
@@ -139,7 +191,7 @@ test("hidden prompted credentials are saved privately without changing existing 
       return `private-${name}`;
     },
   });
-  assert.equal(await cli.main(["setup", "--yes", "--interactive"], f.io), 0, f.output());
+  assert.equal(await cli.main(["setup", "--sandbox", "e2b", "--yes", "--interactive"], f.io), 0, f.output());
   const path = join(f.root, ".env.local");
   const saved = parseEnv(readFileSync(path, "utf8"));
   assert.equal(saved.KEEP_ME, "yes");
@@ -150,19 +202,19 @@ test("hidden prompted credentials are saved privately without changing existing 
   assert.doesNotMatch(f.output(), /private-E2B|private-ANTHROPIC|private-TOGETHER/);
 });
 
-test("default setup never prompts on a TTY and JSON lists all missing credential alternatives", async t => {
+test("explicit E2B setup never prompts on a TTY and JSON lists all missing credential alternatives", async t => {
   const human = await fixture(t, "together-api");
   human.io.stdin = { isTTY: true }; human.io.stdout.isTTY = true;
   let prompts = 0;
   const humanCli = createFrameworkCli({ ...human.dependencies, env: {}, promptSetup() { prompts++; return "private-value"; } });
-  assert.equal(await humanCli.main(["setup"], human.io), 1);
+  assert.equal(await humanCli.main(["setup", "--sandbox", "e2b"], human.io), 1);
   assert.equal(prompts, 0);
   assert.match(human.output(), /setup.credentials-missing/);
   assert.match(human.output(), /E2B_API_KEY.*ANTHROPIC_API_KEY.*TOGETHER_API_KEY/);
   const f = await fixture(t, "together-api");
   f.io.stdin = { isTTY: true }; f.io.stdout.isTTY = true; f.io.stderr.isTTY = true;
   const cli = createFrameworkCli({ ...f.dependencies, env: {}, promptSetup() { assert.fail("Default setup must never prompt"); } });
-  assert.equal(await cli.main(["setup", "--json"], f.io), 1);
+  assert.equal(await cli.main(["setup", "--sandbox", "e2b", "--json"], f.io), 1);
   const report = JSON.parse(f.output());
   assert.equal(report.ok, false);
   assert.equal(report.exitCode, 1);
@@ -178,15 +230,15 @@ test("default setup never prompts on a TTY and JSON lists all missing credential
 test("JSON setup requires explicit build usage acceptance and emits one result without progress", async t => {
   const f = await fixture(t);
   const cli = createFrameworkCli({ ...f.dependencies, promptSetup() { assert.fail("Noninteractive setup must never prompt"); } });
-  assert.equal(await cli.main(["setup", "--json"], f.io), 1);
+  assert.equal(await cli.main(["setup", "--sandbox", "e2b", "--json"], f.io), 1);
   const stopped = JSON.parse(f.output());
   assert.equal(stopped.error.code, "setup.build-required");
-  assert.deepEqual(stopped.nextCommands, ["npx hurdle setup --yes --json"]);
+  assert.deepEqual(stopped.nextCommands, [`${sourceExecutable} setup --sandbox e2b --yes --json`]);
   assert.equal(f.calls.some(([kind]) => kind === "build"), false);
   assert.equal(existsSync(join(f.root, ".gitignore")), false);
   const g = await fixture(t);
   g.io.stdout.isTTY = true; g.io.stderr.isTTY = true;
-  assert.equal(await createFrameworkCli(g.dependencies).main(["setup", "--json", "--yes"], g.io), 0);
+  assert.equal(await createFrameworkCli(g.dependencies).main(["setup", "--sandbox", "e2b", "--json", "--yes"], g.io), 0);
   const configured = JSON.parse(g.output());
   assert.equal(configured.ok, true);
   assert.equal(configured.executionEnvironment, "e2b");
@@ -204,7 +256,7 @@ test("JSON reports rejected readiness and unavailable templates without raw back
         ? { checkAgentReadiness: async () => ({ ok: false, checks: [{ code: "auth.rejected", status: "fail", message: "Credential rejected." }] }) }
         : { loadSetupBackend: async () => ({ exists: async () => { throw Error("test-e2b-secret"); } }) }),
     });
-    assert.equal(await cli.main(["setup", "--json"], f.io), 1);
+    assert.equal(await cli.main(["setup", "--sandbox", "e2b", "--json"], f.io), 1);
     const report = JSON.parse(f.output());
     assert.equal(report.error.code, scenario === "readiness" ? "setup.not-ready" : "setup.template-unavailable");
     assert.doesNotMatch(f.output(), /test-e2b-secret/);
@@ -216,12 +268,12 @@ test("setup refuses credential symlinks and suppresses provider exception detail
   const target = join(f.root, "secret-target");
   writeFileSync(target, "KEEP=untouched\n");
   symlinkSync(target, join(f.root, ".env.local"));
-  assert.equal(await createFrameworkCli(f.dependencies).main(["setup", "--yes"], f.io), 1);
+  assert.equal(await createFrameworkCli(f.dependencies).main(["setup", "--sandbox", "e2b", "--yes"], f.io), 1);
   assert.equal(readFileSync(target, "utf8"), "KEEP=untouched\n");
   assert.equal(f.calls.length, 0);
   const g = await fixture(t);
   const cli = createFrameworkCli({ ...g.dependencies, loadSetupBackend: async () => ({ exists: async () => true }), checkAgentReadiness: async () => { throw Error("private-response test-agent-secret"); } });
-  assert.equal(await cli.main(["setup"], g.io), 1);
+  assert.equal(await cli.main(["setup", "--sandbox", "e2b"], g.io), 1);
   assert.doesNotMatch(g.output(), /private-response|test-agent-secret/);
 });
 
@@ -231,25 +283,27 @@ test("a failed build cannot change an active runtime, and reruns preserve custom
   mkdirSync(join(f.root, ".hurdle/runtime"), { recursive: true });
   writeFileSync(join(f.root, ".hurdle/runtime/default.json"), JSON.stringify(runtime));
   const failed = createFrameworkCli({ ...f.dependencies, loadSetupBackend: async () => ({ exists: async () => false, build: async () => { throw Error("private-build-error"); } }) });
-  assert.equal(await failed.main(["setup", "--yes"], f.io), 1);
+  assert.equal(await failed.main(["setup", "--sandbox", "e2b", "--yes"], f.io), 1);
   assert.deepEqual(f.runtime(), runtime);
   assert.doesNotMatch(f.output(), /private-build-error/);
   const success = createFrameworkCli({ ...f.dependencies, loadSetupBackend: async () => ({ exists: async () => true }) });
-  assert.equal(await success.main(["setup"], f.io), 0);
+  assert.equal(await success.main(["setup", "--sandbox", "e2b"], f.io), 0);
   assert.deepEqual(f.runtime(), runtime);
 });
 
 test("explicit Runtime/topology selections override the saved default and unsupported providers fail early", async t => {
   const f = await fixture(t);
-  assert.equal(await createFrameworkCli(f.dependencies).main(["setup", "--yes"], f.io), 0);
+  assert.equal(await createFrameworkCli(f.dependencies).main(["setup", "--sandbox", "e2b", "--yes"], f.io), 0);
   const cli = createFrameworkCli(f.dependencies);
   assert.equal(await cli.main(["validate", "--environment", "local"], f.io), 0);
   assert.equal(f.calls.at(-1)[1].runtimeProfile.environment.kind, "local");
+  assert.match(f.output(), /Runtime\s+Command-line configuration\n  Execution\s+Local\n  Store\s+Filesystem/);
   writeFileSync(join(f.root, "local.json"), JSON.stringify({ schemaVersion: 1, environment: { kind: "local" }, resultStore: { kind: "local", root: "./local-results" } }));
   assert.equal(await cli.main(["validate", "--runtime", "local.json"], f.io), 0);
   assert.equal(f.calls.at(-1)[1].runtimeProfile.environment.kind, "local");
+  assert.match(f.output(), /Runtime\s+local.json\n  Execution\s+Local\n  Store\s+Filesystem/);
   const before = f.calls.length;
-  for (const args of [["--sandbox", "together"], ["--template"], ["--yes", "--yes"]]) assert.equal(await cli.main(["setup", ...args], f.io), 2);
+  for (const args of [["--sandbox", "unsupported"], ["--template"], ["--yes", "--yes"]]) assert.equal(await cli.main(["setup", ...args], f.io), 2);
   assert.equal(f.calls.length, before);
 });
 

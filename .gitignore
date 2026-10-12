@@ -39,3 +39,6 @@ viewer/.zed/
 viewer/config/
 viewer/.mcp.json
 viewer/opencode.json
+/.env.local
+/.hurdle/
+/.tae/

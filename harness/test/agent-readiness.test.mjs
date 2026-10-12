@@ -114,18 +114,28 @@ test("network failures, forbidden checks, and provider errors are not called inv
   assert.doesNotMatch(JSON.stringify(checked), /secret-error/);
 });
 
-test("remote runtimes check account access without checking the host CLI or allocating resources", async () => {
-  const checked = await checkAgentReadiness({
-    ...input({ CLAUDE_CODE_OAUTH_TOKEN: "token", REMOTE_KEY: "e2b", DATABASE_URL: "postgres-secret" }),
-    runtimeProfile: { environment: { kind: "e2b", apiKeyEnv: "REMOTE_KEY" }, resultStore: { kind: "postgres", databaseUrlEnv: "DATABASE_URL" } },
-  }, {
-    probeCli() { assert.fail("Local executable does not establish remote readiness"); },
-    checkE2b: async key => { assert.equal(key, "e2b"); return { status: "pass", message: "account accessible" }; },
-    checkPostgres: async value => { assert.equal(value, "postgres-secret"); return { status: "fail", message: "connection unavailable" }; },
-  });
-  assert.equal(checked.ok, false);
-  assert.ok(checked.checks.some(value => value.code === "agent.remote-unverified"));
-  assert.doesNotMatch(JSON.stringify(checked), /postgres-secret/);
+test("remote readiness diagnoses account failures and blocks unconfigured stores except during sandbox setup", async () => {
+  for (const provider of ["e2b", "together"]) for (const mode of ["connection", "schema", "sandbox-setup"]) {
+    const checked = await checkAgentReadiness({
+      ...input({ CLAUDE_CODE_OAUTH_TOKEN: "token", REMOTE_KEY: "sandbox-key", DATABASE_URL: "postgres-secret" }),
+      runtimeProfile: { environment: { kind: provider, apiKeyEnv: "REMOTE_KEY" }, resultStore: { kind: "postgres", databaseUrlEnv: "DATABASE_URL" } },
+      allowResultStoreSetup: mode === "sandbox-setup",
+    }, {
+      probeCli() { assert.fail("Local executable does not establish remote readiness"); },
+      checkE2b: async key => { assert.equal(key, "sandbox-key"); return { status: "pass", message: "account accessible" }; },
+      checkTogetherSandbox: async key => { assert.equal(key, "sandbox-key"); return { status: "pass", message: "account accessible" }; },
+      checkPostgres: async value => { assert.equal(value, "postgres-secret"); return mode === "connection"
+        ? { status: "fail", message: "connection unavailable" }
+        : { status: "warning", code: "postgres.setup-required", message: "schema upgrade required" }; },
+    });
+    assert.equal(checked.ok, mode === "sandbox-setup");
+    const store = checked.checks.find(check => check.code.startsWith("runtime.postgres"));
+    assert.equal(store.status, mode === "sandbox-setup" ? "warning" : "fail");
+    const remote = checked.checks.find(value => value.code === "agent.remote-unverified");
+    assert.equal(remote.status, "skip");
+    assert.equal(remote.message, `Claude Code runs inside the ${provider === "together" ? "Together" : "E2B"} sandbox; no local CLI installation needed.`);
+    assert.doesNotMatch(JSON.stringify(checked), /postgres-secret|availability will be checked/);
+  }
 });
 
 test("CLI validate and run reject bad authentication before a store, agent, Judge, or Viewer starts", async t => {

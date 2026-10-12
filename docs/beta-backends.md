@@ -3,7 +3,7 @@
 Hurdle runs locally and saves results to `.hurdle/results-v1` by default. Follow this
 guide only when you need isolated E2B execution, Postgres storage, or both.
 
-For E2B setup, use `npx hurdle setup --yes` in your evaluation project. It
+For E2B setup, use `npx hurdle setup --sandbox e2b --yes` in your evaluation project. It
 reads configured credentials, reuses or builds a template, and saves a Runtime used by
 subsequent commands. For storage setup, run `npx hurdle setup --store postgres`
 with an existing database URL. It checks the connection, applies the schema, and
@@ -162,3 +162,13 @@ process-quiescence defect can mark a run incomplete even when its Judge passes.
 Voice, DMI, fine-tuning, Jig, and persistent-resource lifecycle Tasks are
 outside the preview. This release does not claim legacy score continuity or full
 replacement of the legacy runner.
+
+
+## Together sandbox
+
+Together execution can use filesystem or Postgres storage through the same
+Runtime API. Run `hurdle setup --sandbox together --yes` for an artifact-only
+Suite, or initialize `together` / `together-postgres` with `--snapshot ALIAS`.
+Read [Together sandbox setup and limitations](./sandbox-setup.md#together-sandbox)
+before use. Together API Suites use a separate Guardian VM for the same trusted
+capture, request blocking and credential substitution as E2B.

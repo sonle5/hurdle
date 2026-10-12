@@ -54,7 +54,7 @@ function buildConfigs(
       a.total += 1;
       if (s.passed === true) a.pass += 1;
       if (s.durationSec > 0) { a.durTotal += s.durationSec; a.durN += 1; }
-      if (s.costUsd > 0) { a.costTotal += s.costUsd; a.costN += 1; }
+      if (s.costUsd !== null && s.costUsd >= 0) { a.costTotal += s.costUsd; a.costN += 1; }
       a.corrTotal += s.corrections; a.corrN += 1;
       if (s.toolCalls != null) { a.toolTotal += s.toolCalls; a.toolN += 1; }
       if (s.totalTokensIn > 0) { a.tokTotal += s.totalTokensIn; a.tokN += 1; }
@@ -95,7 +95,7 @@ function buildHeroKpi(list: Awaited<ReturnType<typeof getAllSessions>>) {
     total++;
     if (s.passed === true) pass++;
     if (s.durationSec > 0) { durSum += s.durationSec; durN++; }
-    if (s.costUsd > 0) { costSum += s.costUsd; costN++; }
+    if (s.costUsd !== null && s.costUsd >= 0) { costSum += s.costUsd; costN++; }
   }
   return { runs, total, pass, pendingAudit, unknown, running, avgDuration: durN ? Math.round(durSum / durN) : 0, avgCost: costN ? costSum / costN : 0 };
 }
@@ -192,6 +192,7 @@ export default async function TaskPage({
         toolCalls: s.toolCalls,
         totalTokensIn: s.totalTokensIn,
         costUsd: s.costUsd,
+        costSource: s.costSource,
         corrections: s.corrections,
         createdAt: s.createdAt.toISOString(),
         needsFollowup: s.needsFollowup,

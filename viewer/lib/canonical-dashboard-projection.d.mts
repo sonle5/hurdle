@@ -1,5 +1,11 @@
 export const MAX_CANONICAL_DASHBOARD_TRANSCRIPT_BYTES: number;
 
+export type CanonicalDashboardRuntime = Readonly<{
+  provider: string;
+  label: string;
+  template: string | null;
+}>;
+
 export type CanonicalDashboardVersion = Readonly<{
   id: string;
   name: string;
@@ -21,6 +27,7 @@ export type CanonicalDashboardSessionSummary = Readonly<{
   task: string;
   taskName: string;
   prompt: string;
+  runtime: CanonicalDashboardRuntime | null;
   [key: string]: unknown;
 }>;
 

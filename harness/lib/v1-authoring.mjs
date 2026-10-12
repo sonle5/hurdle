@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { DEFAULT_RUN_CONCURRENCY, normalizeRunConcurrency } from "./run-concurrency.mjs";
 import {
   cpSync,
   existsSync,
@@ -342,7 +343,7 @@ function validateConditionResources(value, conditionId, file) {
 function validateSuite(suite, suiteFile) {
   assertClosedKeys(
     suite,
-    ["api", "tasks", "agents", "conditions", "repeats", "verdict", "judge"],
+    ["api", "tasks", "agents", "conditions", "repeats", "concurrency", "verdict", "judge"],
     "Suite",
     suiteFile,
   );
@@ -391,6 +392,9 @@ function validateSuite(suite, suiteFile) {
     return [condition, validateConditionResources(resources, condition, suiteFile)];
   }));
   const repeats = suite.repeats === undefined ? 1 : suite.repeats;
+  let concurrency;
+  try { concurrency = normalizeRunConcurrency(suite.concurrency === undefined ? DEFAULT_RUN_CONCURRENCY : suite.concurrency); }
+  catch { fail("suite.concurrency-invalid", "Suite concurrency must be an integer between 1 and 100.", suiteFile); }
   if (!Number.isSafeInteger(repeats) || repeats < 1 || repeats > 100) {
     fail("suite.repeats-invalid", "Suite repeats must be an integer between 1 and 100.", suiteFile);
   }
@@ -414,6 +418,7 @@ function validateSuite(suite, suiteFile) {
     agents,
     conditions: Object.freeze(conditions),
     repeats,
+    concurrency,
     verdict: suite.verdict,
     judge,
   });
@@ -833,6 +838,7 @@ export async function resolveV1Suite({ suitePath }) {
         conditionIds: Object.freeze(Object.keys(validated.conditions)),
         agentSelections: Object.freeze([...validated.agents]),
         repeat: validated.repeats,
+        concurrency: validated.concurrency,
       }),
       generatedRoot,
       dispose: () => rmSync(generatedRoot, { recursive: true, force: true }),

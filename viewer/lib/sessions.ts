@@ -50,7 +50,8 @@ export type SessionStats = {
     cacheCreate: number;
     totalIn: number;
   };
-  costUsd: number; // Reported cost, or a historical estimate when unavailable
+  costUsd: number | null;
+  costSource?: "reported" | "estimated" | "unavailable";
   firstTimestamp: string;
   lastTimestamp: string;
   skillInjections: number;

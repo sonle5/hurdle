@@ -13,10 +13,10 @@ import { resolveV1Suite } from "../lib/v1-authoring.mjs";
 
 const cli = fileURLToPath(new URL("../bin/hurdle.mjs", import.meta.url));
 
-test("init pins both starter examples to explicit agent models and medium effort", async (t) => {
+test("init pins starter examples to explicit agent models and medium effort", async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "hurdle-agent-defaults-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
-  for (const example of ["copy-message", "together-api"]) {
+  for (const example of ["copy-message", "together-api", "concurrency-smoke"]) {
     for (const [agent, model] of [["claude-code", "claude-opus-5-5"], ["codex", "gpt-6.1-sol"]]) {
       const directory = `${example}-${agent}`;
       const result = spawnSync(process.execPath, [cli, "init", directory, "--example", example, "--agent", agent], { cwd, encoding: "utf8" });

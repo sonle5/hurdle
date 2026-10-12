@@ -36,7 +36,7 @@ use a new project directory and run the source CLI from your checkout:
 
 ```sh
 node /path/to/together-agent-evals/harness/bin/hurdle.mjs init --example together-api
-node /path/to/together-agent-evals/harness/bin/hurdle.mjs setup --yes
+node /path/to/together-agent-evals/harness/bin/hurdle.mjs setup --sandbox e2b --yes
 node /path/to/together-agent-evals/harness/bin/hurdle.mjs run --view
 ```
 

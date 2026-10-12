@@ -157,17 +157,18 @@ test("the top-left Hurdle brand has no hover tooltip", () => {
 test("the app shell pins the rail footer while only the content pane scrolls", () => {
   const layout = source("../app/layout.tsx");
   const shell = source("../components/shell/ResizableAppShell.tsx");
+  const sidebarShell = source("../components/shell/ResizableSidebarShell.tsx");
   const rail = source("../components/shell/LeftRail.tsx");
   const credit = source("../components/shell/TogetherCredit.tsx");
 
   assert.match(layout, /<body className="h-full overflow-hidden flex flex-col">/);
   assert.match(
-    shell,
+    sidebarShell,
     /className="h-screen w-full overflow-hidden bg-canvas text-foreground"/,
   );
   assert.match(
     shell,
-    /<Panel id="app-content" minSize="50%" className="min-w-0 overflow-y-auto">/,
+    /contentClassName="overflow-y-auto"/,
   );
   assert.equal((rail.match(/hidden h-full w-full/g) ?? []).length, 2);
   assert.doesNotMatch(rail, /sticky top-0/);
@@ -240,9 +241,7 @@ test("a canonical Local Result Store that has no runs renders an actionable empt
 
   const home = source("../app/page.tsx");
   assert.match(home, /canonicalSource\.status === "empty"/);
-  assert.match(home, /Run your first evaluation/);
-  assert.match(home, /onboarding\.commands/);
-  assert.match(home, /Results folder/);
+  assert.match(home, /<GettingStarted steps=\{onboarding\?\.steps\}/);
 });
 
 test("the session highlights use a roomy two-by-two layout inside the narrow detail column", () => {
@@ -347,36 +346,38 @@ test("the check-code drawer resizes from its left edge", () => {
 
 test("the transcript sidebar uses the shared resizable panel interaction", () => {
   const shell = source("../components/ResizableSessionShell.tsx");
+  const sidebarShell = source("../components/shell/ResizableSidebarShell.tsx");
   const session = source("../app/s/[id]/page.tsx");
   const sidebar = source("../components/SessionSidebar.tsx");
   const storage = source("../lib/browser-layout-storage.ts");
 
-  assert.match(shell, /defaultSize=\{initialRailWidth\}/);
-  assert.match(shell, /minSize=\{MIN_TRANSCRIPT_RAIL_WIDTH\}/);
-  assert.match(shell, /maxSize=\{MAX_TRANSCRIPT_RAIL_WIDTH\}/);
-  assert.match(shell, /aria-label="Resize transcript sidebar"/);
-  assert.match(storage, /TRANSCRIPT_RAIL_WIDTH_STORAGE_KEY = "hurdle-transcript-rail-width"/);
-  assert.match(shell, /writeStoredWidth/);
+  assert.match(shell, /<ResizableSidebarShell/);
+  assert.match(sidebarShell, /minSize=\{MIN_SIDEBAR_WIDTH\}/);
+  assert.match(sidebarShell, /maxSize=\{MAX_SIDEBAR_WIDTH\}/);
+  assert.match(shell, /resizeLabel="Resize transcript sidebar"/);
+  assert.match(storage, /SIDEBAR_WIDTH_STORAGE_KEY = "hurdle-sidebar-width"/);
+  assert.match(sidebarShell, /writeStoredWidth/);
   assert.match(shell, /<SessionSidebar messages=\{messages\}/);
-  assert.match(session, /parseStoredWidth\(/);
-  assert.match(session, /cookieStore\.get\(TRANSCRIPT_RAIL_WIDTH_STORAGE_KEY\)/);
-  assert.match(session, /<ResizableSessionShell messages=\{session\.messages\} initialRailWidth=\{initialTranscriptRailWidth\}>/);
+  assert.match(session, /readSidebarLayout\(/);
+  assert.match(session, /initialRailWidth=\{sidebarLayout\.width\} initialRailCollapsed=\{sidebarLayout\.collapsed\}/);
+  assert.match(sidebar, /<SidebarToggle/);
   assert.doesNotMatch(session, /<SessionSidebar/);
   assert.doesNotMatch(sidebar, /w-80|min-w-72/);
 });
 
 test("resizable app layouts persist user-adjusted widths", () => {
   const appShell = source("../components/shell/ResizableAppShell.tsx");
+  const sidebarShell = source("../components/shell/ResizableSidebarShell.tsx");
   const storage = source("../lib/browser-layout-storage.ts");
 
-  assert.match(appShell, /APP_RAIL_WIDTH_STORAGE_KEY = "hurdle-app-rail-width"/);
-  assert.match(appShell, /APP_RAIL_COLLAPSED_STORAGE_KEY = "hurdle-app-rail-collapsed"/);
-  assert.match(appShell, /readStoredWidth/);
-  assert.match(appShell, /writeStoredWidth/);
-  assert.match(appShell, /readStoredBoolean/);
-  assert.match(appShell, /writeStoredBoolean/);
-  assert.match(appShell, /readyToPersistRef/);
-  assert.match(appShell, /size\.inPixels <= COLLAPSED_RAIL_WIDTH \+ 1/);
+  assert.match(appShell, /<ResizableSidebarShell/);
+  assert.match(sidebarShell, /readStoredWidth/);
+  assert.match(sidebarShell, /writeStoredWidth/);
+  assert.match(sidebarShell, /readStoredBoolean/);
+  assert.match(sidebarShell, /writeStoredBoolean/);
+  assert.match(sidebarShell, /if \(!isUserInteraction/);
+  assert.match(sidebarShell, /size\.inPixels <= COLLAPSED_SIDEBAR_WIDTH \+ 1/);
+  assert.match(storage, /SIDEBAR_COLLAPSED_STORAGE_KEY = "hurdle-sidebar-collapsed"/);
   assert.match(storage, /typeof window === "undefined"/);
   assert.match(storage, /readStoredPreference\(window\.localStorage, key\)/);
   assert.match(storage, /window\.localStorage\.setItem/);

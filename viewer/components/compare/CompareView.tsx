@@ -1,5 +1,6 @@
 "use client";
 
+import { RunCost } from "@/components/RunCost";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -37,7 +38,8 @@ export type CompareSession = {
   result: string | null;
   rawResult?: string | null;
   auditVerdict: string | null;
-  costUsd: number;
+  costUsd: number | null;
+  costSource?: "reported" | "estimated" | "unavailable";
   mcpCalls: number;
   mcpMethods: string[];
   toolVersions?: unknown;
@@ -228,7 +230,7 @@ function addSide(stats: SideStats, session: CompareSession) {
     stats.durationTotal += session.durationSec;
     stats.durationCount += 1;
   }
-  if (session.costUsd > 0) {
+  if (session.costUsd !== null && session.costUsd >= 0) {
     stats.costTotal += session.costUsd;
     stats.costCount += 1;
   }
@@ -1243,7 +1245,7 @@ function DrilldownPanel({
                   <SessionLinkCell session={pair.cur} />
                   <td className="px-3 py-3 text-right align-top text-[11px] tabular-nums text-fg-muted">
                     <div>{fmtSignedDuration(pair.cur.durationSec - pair.base.durationSec)}</div>
-                    <div>{fmtSignedCost(pair.cur.costUsd - pair.base.costUsd)}</div>
+                    <div>{pair.cur.costUsd !== null && pair.base.costUsd !== null ? fmtSignedCost(pair.cur.costUsd - pair.base.costUsd) : "—"}</div>
                     {pair.bothScored && (
                       <div className={cn("font-medium", !resultChanged ? "text-fg-faint" : pair.cur.passed ? "text-pass" : "text-fail")}>
                         {!resultChanged ? "same result" : pair.cur.passed ? "improved" : "regressed"}
@@ -1301,7 +1303,7 @@ function SessionLinkCell({ session }: { session: CompareSession }) {
         <ExternalLink className="h-3 w-3 text-fg-faint group-hover:text-info" aria-hidden />
       </Link>
       <div className="mt-1 text-[10px] tabular-nums text-fg-faint">
-        {fmtDuration(session.durationSec)} · {fmtCost(session.costUsd)}
+        {fmtDuration(session.durationSec)} · <RunCost value={session.costUsd} source={session.costSource} />
       </div>
       {!session.auditVerdict && (
         <div className="mt-1 text-[10px] text-warn">no deep audit</div>

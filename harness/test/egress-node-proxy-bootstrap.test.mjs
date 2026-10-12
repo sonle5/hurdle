@@ -156,6 +156,8 @@ https.globalAgent.addRequest({}, { hostname: "api.together.xyz" });
 console.log(JSON.stringify({ undici: global.__undiciRoutes, https: global.__httpsRoutes }));
 `;
     const child = spawnSync(process.execPath, ["--require", bootstrap, "-e", script], {
+      // Resolve the fixture modules before optional SDK dependencies in the repo.
+      cwd: dir,
       encoding: "utf-8",
       env: {
         ...process.env,

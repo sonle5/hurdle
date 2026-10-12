@@ -7,12 +7,14 @@ import { cn } from "@/lib/utils";
 export function CopyButton({
   value,
   label,
+  ariaLabel,
   copiedLabel = "Copied",
   size = "sm",
   className,
 }: {
   value: string;
   label?: React.ReactNode;
+  ariaLabel?: string;
   copiedLabel?: string;
   size?: "sm" | "xs";
   className?: string;
@@ -37,7 +39,7 @@ export function CopyButton({
     <button
       type="button"
       onClick={onClick}
-      aria-label={typeof label === "string" ? `Copy ${label}` : "Copy"}
+      aria-label={ariaLabel ?? (typeof label === "string" ? `Copy ${label}` : "Copy")}
       className={cn(
         "inline-flex items-center rounded-md border border-rule bg-background text-fg-muted hover:text-foreground transition-colors",
         sizeClass,

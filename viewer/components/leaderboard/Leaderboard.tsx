@@ -29,7 +29,8 @@ type SessionData = {
   createdAt?: string;
   toolCalls: number | null;
   totalTokensIn: number;
-  costUsd: number;
+  costUsd: number | null;
+  costSource?: "reported" | "estimated" | "unavailable";
   needsFollowup?: boolean;
   followupReason?: string | null;
   failureAnalysis?: unknown;
@@ -106,7 +107,7 @@ function excludedSub(kpi: { pendingAudit: number; unknown: number; running: numb
 // Aggregate a set of task groups into the (task × config) matrix. Pure so the
 // "all models" view can call it once per model without blending across them.
 function buildMatrix(groups: TaskGroup[]): MatrixData {
-  type Accum = { pass: number; total: number; durTotal: number; costTotal: number; failNotes: Map<string, number> };
+  type Accum = { pass: number; total: number; durTotal: number; costTotal: number; costCount: number; failNotes: Map<string, number> };
   const configSet = new Map<string, string>();
   const taskList: { slug: string; label: string; findings?: string }[] = [];
   const accum = new Map<string, Accum>();
@@ -116,10 +117,10 @@ function buildMatrix(groups: TaskGroup[]): MatrixData {
       if (!configSet.has(s.configId)) configSet.set(s.configId, s.configLabel);
       if (!isScoredResult(s.result)) continue;
       const key = `${g.task}|${s.configId}`;
-      const a = accum.get(key) ?? { pass: 0, total: 0, durTotal: 0, costTotal: 0, failNotes: new Map<string, number>() };
+      const a = accum.get(key) ?? { pass: 0, total: 0, durTotal: 0, costTotal: 0, costCount: 0, failNotes: new Map<string, number>() };
       a.total += 1;
       a.durTotal += s.durationSec;
-      a.costTotal += s.costUsd;
+      if (s.costUsd !== null) { a.costTotal += s.costUsd; a.costCount++; }
       if (s.passed === true) a.pass += 1;
       if (s.passed === false && s.note && s.note.trim()) {
         const n = s.note.trim();
@@ -138,7 +139,8 @@ function buildMatrix(groups: TaskGroup[]): MatrixData {
       pass: a.pass,
       total: a.total,
       avgDurationSec: a.total ? Math.round(a.durTotal / a.total) : 0,
-      avgCostUsd: a.total ? a.costTotal / a.total : 0,
+      avgCostUsd: a.costCount ? a.costTotal / a.costCount : 0,
+      costCount: a.costCount,
       topFails: topFails.length > 0 ? topFails : undefined,
     });
   }
@@ -162,7 +164,7 @@ function buildKpi(groups: TaskGroup[]) {
       total++;
       if (s.passed === true) pass++;
       if (s.durationSec > 0) { dur += s.durationSec; durCount++; }
-      if (s.costUsd > 0) { cost += s.costUsd; costCount++; }
+      if (s.costUsd !== null && s.costUsd >= 0) { cost += s.costUsd; costCount++; }
     }
   }
   return {
@@ -394,6 +396,7 @@ export function Leaderboard({
           toolCalls: s.toolCalls,
           totalTokensIn: s.totalTokensIn,
           costUsd: s.costUsd,
+          costSource: s.costSource,
           corrections: s.corrections,
           createdAt: s.createdAt,
           needsFollowup: s.needsFollowup,

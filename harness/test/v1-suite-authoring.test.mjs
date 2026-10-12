@@ -199,6 +199,7 @@ test("compact Suite defaults compile identically to their explicit forms", async
   assert.equal(compact.value.definitionFingerprint, verbose.value.definitionFingerprint);
   assert.deepEqual(compact.defaults.conditionIds, ["baseline"]);
   assert.equal(compact.defaults.repeat, 1);
+  assert.equal(compact.defaults.concurrency, 3);
 });
 
 test("a Task workspace preserves legacy fixture paths at the Agent workspace root", (t) => {
@@ -648,4 +649,25 @@ test("v1 rejects fixture and workspace paths that target the same Agent file", (
   const result = runCli(root, ["validate", "general.suite.mjs", "--offline"]);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /\[task\.fixture-collision\]/);
+});
+
+
+test("Suite concurrency accepts an explicit limit and rejects invalid values", async t => {
+  const root = mkdtempSync(join(tmpdir(), "hurdle-suite-concurrency-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const taskRoot = join(root, "tasks", "copy-message");
+  mkdirSync(taskRoot, { recursive: true });
+  writeFileSync(join(taskRoot, "prompt.md"), "Reply hello.");
+  writeFileSync(join(taskRoot, "checks.mjs"), 'import { defineChecks } from "hurdle"; export default defineChecks(run => run.expect.replyIncludes("hello"));');
+  for (const [index, value] of ["3", "100", "0", "-1", "101", "1.5", '"5"', "null", "NaN"].entries()) {
+    const suitePath = join(root, `limit-${index}.suite.mjs`);
+    writeFileSync(suitePath, `import { defineSuite } from "hurdle"; export default defineSuite({ tasks: ["./tasks/copy-message"], agents: [{runner: "claude-code"}], concurrency: ${value}, verdict: "code" });`);
+    if (index < 2) {
+      const resolved = await resolveV1Suite({ suitePath });
+      assert.equal(resolved.defaults.concurrency, Number(value));
+      resolved.dispose();
+    } else {
+      await assert.rejects(resolveV1Suite({ suitePath }), error => error.code === "suite.concurrency-invalid");
+    }
+  }
 });

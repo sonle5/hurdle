@@ -7,6 +7,7 @@ import { Activity, User, Bot, Terminal, FileText, Pencil, Search, Globe, Zap, Li
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { TogetherCredit } from "@/components/shell/TogetherCredit";
+import { SidebarToggle } from "@/components/shell/ResizableSidebarShell";
 
 const toolIcons: Record<string, typeof Terminal> = {
   Bash: Terminal,
@@ -24,7 +25,11 @@ const toolIcons: Record<string, typeof Terminal> = {
   ToolSearch: Search,
 };
 
-export function SessionSidebar({ messages }: { messages: ParsedMessage[] }) {
+export function SessionSidebar({ messages, collapsed, onCollapsedChange }: {
+  messages: ParsedMessage[];
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+}) {
   const [filter, setFilter] = useState<"default" | "no-tools" | "user" | "all">("default");
   const filtered = messages.filter((m) => {
     if (m.role === "user" && m.msgType === "user") {
@@ -42,17 +47,29 @@ export function SessionSidebar({ messages }: { messages: ParsedMessage[] }) {
     return true;
   });
 
+  if (collapsed) {
+    return (
+      <div className="hidden h-full w-full flex-col items-center bg-sidebar lg:flex">
+        <div className="flex h-12 w-full shrink-0 items-center justify-center border-b border-rule">
+          <Link href="/" className="font-mono text-sm font-semibold text-foreground">hurdle</Link>
+        </div>
+        <div className="mt-2"><SidebarToggle collapsed={collapsed} onCollapsedChange={onCollapsedChange} /></div>
+      </div>
+    );
+  }
+
   return (
     <div className="hidden h-full w-full min-w-0 flex-col bg-sidebar lg:flex">
       {/* Brand */}
-      <div className="px-4 h-12 border-b border-rule flex items-center flex-shrink-0">
+      <div className="px-3 h-12 border-b border-rule flex items-center justify-between flex-shrink-0">
         <Link href="/" className="inline-flex items-center gap-1.5 font-mono text-sm font-semibold text-foreground">
           <Activity className="h-3.5 w-3.5 text-fg-muted" strokeWidth={2.25} />
           hurdle
         </Link>
+        <SidebarToggle collapsed={collapsed} onCollapsedChange={onCollapsedChange} />
       </div>
       {/* Filters */}
-      <div className="px-3 py-2.5 border-b border-rule flex gap-1 flex-shrink-0">
+      <div className="px-3 py-2.5 border-b border-rule flex flex-wrap gap-1 flex-shrink-0">
         {(["default", "no-tools", "user", "all"] as const).map((f) => (
           <button
             key={f}

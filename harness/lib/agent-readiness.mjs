@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkE2bCredential, checkPostgresCredential } from "./credential-preflight.mjs";
+import { checkE2bCredential, checkPostgresCredential, checkTogetherSandboxCredential } from "./credential-preflight.mjs";
 
 const nonblank = value => typeof value === "string" && value.trim().length > 0;
 const result = (status, code, message) => ({ status, code, message });
@@ -65,9 +65,11 @@ async function checkApiKey(provider, name, key, fetch) {
 export async function checkAgentReadiness({
   agentSelections, runtimeProfile, runtimeEnv, requiredCredentials = [],
   judgeCredentialName = null,
+  allowResultStoreSetup = false,
 }, {
   fetch = globalThis.fetch, probeCli = probeAgentCli,
   checkE2b = checkE2bCredential, checkPostgres = checkPostgresCredential,
+  checkTogetherSandbox = checkTogetherSandboxCredential,
 } = {}) {
   const checks = [];
   const verified = new Map();
@@ -90,7 +92,8 @@ export async function checkAgentReadiness({
         ? `${label} executable is available.`
         : `${label} executable is missing or could not start. Install ${label} and ensure it is on PATH.`));
     } else {
-      checks.push(result("warning", "agent.remote-unverified", `${label} availability will be checked during E2B execution.`));
+      // A host CLI probe is inapplicable; run observes startup inside the VM.
+      checks.push(result("skip", "agent.remote-unverified", `${label} runs inside the ${runtimeProfile.environment.kind === "together" ? "Together" : "E2B"} sandbox; no local CLI installation needed.`));
     }
     const name = (claude
       ? ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]
@@ -123,9 +126,15 @@ export async function checkAgentReadiness({
     const checked = await checkE2b(runtimeEnv[runtimeProfile.environment.apiKeyEnv]);
     checks.push(result(checked.status === "pass" ? "pass" : "fail", "runtime.e2b", `E2B: ${checked.message}.`));
   }
+  if (runtimeProfile.environment.kind === "together") {
+    const checked = await checkTogetherSandbox(runtimeEnv[runtimeProfile.environment.apiKeyEnv]);
+    checks.push(result(checked.status === "pass" ? "pass" : "fail", "runtime.together", `Together sandbox: ${checked.message}.`));
+  }
   if (runtimeProfile.resultStore.kind === "postgres") {
     const checked = await checkPostgres(runtimeEnv[runtimeProfile.resultStore.databaseUrlEnv]);
-    checks.push(result(checked.status === "pass" ? "pass" : "fail", "runtime.postgres", `Postgres: ${checked.message}.`));
+    const needsSetup = checked.code === "postgres.setup-required";
+    const status = needsSetup && allowResultStoreSetup ? "warning" : checked.status === "pass" ? "pass" : "fail";
+    checks.push(result(status, needsSetup ? "runtime.postgres-setup-required" : "runtime.postgres", `Postgres: ${checked.message}.`));
   }
   return { ok: checks.every(value => value.status !== "fail"), checks };
 }

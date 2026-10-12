@@ -117,3 +117,48 @@ test("non-pass progress projects only bounded single-line stored reasons", () =>
   assert.ok(Object.isFrozen(reasons) && reasons.every(Object.isFrozen));
   assert.doesNotMatch(JSON.stringify(reasons), /private-error|not-for-terminal|fourth reason|\\u001b|\\n/);
 });
+
+
+test("remote resource progress preserves provider identity and strips private metadata", () => {
+  const events = [];
+  const observer = { observe: event => events.push(event) };
+  for (const provider of ["e2b", "together"]) {
+    assert.equal(reportExecutionProgress(observer, {
+      kind: "environment-resource-allocated", executionId: "execution-one", environmentId: provider,
+      resource: { provider, role: "agent", id: "vm-one", token: "private-token" },
+    }), true);
+    assert.deepEqual(events.at(-1).resource, { provider, role: "agent", id: "vm-one" });
+  }
+  assert.equal(reportExecutionProgress(observer, {
+    kind: "environment-resource-allocated", executionId: "execution-one", environmentId: "together",
+    resource: { provider: "e2b", role: "agent", id: "vm-one" },
+  }), false);
+  assert.doesNotMatch(JSON.stringify(events), /private-token/);
+});
+
+test("environment status accepts only closed lifecycle stages and omits private metadata", () => {
+  const events = [];
+  const observer = { observe: event => events.push(event) };
+  const stage = { kind: "environment-status", environmentId: "together", executionId: "run-one", status: "agent-running", token: "private-token", stderr: "private-error" };
+  assert.equal(reportExecutionProgress(observer, stage), true);
+  assert.deepEqual(events, [{ kind: stage.kind, environmentId: stage.environmentId, executionId: stage.executionId, status: stage.status }]);
+  assert.ok(Object.isFrozen(events[0]));
+  for (const invalid of [{ status: "private-error" }, { status: "toString" }, { status: null }, { environmentId: "unknown" }, { executionId: "run\nunsafe" }])
+    assert.equal(reportExecutionProgress(observer, { ...stage, ...invalid }), false);
+  assert.equal(events.length, 1);
+});
+
+
+test("attempt progress maps concurrent lifecycle events to a cell without private metadata", () => {
+  const events = [];
+  const observer = { observe: event => events.push(event) };
+  const cell = { ordinal: 2, total: 5, taskId: "copy", conditionId: "baseline", adapterId: "codex", repeatOrdinal: 1, repeatTotal: 1, secret: "private-cell" };
+  const event = { kind: "cell-attempt-started", cell, executionId: "run-two", token: "private-token" };
+  assert.equal(reportExecutionProgress(observer, event), true);
+  assert.deepEqual(events[0], { kind: event.kind, cell: { ordinal: 2, total: 5, taskId: "copy", conditionId: "baseline", adapterId: "codex", repeatOrdinal: 1, repeatTotal: 1 }, executionId: "run-two" });
+  assert.ok(Object.isFrozen(events[0]) && Object.isFrozen(events[0].cell));
+  for (const executionId of [null, "", "run\nunsafe", "x".repeat(257)]) {
+    assert.equal(reportExecutionProgress(observer, { ...event, executionId }), false);
+  }
+  assert.doesNotMatch(JSON.stringify(events), /private-cell|private-token/);
+});

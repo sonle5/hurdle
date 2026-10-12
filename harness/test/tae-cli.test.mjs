@@ -1,3 +1,4 @@
+import { cliExecutable } from "../lib/terminal-output.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -17,6 +18,8 @@ import test from "node:test";
 
 import { createClaudeCodeAdapter } from "../lib/agent-adapters/claude-code.mjs";
 import { openLocalResultStore } from "../lib/local-result-store.mjs";
+
+const sourceExecutable = cliExecutable();
 
 function editStarter(cwd, { agents = [{ runner: "claude-code", model: "test-model", effort: "medium" }], matrix = false, secret = false, delay = false } = {}) {
   const root = join(cwd, "evals");
@@ -137,10 +140,7 @@ test("hurdle init and offline validation work without credentials", (t) => {
   assert.equal(initialized.status, 0);
   assert.equal(initialized.stderr, "");
   assert.match(initialized.stdout, /✓ Evaluation created\n\n  Suite     evals\/example\.suite\.mjs\n/);
-  assert.match(
-    initialized.stdout,
-    /  Next      npx hurdle validate\n            npx hurdle run --view\n/,
-  );
+  assert.ok(initialized.stdout.includes(`  Next      ${sourceExecutable} validate\n            ${sourceExecutable} run --view\n`));
   assert.doesNotMatch(initialized.stdout, /sha256:/);
 
   const validated = runCli(cwd, ["validate", "--offline"]);
@@ -161,8 +161,9 @@ test("hurdle validate reports a missing Suite as an ordinary validation failure"
   assert.equal(result.stdout, "");
   assert.match(
     result.stderr,
-    /example\.suite\.mjs.*\[suite\.file-invalid\]/,
+    /\[suite\.missing\] No Suites found in this project\. Create an evaluation first\./,
   );
+  assert.ok(result.stderr.endsWith(`\n  Next      ${cliExecutable(cwd)} init\n\n`));
 });
 
 test("hurdle run composes Claude Code and local execution into the canonical store", async (t) => {

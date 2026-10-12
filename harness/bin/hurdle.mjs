@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createClaudeCodeAdapter } from "../lib/agent-adapters/claude-code.mjs";
 import { createCodexAdapter } from "../lib/agent-adapters/codex.mjs";
 import { assertRuntimeDependencies, BackendDependencyError } from "../lib/backend-dependencies.mjs";
-import { createE2BExecutionEnvironment } from "../lib/execution-environments/e2b.mjs";
+import { createE2BExecutionEnvironment, normalizeE2BSettings } from "../lib/execution-environments/e2b.mjs";
+import { createTogetherExecutionEnvironment, normalizeTogetherSettings } from "../lib/execution-environments/together.mjs";
 import { createLocalExecutionEnvironment } from "../lib/execution-environments/local.mjs";
 import { createAnthropicJsonJudge } from "../lib/judges/anthropic-json.mjs";
 import { resolveAuthoritySelections } from "../lib/authority-profile.mjs";
-import { normalizeExecutionProgressObserver, projectVerdictReasons, reportExecutionProgress } from "../lib/execution-progress.mjs";
+import { ENVIRONMENT_STATUS_LABELS, normalizeExecutionProgressObserver, projectVerdictReasons, reportExecutionProgress } from "../lib/execution-progress.mjs";
 import { openLocalResultStore } from "../lib/local-result-store.mjs";
 import { loadProjectEnvironment } from "../lib/project-environment.mjs";
 import {
@@ -19,6 +20,7 @@ import {
   openPostgresResultStore,
 } from "../lib/postgres-result-store.mjs";
 import { createRunEngine } from "../lib/run-engine.mjs";
+import { DEFAULT_RUN_CONCURRENCY, normalizeRunConcurrency } from "../lib/run-concurrency.mjs";
 import {
   RuntimeProfileError,
   describeRuntimeJudgeCapability,
@@ -26,7 +28,7 @@ import {
   resolveRuntimeSecrets,
   viewerStoreEnvironment,
 } from "../lib/runtime-profile.mjs";
-import { selectDefinitionIds } from "../lib/run-model.mjs";
+import { RunSelectionInputError, selectDefinitionIds } from "../lib/run-model.mjs";
 import { createTerminalProgress } from "../lib/terminal-progress.mjs";
 import {
   V1AuthoringError,
@@ -36,12 +38,15 @@ import { initializeSuite, STARTER_AGENT_MODELS } from "../lib/starter-suite.mjs"
 import { isAgentEffort } from "../lib/agent-effort.mjs";
 import { checkAgentReadiness } from "../lib/agent-readiness.mjs";
 import { projectRuntimePath, setupSandbox } from "../lib/sandbox-setup.mjs";
+import { setupTogetherSandbox } from "../lib/together-sandbox-setup.mjs";
 import { setupPostgresStore } from "../lib/postgres-setup.mjs";
 import { createSetupOutput } from "../lib/setup-output.mjs";
 import { createViewerOnboarding } from "../lib/viewer-onboarding.mjs";
+import { defaultProjectSuite, discoverProjectSuites, resolveProjectSuite } from "../lib/project-suites.mjs";
 import {
   terminalUsesColor, paintTerminal as paintRunOutput, terminalFact as runFact,
-  terminalHeader, terminalStatus, terminalNote, terminalNext, suiteCommand,
+  terminalHeader, terminalStatus, terminalNote, terminalNext, suiteCommand, quoteCommandArgument, cliExecutable,
+  runtimeSummaryRows,
 } from "../lib/terminal-output.mjs";
 
 const FIRST_PARTY_AGENT_ADAPTERS = Object.freeze({
@@ -81,13 +86,13 @@ function scoringLabel(authorities) {
   return labels.size === 1 ? [...labels][0] : "Mixed";
 }
 
-function displayStore(runtimeProfile, cwd) {
+function displayResultsPath(runtimeProfile, cwd) {
   if (runtimeProfile.resultStore.kind === "postgres") {
     const artifactRoot = relative(cwd, runtimeProfile.resultStore.artifactRoot);
     const displayedRoot = artifactRoot && !artifactRoot.startsWith(`..${sep}`)
       ? artifactRoot
       : runtimeProfile.resultStore.artifactRoot;
-    return `Postgres · artifacts ${displayedRoot}`;
+    return displayedRoot;
   }
   const storeRoot = relative(cwd, runtimeProfile.resultStore.root);
   return storeRoot && !storeRoot.startsWith(`..${sep}`)
@@ -121,6 +126,7 @@ const PRODUCTION_DEPENDENCIES = Object.freeze({
   createRunEngine,
   createLocalExecutionEnvironment,
   createE2BExecutionEnvironment,
+  createTogetherExecutionEnvironment,
   assertRuntimeDependencies,
   createAnthropicJsonJudge,
   resolveV1Suite,
@@ -160,7 +166,9 @@ const HELP_TEXT = Object.freeze({
     "",
     "Commands:",
     "  init [directory]   Create a starter evaluation",
-    "  setup [suite]      Configure sandbox or result storage",
+    "  suites [suite]     List Suites or inspect one (alias: ls)",
+    "  setup [suite]      Configure the project Runtime",
+    "  runtime            Show the project Runtime configuration",
     "  validate [suite]   Validate a Suite and check Agent readiness",
     "  run [suite]        Run a Suite",
     "  view               Start the Results Viewer",
@@ -171,7 +179,7 @@ const HELP_TEXT = Object.freeze({
   ].join("\n"),
   init: [
     "Usage:",
-    "  hurdle init [directory] [--agent claude-code|codex] [--example copy-message|together-api] [--model MODEL] [--effort LEVEL]",
+    "  hurdle init [directory] [--agent claude-code|codex] [--example copy-message|together-api|concurrency-smoke] [--model MODEL] [--effort LEVEL]",
     "",
     "Create a starter evaluation. The default directory is `evals`.",
     "The destination must not already exist; its parent directory must exist.",
@@ -184,7 +192,7 @@ const HELP_TEXT = Object.freeze({
     "",
     "Options:",
     "  --agent ID         Choose Claude Code (default) or Codex",
-    "  --example NAME     Choose copy-message (default) or Together API demo",
+    "  --example NAME     Choose copy-message (default), together-api or concurrency-smoke",
     "  --model MODEL      Override the starter Agent model",
     "  --effort LEVEL     low, medium (default), high, xhigh, or max",
     "  -h, --help         Show this help",
@@ -193,22 +201,69 @@ const HELP_TEXT = Object.freeze({
     "Usage:",
     "  hurdle setup [suite] [options]",
     "",
-    "Configure the project sandbox (E2B) or connect an existing Postgres database.",
-    "Sandbox setup checks credentials and reuses or builds an E2B template.",
-    "Saves .hurdle/runtime/default.json for validate, run, and view. No Agent runs.",
-    "Template builds use your E2B account and may be billed.",
-    "--store postgres checks the connection and applies the result schema migrations.",
-    "Storage setup preserves execution settings and creates no database.",
-    "Configure sandbox and storage in separate commands.",
-    "Reads .env.local or environment credentials; reports missing values without prompting.",
+    "Configure the project Runtime: sandbox execution or result storage.",
+    "Use separate commands for sandbox and storage setup.",
+    "Saves .hurdle/runtime/default.json for validate, run, and view.",
+    "The project Runtime is the shared default for all Suites.",
+    "Sandbox setup defaults to Together; runs without a saved Runtime use Local.",
+    "",
+    "Sandbox setup checks credentials and reuses or builds an Agent image.",
+    "No Agent runs. Add --yes to build a missing image without prompting.",
+    "",
+    "Postgres URL (.env.local):",
+    '  HURDLE_RESULT_STORE_DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE"',
+    "  Replace the placeholders with your provider's full URL and TLS options.",
+    "  File values override matching shell variables; echo does not show them.",
+    "",
+    "Postgres setup checks the connection and applies schema migrations.",
+    "It preserves execution settings and creates no database.",
+    "",
+    "Credentials come from .env.local or the environment.",
+    "Missing values are reported without prompting unless --interactive is used.",
     "",
     "Options:",
-    "  --store postgres   Configure Postgres storage without changing execution",
-    "  --sandbox e2b      Select the sandbox provider",
-    "  --template NAME    Reuse an existing template (must include the Suite's Agent CLIs)",
-    "  --yes              Accept E2B template build usage",
-    "  --json             Emit one JSON result, including missing credential names",
-    "  --interactive      Prompt for missing credentials and template build approval",
+    "  --sandbox e2b|together  Select the sandbox provider (default: together)",
+    "  --snapshot ALIAS       Reuse a Together snapshot",
+    "  --template NAME        Reuse an E2B template with the Suite's Agent CLIs",
+    "",
+    "  --store postgres       Configure Postgres storage; preserve execution",
+    "",
+    "  --yes                  Build a missing snapshot or template without prompting",
+    "  --interactive          Prompt for credentials and build approval",
+    "  --json                 Emit one JSON result",
+    "  -h, --help             Show this help",
+  ].join("\n"),
+  suites: [
+    "Usage:",
+    "  hurdle suites [suite] [--runtime FILE] [--json]",
+    "  hurdle ls [suite] [--runtime FILE] [--json]",
+    "",
+    "List .suite.mjs files, or inspect one by short name or path.",
+    "Listing scans filenames only; inspection resolves Suite and Task definitions.",
+    "Inspection shows Suite settings and the project Runtime used by default.",
+    "The project Runtime applies to all Suites unless a run selects another.",
+    "Unique filenames or folder names can be used by setup, validate and run.",
+    "Duplicate names require an explicit Suite path.",
+    "Hidden/generated directories and symlinks are excluded from discovery.",
+    "",
+    "Options:",
+    "  --runtime FILE     Inspect a selected Suite with another Runtime Profile",
+    "  --json             Emit the Suite list or selected Suite details",
+    "  -h, --help         Show this help",
+  ].join("\n"),
+  runtime: [
+    "Usage:",
+    "  hurdle runtime [--runtime FILE] [--json]",
+    "",
+    "Show the project Runtime: execution, storage, Judge and Viewer settings.",
+    "Execution is Local, Together sandbox or E2B sandbox.",
+    "Uses the project Runtime saved by setup, or the built-in Local default.",
+    "Reads configuration only; does not load credentials or contact services.",
+    "Suite and command-line overrides apply when running an evaluation.",
+    "",
+    "Options:",
+    "  --runtime FILE     Inspect a specific Runtime Profile",
+    "  --json             Emit one JSON result",
     "  -h, --help         Show this help",
   ].join("\n"),
   validate: [
@@ -217,9 +272,11 @@ const HELP_TEXT = Object.freeze({
     "",
     "Validate a .suite.mjs Suite and check runtime/authentication readiness.",
     "Uses read-only provider requests; never runs an Agent or Judge.",
-    "The default Suite is `evals/example.suite.mjs` when it exists,",
-    "otherwise `example.suite.mjs`.",
+    "Select a Suite path or a unique short name from `hurdle suites`.",
+    "With no selection, use evals/example.suite.mjs, example.suite.mjs,",
+    "or the sole project Suite (bundled examples are not selected automatically).",
     "Uses the project Runtime saved by setup unless overridden.",
+    "Without a saved Runtime, use Local execution and filesystem storage.",
     "",
     "Options:",
     "  --offline          Check Suite definitions only; no readiness checks",
@@ -232,9 +289,11 @@ const HELP_TEXT = Object.freeze({
     "Usage:",
     "  hurdle run [suite] [options]",
     "",
-    "Run a .suite.mjs Suite. The default is `evals/example.suite.mjs` when",
-    "it exists, otherwise `example.suite.mjs`.",
+    "Run a .suite.mjs Suite by path or unique short name from `hurdle suites`.",
+    "With no selection, use evals/example.suite.mjs, example.suite.mjs,",
+    "or the sole project Suite (bundled examples are not selected automatically).",
     "Uses the project Runtime saved by setup unless overridden.",
+    "Without a saved Runtime, use Local execution and filesystem storage.",
     "Agent and model options filter selections already defined by the Suite.",
     "",
     "Selection:",
@@ -243,10 +302,14 @@ const HELP_TEXT = Object.freeze({
     "  --agent claude-code|codex   Select an Agent",
     "  --model MODEL               Select a model",
     "",
+    "Execution:",
+    `  --concurrency N             Run up to N cells at once (1–100; default: ${DEFAULT_RUN_CONCURRENCY})`,
+    "                              Overrides Suite concurrency, including retries and judging",
+    "",
     "Runtime:",
     "  --runtime FILE              Use a Runtime Profile",
-    "  --environment local|e2b     Select an Execution Environment",
-    "  --environment-settings JSON Configure the Environment with a JSON object",
+    "  --environment local|e2b|together     Override execution",
+    "  --environment-settings JSON Configure execution with a JSON object",
     "  --store DIR                 Save results to a local directory",
     "",
     "Output:",
@@ -280,7 +343,142 @@ const HELP_TEXT = Object.freeze({
 function help(topic, io) {
   const body = topic === "main" ? HELP_TEXT[topic].slice("Hurdle\n\n".length) : HELP_TEXT[topic];
   io.stdout.write(terminalHeader(io.stdout).trimStart() + `${body}\n`);
+  if (["setup", "run", "validate"].includes(topic)) {
+    io.stdout.write(projectSuiteHelp(topic, io.cwd));
+  }
   return 0;
+}
+
+function projectExecutable(cwd) {
+  return cliExecutable(cwd);
+}
+
+function suiteSelection(suite) {
+  return suite.ambiguous || suite.name.startsWith("-") ? suite.path : suite.name;
+}
+
+function projectSuiteHelp(command, cwd) {
+  const executable = projectExecutable(cwd);
+  let suites;
+  try { suites = discoverProjectSuites(cwd); }
+  catch { return `\nList Suites:\n  ${executable} suites\n\nOr select an explicit .suite.mjs path.\n`; }
+  const defaultPath = defaultProjectSuite(cwd, suites);
+  const example = suites.find(suite => suite.path === defaultPath) ?? suites.find(suite => !suite.bundled) ?? suites[0];
+  const selection = example ? quoteCommandArgument(suiteSelection(example)) : "evals/example.suite.mjs";
+  const suiteRows = suites.map(suite => `  ${suiteSelection(suite).padEnd(22)} ${suite.path}${suite.path === defaultPath ? "  (default)" : ""}`);
+  const heading = example ? `Examples using ${suiteSelection(example)}:` : "Examples after creating a Suite with init:";
+  const examples = command === "setup" ? [
+    "  Together sandbox (default):", `    ${executable} setup ${selection}`, "",
+    "  E2B sandbox:", `    ${executable} setup ${selection} --sandbox e2b`, "",
+    "  Postgres results (separate step):", `    ${executable} setup --store postgres`, "",
+    "  Run with the saved runtime:", `    ${executable} run ${selection} --view`,
+  ] : [`  ${executable} ${command} ${selection}${command === "run" ? " --view" : " --offline"}`];
+  return ["", ...(suiteRows.length ? ["Available Suites (name / path):", ...suiteRows, ""] : []),
+    heading, ...examples, "", `List Suites: ${executable} suites`, ""].join("\n");
+}
+
+function selectProjectSuite(selection, io, report = message => argumentError(message, io)) {
+  let result;
+  try { result = resolveProjectSuite(io.cwd, selection); }
+  catch (error) { return report(error.message); }
+  if (result.path) return { ok: true, suite: result.path };
+  const message = result.matches.length > 1
+    ? `Suite name '${selection}' is ambiguous. Use one of these paths:\n\n${result.matches.map(suite => `  ${quoteCommandArgument(suite.path)}`).join("\n")}`
+    : `Unknown Suite name '${selection}'. Pass a .suite.mjs path or list the available names.`;
+  return report(`${message}\n\n  ${projectExecutable(io.cwd)} suites`);
+}
+
+function missingRunSuite(command, io, suite = null) {
+  const executable = cliExecutable(io.cwd);
+  let suites;
+  try { suites = discoverProjectSuites(io.cwd); }
+  catch { /* The suites command reports discovery limits; explicit paths still work. */ }
+  if (suite) {
+    printDiagnostics([{
+      file: suite, code: "suite.file-invalid",
+      message: "Could not read the Suite file. Check the path and file permissions.",
+    }], io);
+  } else {
+    const empty = suites?.length === 0;
+    writeError(io, `hurdle [${empty ? "suite.missing" : "suite.selection-required"}] ${empty
+      ? "No Suites found in this project. Create an evaluation first."
+      : "No default Suite found. Choose a Suite by name or path."}`);
+  }
+  if (suites?.length) {
+    const example = suites.find(suite => !suite.bundled) ?? suites[0];
+    io.stderr.write("\n" + runFact("Example", suiteCommand(command, suiteSelection(example), { view: command === "run", cwd: io.cwd }), { useColor: terminalUsesColor(io.stderr) }));
+  }
+  let next = `${executable} suites`;
+  if (suites?.length === 0) {
+    let destination = "evals";
+    if (existsSync(resolve(io.cwd, destination))) {
+      destination = "evals/my-eval";
+      for (let suffix = 2; existsSync(resolve(io.cwd, destination)); suffix += 1) destination = `evals/my-eval-${suffix}`;
+    }
+    next = `${executable} init${destination === "evals" ? "" : ` ${quoteCommandArgument(destination)}`}`;
+  }
+  io.stderr.write(terminalNext([next], io.stderr));
+  return 1;
+}
+
+async function inspectProjectSuite(selection, io, dependencies, { json, runtimePath, argumentError: reportArgumentError }) {
+  const selected = selectProjectSuite(selection, io, message => ({ ok: false, exitCode: reportArgumentError(message) }));
+  if (!selected.ok) return selected.exitCode;
+  const invalid = diagnostics => {
+    if (json) {
+      const details = diagnostics.map(({ code, message, file, pointer }) => ({ code, message, file, ...(pointer ? { pointer } : {}) }));
+      io.stdout.write(`${JSON.stringify({ schemaVersion: 1, command: "suites", suite: null, runtime: null, error: { code: details[0]?.code ?? "suite.invalid", message: details[0]?.message ?? "Suite could not be inspected.", diagnostics: details } })}\n`);
+    } else printDiagnostics(diagnostics, io);
+    return 1;
+  };
+  let authored;
+  try {
+    try { authored = await dependencies.resolveV1Suite({ suitePath: resolve(io.cwd, selected.suite) }); }
+    catch (error) {
+      if (!(error instanceof V1AuthoringError)) throw error;
+      return invalid([error]);
+    }
+    if (!authored.ok) return invalid(authored.diagnostics);
+    const { defaults, value } = authored;
+    const agents = defaults.agentSelections.map(agent => ({ runner: agent.adapterId, model: agent.requestedModel, effort: agent.settings?.effort ?? null }));
+    const suite = {
+      name: basename(selected.suite) === "example.suite.mjs" ? dirname(selected.suite) === "." ? "example" : basename(dirname(selected.suite)) : basename(selected.suite, ".suite.mjs"),
+      path: selected.suite,
+      tasks: [...defaults.taskIds], conditions: [...defaults.conditionIds], agents,
+      repeats: defaults.repeat, concurrency: defaults.concurrency,
+      plannedRuns: defaults.taskIds.length * defaults.conditionIds.length * agents.length * defaults.repeat,
+      scoring: scoringLabel(value.definition.authorityProfiles),
+      judge: value.definition.authorityProfiles.find(profile => profile.judge?.availability === "required")?.judge?.capability?.model ?? null,
+    };
+    let runtime;
+    try { runtime = readRuntimeInfo(runtimePath, io.cwd); }
+    catch (error) {
+      if (!(error instanceof RuntimeProfileError)) throw error;
+      return invalid([{ code: error.code, message: error.message, file: error.sourcePath ?? selected.suite, pointer: error.pointer }]);
+    }
+    if (json) {
+      io.stdout.write(`${JSON.stringify({ schemaVersion: 1, command: "suites", suite, runtime })}\n`);
+      return 0;
+    }
+    const useColor = runOutputUsesColor(io);
+    const fact = (label, text) => runFact(label, text, { useColor, labelWidth: 12 });
+    io.stdout.write(terminalHeader(io.stdout)
+      + fact("Suite", suite.name) + fact("Path", suite.path)
+      + fact("Plan", `${suite.plannedRuns} ${plural(suite.plannedRuns, "run")} · ${suite.tasks.length} ${plural(suite.tasks.length, "task")} · ${suite.conditions.length} ${plural(suite.conditions.length, "condition")}`));
+    for (const [index, agent] of agents.entries()) {
+      io.stdout.write(fact(index ? "" : agents.length === 1 ? "Agent" : "Agents", `${AGENT_LABELS[agent.runner]} · ${agent.model ?? "agent default model"} · ${agent.effort ? `${agent.effort} effort` : "agent default effort"}`));
+    }
+    for (const [label, values] of [["Tasks", suite.tasks], ["Conditions", suite.conditions]]) {
+      values.forEach((id, index) => io.stdout.write(fact(index ? "" : label, id)));
+    }
+    io.stdout.write(fact("Repeats", suite.repeats) + fact("Concurrency", suite.concurrency) + fact("Scoring", suite.scoring));
+    if (suite.judge) io.stdout.write(fact("Judge", suite.judge));
+    io.stdout.write("\n");
+    for (const [label, text] of runtimeInfoRows(runtime, io.cwd)) io.stdout.write(fact(label, text));
+    const next = suiteCommand("run", selection, { cwd: io.cwd }) + (runtimePath ? ` --runtime ${quoteCommandArgument(runtimePath)}` : "") + " --view";
+    io.stdout.write(`\n${fact("Next", next)}\n`);
+    return 0;
+  } finally { authored?.dispose?.(); }
 }
 
 function hasHelpFlag(args) {
@@ -288,13 +486,91 @@ function hasHelpFlag(args) {
 }
 
 function usage(io) {
-  writeError(io, "hurdle [argument-error] Unknown command or help topic. Run npx hurdle help.\n");
+  writeError(io, `hurdle [argument-error] Unknown command or help topic. Run ${cliExecutable(io.cwd)} help.\n`);
   return 2;
 }
 
 function argumentError(message, io) {
   writeError(io, `hurdle [argument-error] ${message}\n`);
   return { ok: false, exitCode: 2 };
+}
+
+function readRuntimeInfo(runtimePath, cwd) {
+  const runtime = resolveRuntimeProfile({ runtimePath: runtimePath ?? projectRuntimePath(cwd) ?? undefined, cwd });
+  const { environment } = runtime;
+  try {
+    const settings = environment.kind === "together" ? normalizeTogetherSettings(environment.settings)
+      : environment.kind === "e2b" ? normalizeE2BSettings(environment.settings) : environment.settings;
+    return { ...runtime, environment: { ...environment, settings } };
+  } catch (error) {
+    if (!(error instanceof RunSelectionInputError)) throw error;
+    throw new RuntimeProfileError("runtime.profile-schema", error.message, { sourcePath: runtime.sourcePath, pointer: "/environment/settings" });
+  }
+}
+
+function showRuntimeInfo(args, io) {
+  const json = args.includes("--json");
+  const fail = (code, message, sourcePath = null) => {
+    if (json) {
+      io.stdout.write(`${JSON.stringify({ schemaVersion: 1, command: "runtime", runtime: null, error: { code, message, sourcePath } })}\n`);
+    } else {
+      writeError(io, `hurdle [${code}] ${message}${sourcePath ? `\n  Runtime: ${sourcePath}` : ""}`);
+      if (code === "argument-error") io.stderr.write(terminalNext([`${cliExecutable(io.cwd)} help runtime`], io.stderr));
+    }
+    return 2;
+  };
+  let runtimePath;
+  const seen = new Set();
+  for (let index = 0; index < args.length; index += 1) {
+    const option = args[index];
+    if (!["--runtime", "--json"].includes(option)) return fail("argument-error", "Use runtime [--runtime FILE] [--json].");
+    if (seen.has(option)) return fail("argument-error", `${option} may only be supplied once.`);
+    seen.add(option);
+    if (option === "--runtime") {
+      const value = args[++index];
+      if (!value?.trim() || value.startsWith("-")) return fail("argument-error", "--runtime requires a file path.");
+      runtimePath = value;
+    }
+  }
+  let runtime;
+  try {
+    runtime = readRuntimeInfo(runtimePath, io.cwd);
+  } catch (error) {
+    if (!(error instanceof RuntimeProfileError)) throw error;
+    return fail(error.code, error.message, error.sourcePath);
+  }
+  if (json) {
+    io.stdout.write(`${JSON.stringify({ schemaVersion: 1, command: "runtime", runtime })}\n`);
+    return 0;
+  }
+  io.stdout.write(terminalHeader(io.stdout));
+  for (const [label, value] of runtimeInfoRows(runtime, io.cwd)) io.stdout.write(runFact(label, value, { useColor: runOutputUsesColor(io) }));
+  io.stdout.write("\n");
+  return 0;
+}
+
+function runtimeInfoRows(runtime, cwd) {
+  const displayPath = path => {
+    const localPath = relative(cwd, path);
+    return localPath === ".." || localPath.startsWith(`..${sep}`) ? path : localPath || ".";
+  };
+  const { environment, resultStore } = runtime;
+  const { settings } = environment;
+  const rows = runtimeSummaryRows(runtime, cwd);
+  if (environment.kind !== "local") {
+    rows.push(environment.kind === "together" ? ["Snapshot", settings.snapshotAlias] : ["Template", settings.workloadTemplate]);
+    if (environment.kind === "e2b") rows.push(["Guardian", settings.guardianTemplate]);
+    const lifetime = settings.maxLifetimeMs % 60_000 === 0 ? `${settings.maxLifetimeMs / 60_000}m` : `${settings.maxLifetimeMs / 1000}s`;
+    rows.push(["Limits", `${settings.cpuCount} ${plural(settings.cpuCount, "CPU")} · ${settings.memoryMiB} MiB · ${lifetime} max`]);
+  }
+  if (resultStore.kind === "postgres") {
+    rows.push(["Database", `${resultStore.databaseUrlEnv} (environment variable)`], ["Artifacts", displayPath(resultStore.artifactRoot)]);
+  } else {
+    rows.push(["Results", displayPath(resultStore.root)]);
+  }
+  if (runtime.judge) rows.push(["Judge", `${runtime.judge.kind} · ${runtime.judge.model}`]);
+  rows.push(["Viewer", `Port ${runtime.viewer.port}`]);
+  return rows;
 }
 
 function versionCommand(argv, io) {
@@ -308,14 +584,14 @@ function versionCommand(argv, io) {
 }
 
 function defaultSuiteArgument(cwd) {
-  return existsSync(resolve(cwd, "evals/example.suite.mjs"))
-    ? "evals/example.suite.mjs"
-    : "example.suite.mjs";
+  // An explicit Suite path must remain usable even if broad discovery is limited.
+  try { return defaultProjectSuite(cwd); }
+  catch { return "example.suite.mjs"; }
 }
 
 function parseRunArguments(args, io, { validation = false } = {}) {
   const values = {
-    suite: defaultSuiteArgument(io.cwd),
+    suite: null,
     taskIds: [],
     conditionIds: [],
     agent: undefined,
@@ -323,6 +599,7 @@ function parseRunArguments(args, io, { validation = false } = {}) {
     model: undefined,
     repeat: 1,
     retries: 0,
+    concurrency: undefined,
     environmentSettings: "{}",
     experimentVersion: null,
     store: null,
@@ -344,6 +621,7 @@ function parseRunArguments(args, io, { validation = false } = {}) {
     ["--store", "store"],
     ["--runtime", "runtime"],
   ]);
+  if (!validation) flags.set("--concurrency", "concurrency");
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index];
     if (!token.startsWith("-")) {
@@ -388,6 +666,14 @@ function parseRunArguments(args, io, { validation = false } = {}) {
     }
     index += 1;
   }
+  if (values.concurrency !== undefined) {
+    try {
+      if (!/^\d+$/.test(values.concurrency)) throw new TypeError();
+      values.concurrency = normalizeRunConcurrency(Number(values.concurrency));
+    } catch {
+      return argumentError("--concurrency must be an integer between 1 and 100.", io);
+    }
+  }
   try {
     values.environmentSettings = JSON.parse(values.environmentSettings);
   } catch {
@@ -403,8 +689,8 @@ function parseRunArguments(args, io, { validation = false } = {}) {
   if (values.agent !== undefined && !Object.hasOwn(FIRST_PARTY_AGENT_ADAPTERS, values.agent)) {
     return argumentError("Agent filter must use 'claude-code' or 'codex'.", io);
   }
-  if (!["local", "e2b"].includes(values.environment)) {
-    return argumentError("Execution Environment must be 'local' or 'e2b'.", io);
+  if (!["local", "e2b", "together"].includes(values.environment)) {
+    return argumentError("Execution Environment must be 'local', 'e2b', or 'together'.", io);
   }
   if (
     values.runtime === null
@@ -483,7 +769,8 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies, {
     io.stdout.write(
       terminalStatus("pass", "Viewer ready", io.stdout) + "\n"
       + runFact("URL", url, { useColor })
-      + runFact("Store", displayStore(runtimeProfile, io.cwd), { useColor })
+      + runtimeSummaryRows(runtimeProfile, io.cwd, { inline: storeOverride }).map(([label, value]) => runFact(label, value, { useColor })).join("")
+      + runFact(runtimeProfile.resultStore.kind === "postgres" ? "Artifacts" : "Results", displayResultsPath(runtimeProfile, io.cwd), { useColor })
       + `\n  ${paintRunOutput("Press Ctrl+C to stop.", "dim", useColor)}\n`,
     );
   };
@@ -492,8 +779,6 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies, {
     storeEnvironment,
     onboarding: createViewerOnboarding({
       cwd: io.cwd,
-      cliPath: fileURLToPath(import.meta.url),
-      sourceCheckout: existsSync(new URL("../../viewer/package.json", import.meta.url)),
       suite,
       runtimeProfile,
       storeOverride,
@@ -543,7 +828,8 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies, {
 async function runCliMain(argv, io, dependencies) {
   const versionResult = versionCommand(argv, io);
   if (versionResult !== null) return versionResult;
-  const [command, ...args] = argv;
+  const [requestedCommand, ...args] = argv;
+  const command = requestedCommand === "ls" ? "suites" : requestedCommand;
   if (!command) return help("main", io);
 
   if (["--help", "-h"].includes(command) && args.length === 0) {
@@ -553,13 +839,59 @@ async function runCliMain(argv, io, dependencies) {
     if (args.length === 0 || (args.length === 1 && ["--help", "-h"].includes(args[0]))) {
       return help("main", io);
     }
-    if (args.length === 1 && Object.hasOwn(HELP_TEXT, args[0]) && args[0] !== "main") {
-      return help(args[0], io);
+    const topic = args[0] === "ls" ? "suites" : args[0];
+    if (args.length === 1 && Object.hasOwn(HELP_TEXT, topic) && topic !== "main") {
+      return help(topic, io);
     }
     return usage(io);
   }
-  if (["init", "setup", "validate", "run", "view"].includes(command) && hasHelpFlag(args)) {
+  if (["init", "suites", "setup", "runtime", "validate", "run", "view"].includes(command) && hasHelpFlag(args)) {
     return help(command, io);
+  }
+
+  if (command === "runtime") return showRuntimeInfo(args, io);
+
+  if (command === "suites") {
+    let selection, runtimePath, json = false;
+    const suitesArgumentError = message => {
+      if (!args.includes("--json")) return argumentError(message, io).exitCode;
+      io.stdout.write(`${JSON.stringify({ schemaVersion: 1, command: "suites", ...(selection ? { suite: null } : { defaultSuite: null, suites: [] }), error: { code: "argument-error", message } })}\n`);
+      return 2;
+    };
+    for (let index = 0; index < args.length; index++) {
+      const arg = args[index];
+      if (arg === "--json" && !json) json = true;
+      else if (arg === "--runtime" && runtimePath === undefined) {
+        runtimePath = args[++index];
+        if (!runtimePath?.trim() || runtimePath.startsWith("-")) return suitesArgumentError("--runtime requires a file path.");
+      }
+      else if (!arg.startsWith("-") && arg.trim() && !selection) selection = arg;
+      else return suitesArgumentError("Use suites [suite] [--runtime FILE] [--json] (alias: ls).");
+    }
+    if (runtimePath && !selection) return suitesArgumentError("Select a Suite when using --runtime.");
+    if (selection) return inspectProjectSuite(selection, io, dependencies, { json, runtimePath, argumentError: suitesArgumentError });
+    let suites;
+    try { suites = discoverProjectSuites(io.cwd); }
+    catch (error) { return suitesArgumentError(error.message); }
+    const selectedDefault = defaultProjectSuite(io.cwd, suites);
+    const defaultSuite = suites.find(suite => suite.path === selectedDefault)?.path ?? null;
+    if (json) {
+      io.stdout.write(`${JSON.stringify({ schemaVersion: 1, command: "suites", defaultSuite, suites })}\n`);
+      return 0;
+    }
+    io.stdout.write(terminalHeader(io.stdout));
+    if (suites.length === 0) {
+      io.stdout.write(`No Suites found.\n\nCreate one:\n  ${projectExecutable(io.cwd)} init\n\n`);
+      return 0;
+    }
+    const width = Math.max(8, ...suites.map(suite => suite.name.length));
+    io.stdout.write(`  ${"Name".padEnd(width)}  Suite path\n\n`);
+    for (const suite of suites) {
+      io.stdout.write(`  ${suite.name.padEnd(width)}  ${suite.path}${suite.ambiguous ? "  (use path; name is ambiguous)" : suite.name.startsWith("-") ? "  (use path)" : ""}${suite.path === defaultSuite ? "  (default)" : ""}\n`);
+    }
+    const example = suites.find(suite => suite.path === defaultSuite) ?? suites.find(suite => !suite.bundled) ?? suites[0];
+    io.stdout.write(`\nRun by name or path:\n  ${projectExecutable(io.cwd)} run ${quoteCommandArgument(suiteSelection(example))} --view\n\n`);
+    return 0;
   }
 
   if (command === "init") {
@@ -573,7 +905,7 @@ async function runCliMain(argv, io, dependencies) {
       } else if (args[index] === "--example" && !exampleSeen) {
         example = args[++index];
         exampleSeen = true;
-        if (!["copy-message", "together-api"].includes(example)) return argumentError("--example must be copy-message or together-api.", io).exitCode;
+        if (!["copy-message", "together-api", "concurrency-smoke"].includes(example)) return argumentError("--example must be copy-message, together-api or concurrency-smoke.", io).exitCode;
       } else if (["--model", "--effort"].includes(args[index]) && !seenOptions.has(args[index])) {
         const option = args[index];
         const value = args[++index];
@@ -588,7 +920,7 @@ async function runCliMain(argv, io, dependencies) {
         directory = args[index];
         directorySeen = true;
       } else {
-        return argumentError("Use init [directory] [--agent claude-code|codex] [--example copy-message|together-api] [--model MODEL] [--effort LEVEL].", io).exitCode;
+        return argumentError("Use init [directory] [--agent claude-code|codex] [--example copy-message|together-api|concurrency-smoke] [--model MODEL] [--effort LEVEL].", io).exitCode;
       }
     }
     const destination = resolve(io.cwd, directory);
@@ -606,44 +938,82 @@ async function runCliMain(argv, io, dependencies) {
       + runFact("Agent", AGENT_LABELS[agent], { useColor })
       + runFact("Model", model, { useColor })
       + runFact("Effort", effort, { useColor })
-      + (example === "together-api" ? runFact("Needs", "E2B + TOGETHER_API_KEY", { useColor }) : "")
-      + runFact("Auth", ".env.local or shell · see npx hurdle help init", { useColor })
-      + runFact("Usage", example === "together-api" ? "Agent, Together, and E2B may be billed" : "Agent may be billed", { useColor })
+      + (example === "together-api" ? runFact("Needs", "Together sandbox + TOGETHER_API_KEY", { useColor }) : "")
+      + runFact("Auth", `.env.local or shell · see ${cliExecutable(io.cwd)} help init`, { useColor })
+      + runFact("Usage", example === "together-api" ? "Agent, Together sandbox, and API may be billed" : "Agent may be billed", { useColor })
       + terminalNext([
-        suiteCommand(example === "together-api" ? "setup" : "validate", suite),
-        suiteCommand("run", suite, { view: true }),
+        suiteCommand(example === "together-api" ? "setup" : "validate", suite, { cwd: io.cwd }),
+        suiteCommand("run", suite, { view: true, cwd: io.cwd }),
       ], io.stdout));
     return 0;
   }
 
   if (command === "setup") {
-    const options = { suite: defaultSuiteArgument(io.cwd), sandbox: "e2b", template: undefined, yes: false, interactive: false, json: args.includes("--json") };
-    const setupArgumentError = message => options.json
-      ? createSetupOutput(io, { json: true }).finish(2, { code: "argument-error", message })
-      : argumentError(message, io).exitCode;
+    const options = { suite: defaultSuiteArgument(io.cwd), sandbox: "together", template: undefined, yes: false, interactive: false, json: args.includes("--json") };
+    const setupArgumentError = message => {
+      const executable = projectExecutable(io.cwd);
+      const sandboxIndex = args.findIndex(value => value.replace(/^-+/, "--") === "--sandbox");
+      const requestedSandbox = sandboxIndex >= 0 ? args[sandboxIndex + 1] : null;
+      const provider = ["e2b", "together"].includes(requestedSandbox) ? requestedSandbox
+        : ["e2b", "together"].includes(options.sandbox) ? options.sandbox : "together";
+      let suites = [];
+      try { suites = discoverProjectSuites(io.cwd); } catch { /* Explicit paths and help still work. */ }
+      const example = suites.find(suite => suite.path === options.suite || suite.name === options.suite)
+        ?? suites.find(suite => !suite.bundled) ?? suites[0];
+      const selection = example ? quoteCommandArgument(suiteSelection(example)) : "evals/example.suite.mjs";
+      const commands = [
+        `${executable} setup ${selection} --sandbox ${provider}`,
+        `${executable} setup --store postgres`,
+      ];
+      if (options.json) {
+        const output = createSetupOutput(io, { json: true });
+        output.result.nextCommands = commands;
+        return output.finish(2, { code: "argument-error", message });
+      }
+      return argumentError(`${message}\n\nSeparate setup steps (sandbox, then storage):\n  ${commands.join("\n  ")}\n\nMore help:\n  ${executable} help setup\n  ${executable} suites\n`, io).exitCode;
+    };
     const seen = new Set();
     for (let index = 0; index < args.length; index++) {
       const arg = args[index];
-      if (["--yes", "--json", "--interactive"].includes(arg) && !seen.has(arg)) { options[arg.slice(2)] = true; seen.add(arg); }
-      else if (["--sandbox", "--template", "--store"].includes(arg) && !seen.has(arg) && args[index + 1] && !args[index + 1].startsWith("-")) {
-        seen.add(arg); options[arg.slice(2)] = args[++index];
-      } else if (!arg.startsWith("-") && !seen.has("suite")) { options.suite = arg; seen.add("suite"); }
-      else return setupArgumentError("Use setup [suite] [--store postgres | --sandbox e2b] [--template NAME] [--yes] [--json | --interactive].");
+      if (["--yes", "--json", "--interactive", "--sandbox", "--template", "--snapshot", "--store"].includes(arg)) {
+        if (seen.has(arg)) return setupArgumentError(`Option '${arg}' may only be supplied once.`);
+        seen.add(arg);
+        if (["--yes", "--json", "--interactive"].includes(arg)) options[arg.slice(2)] = true;
+        else {
+          if (!args[index + 1] || args[index + 1].startsWith("-")) return setupArgumentError(`Option '${arg}' requires a value.`);
+          options[arg.slice(2)] = args[++index];
+        }
+      } else if (!arg.startsWith("-")) {
+        if (seen.has("suite")) return setupArgumentError("Only one Suite may be selected.");
+        options.suite = arg; seen.add("suite");
+      } else {
+        const normalized = arg.replace(/^-+/, "--");
+        const suggestion = ["--sandbox", "--template", "--snapshot", "--store", "--yes", "--json", "--interactive"].includes(normalized)
+          ? ` Use '${normalized}' with two dashes.` : " Run help setup to see supported options.";
+        const combined = args.some(value => value.replace(/^-+/, "--") === "--store") && args.includes("--sandbox")
+          ? " Sandbox and storage must be configured in separate commands." : "";
+        return setupArgumentError(`Unknown setup option '${arg}'.${suggestion}${combined}`);
+      }
     }
     if (options.json && options.interactive) return setupArgumentError("Use --json for noninteractive setup or --interactive for terminal prompts, not both.");
     if (options.interactive && (!(io.stdin ?? process.stdin).isTTY || !io.stdout.isTTY)) {
       return setupArgumentError("--interactive requires a terminal. Configure credentials in .env.local or the environment instead.");
     }
-    if (options.sandbox !== "e2b") return setupArgumentError("Only the E2B sandbox provider is supported currently.");
+    if (!["e2b", "together"].includes(options.sandbox)) return setupArgumentError("Sandbox provider must be e2b or together.");
+    if (options.template && options.sandbox !== "e2b") return setupArgumentError("Use --snapshot ALIAS for Together, or --sandbox e2b --template NAME for an E2B template.");
+    if (options.snapshot && (options.sandbox !== "together" || !/^[A-Za-z0-9][A-Za-z0-9_.\/@:-]*$/.test(options.snapshot))) return setupArgumentError("Use --sandbox together --snapshot ALIAS to select a Together snapshot.");
     if (options.template && !/^[A-Za-z0-9][A-Za-z0-9_./:-]*$/.test(options.template)) return setupArgumentError("Use an E2B template ID or name, optionally with a tag.");
     if (options.store !== undefined) {
       if (options.store !== "postgres") return setupArgumentError("Use --store postgres to configure database storage.");
-      if (seen.has("--sandbox") || seen.has("--template")) {
-        return setupArgumentError("Configure the sandbox with setup first, then run setup --store postgres.");
+      if (seen.has("--sandbox") || seen.has("--template") || seen.has("--snapshot")) {
+        return setupArgumentError("--store postgres cannot be combined with sandbox options. Configure the sandbox first, then Postgres storage; both settings are saved in the same Runtime.");
       }
-      return setupPostgresStore(options, io, dependencies);
     }
-    return setupSandbox(options, io, dependencies);
+    const selected = selectProjectSuite(options.suite, io, message => ({ ok: false, exitCode: setupArgumentError(message) }));
+    if (!selected.ok) return selected.exitCode;
+    options.suite = selected.suite;
+    if (options.store) return setupPostgresStore(options, io, dependencies);
+    return options.sandbox === "together" ? setupTogetherSandbox(options, io, dependencies) : setupSandbox(options, io, dependencies);
   }
 
   if (command === "run" || command === "validate") {
@@ -651,6 +1021,14 @@ async function runCliMain(argv, io, dependencies) {
     const parsed = parseRunArguments(args, io, { validation });
     if (!parsed.ok) return parsed.exitCode;
     const options = parsed.values;
+    if (options.suite === null) {
+      const defaultSuite = defaultSuiteArgument(io.cwd);
+      if (!existsSync(resolve(io.cwd, defaultSuite))) return missingRunSuite(command, io);
+      options.suite = defaultSuite;
+    }
+    const selected = selectProjectSuite(options.suite, io);
+    if (!selected.ok) return selected.exitCode;
+    options.suite = selected.suite;
     const suiteSelected = /\.suite\.mjs$/.test(options.suite);
     let authoredSuite = null;
     let authoredSuiteCleanupOnExit = null;
@@ -662,6 +1040,7 @@ async function runCliMain(argv, io, dependencies) {
         });
       } catch (error) {
         if (!(error instanceof V1AuthoringError)) throw error;
+        if (error.code === "suite.file-invalid") return missingRunSuite(command, io, options.suite);
         printDiagnostics([error], io);
         return 1;
       }
@@ -681,6 +1060,7 @@ async function runCliMain(argv, io, dependencies) {
         return argumentError("No Suite Agent matches the selected agent/model filters. Edit the Suite to change its matrix.", io).exitCode;
       }
       options.repeat = authoredSuite.defaults.repeat;
+      options.concurrency ??= authoredSuite.defaults.concurrency ?? DEFAULT_RUN_CONCURRENCY;
       authoredSuiteCleanupOnExit = () => authoredSuite?.dispose();
       dependencies.processTarget.once("exit", authoredSuiteCleanupOnExit);
     } else {
@@ -721,7 +1101,7 @@ async function runCliMain(argv, io, dependencies) {
         + runFact("Agent", options.agentSelections.map(agentSelectionLabel).join(", "), { useColor }));
       if (options.offline) {
         io.stdout.write("\n" + terminalStatus("warning", "Readiness not checked (--offline)", io.stdout)
-          + terminalNext([suiteCommand("validate", options.suite)], io.stdout));
+          + terminalNext([suiteCommand("validate", options.suite, { cwd: io.cwd })], io.stdout));
         disposeAuthoredSuite();
         return 0;
       }
@@ -743,7 +1123,7 @@ async function runCliMain(argv, io, dependencies) {
           ...builtIn,
           environment: Object.freeze({
             kind: options.environment,
-            ...(options.environment === "e2b" ? { apiKeyEnv: "E2B_API_KEY" } : {}),
+            ...(options.environment === "e2b" ? { apiKeyEnv: "E2B_API_KEY" } : options.environment === "together" ? { apiKeyEnv: "TOGETHER_API_KEY" } : {}),
             settings: structuredClone(options.environmentSettings),
           }),
           resultStore: Object.freeze({
@@ -765,7 +1145,7 @@ async function runCliMain(argv, io, dependencies) {
         "environment.trusted-egress-capture", "environment.trusted-request-blocking",
       ].includes(requirement))
     ))) {
-      writeError(io, `hurdle [runtime.capture-required] Selected Tasks require trusted API capture or request blocking. Run \`${suiteCommand("setup", options.suite)}\` to configure E2B, or select an E2B Runtime with --runtime. No evaluation started.\n`);
+      writeError(io, `hurdle [runtime.capture-required] Selected Tasks require trusted API capture or request blocking. Run \`${suiteCommand("setup", options.suite, { cwd: io.cwd })}\` to configure Together sandbox, or select an E2B or Together Runtime with --runtime. No evaluation started.\n`);
       disposeAuthoredSuite();
       return 1;
     }
@@ -834,6 +1214,11 @@ async function runCliMain(argv, io, dependencies) {
           ?? { kind: "environment" }
       ).kind === "environment");
     }));
+    if (validation) {
+      for (const [label, value] of runtimeSummaryRows(runtimeProfile, io.cwd, { inline: options.explicitTopology.size > 0 })) {
+        io.stdout.write(runFact(label, value, { useColor: runOutputUsesColor(io) }));
+      }
+    }
     io.stdout.write("\n" + terminalNote(`Readiness (${dependencies.environmentSource})`, io.stdout));
     let readiness;
     try {
@@ -853,14 +1238,18 @@ async function runCliMain(argv, io, dependencies) {
       io.stdout.write(terminalStatus(check.status, check.message, io.stdout));
     }
     if (!readiness.ok) {
-      writeError(io, `hurdle [not-ready] Resolve the setup errors above and run \`${suiteCommand("validate", options.suite)}\` again. No evaluation started.\n`);
+      const needsStorageSetup = readiness.checks.some(check => check.code === "runtime.postgres-setup-required" && check.status === "fail");
+      if (needsStorageSetup) {
+        writeError(io, "hurdle [runtime.postgres-setup-required] Postgres storage needs setup before running. No evaluation started.\n");
+        io.stdout.write(terminalNext([`${suiteCommand("setup", options.suite, { cwd: io.cwd })} --store postgres`], io.stdout));
+      } else writeError(io, `hurdle [not-ready] Resolve the setup errors above and run \`${suiteCommand("validate", options.suite, { cwd: io.cwd })}\` again. No evaluation started.\n`);
       disposeAuthoredSuite();
       return 1;
     }
     if (validation) {
       io.stdout.write("\n" + terminalStatus("pass", "Ready to run", io.stdout)
         + terminalNote("Model access, billing, and task success are checked during execution.", io.stdout)
-        + terminalNext([suiteCommand("run", options.suite, { view: true })], io.stdout));
+        + terminalNext([suiteCommand("run", options.suite, { view: true, cwd: io.cwd })], io.stdout));
       disposeAuthoredSuite();
       return 0;
     }
@@ -875,7 +1264,7 @@ async function runCliMain(argv, io, dependencies) {
       const services = [
         "Agent",
         ...(authorityNeedsJudge ? ["Judge"] : []),
-        ...(runtimeProfile.environment.kind === "e2b" ? ["E2B"] : []),
+        ...(runtimeProfile.environment.kind === "e2b" ? ["E2B"] : runtimeProfile.environment.kind === "together" ? ["Together sandbox"] : []),
         ...(selectedCredentialNames.size > 0 ? ["external API"] : []),
       ];
       const serviceText = services.length === 1
@@ -888,21 +1277,21 @@ async function runCliMain(argv, io, dependencies) {
         + `${selectedTaskIds.length} ${plural(selectedTaskIds.length, "task")} · `
         + `${selectedConditionCount} ${plural(selectedConditionCount, "condition")}`;
       const agents = options.agentSelections.map(agentSelectionLabel).join(", ");
-      const runtime = `${runtimeProfile.environment.kind === "e2b" ? "E2B" : "Local"} · `
-        + `${runtimeProfile.resultStore.kind === "postgres" ? "Postgres" : "Filesystem"}`;
       const authorities = selectedTaskIds.map(
         (taskId) => authoritySelection.value.byTaskId[taskId],
       );
+      const planFact = (label, value) => runFact(label, value, { useColor, labelWidth: 12 });
       io.stdout.write(
-        "\n" + runFact("Plan", plan, { useColor })
-        + runFact("Agent", agents, { useColor })
-        + runFact("Runtime", runtime, { useColor })
-        + runFact("Scoring", scoringLabel(authorities), { useColor })
-        + runFact("Usage", `${serviceText} may be billed`, { useColor }),
+        "\n" + planFact("Plan", plan)
+        + planFact("Agent", agents)
+        + runtimeSummaryRows(runtimeProfile, io.cwd, { inline: options.explicitTopology.size > 0 }).map(([label, value]) => planFact(label, value)).join("")
+        + planFact("Concurrency", String(options.concurrency))
+        + planFact("Scoring", scoringLabel(authorities))
+        + planFact("Usage", `${serviceText} may be billed`),
       );
       if (agentVisibleCredentialNames.size > 0) {
         io.stdout.write(
-          runFact("Access", "Target API credentials available to Agent", { useColor }),
+          planFact("Access", "Target API credentials available to Agent"),
         );
       }
       io.stdout.write("\n");
@@ -920,29 +1309,75 @@ async function runCliMain(argv, io, dependencies) {
             localArtifactRoot: runtimeProfile.resultStore.artifactRoot,
           })
         : await dependencies.openLocalResultStore({ root: runtimeProfile.resultStore.root });
-    } catch {
+    } catch (error) {
       progress.stop();
-      writeError(io, "hurdle [store-unavailable] The configured Result Store could not be opened.\n");
+      if (runtimeProfile.resultStore.kind === "postgres" && error?.code === "store.schema-not-ready") {
+        writeError(io, "hurdle [store.schema-not-ready] Postgres result schema needs setup. No evaluation started.\n");
+        io.stdout.write(terminalNext([`${suiteCommand("setup", options.suite, { cwd: io.cwd })} --store postgres`], io.stdout));
+      } else writeError(io, "hurdle [store-unavailable] The configured Result Store could not be opened.\n");
       disposeAuthoredSuite();
       return 1;
     }
-    let cellStartedAt = Date.now();
+    const activeCells = new Map();
+    const executionCells = new Map();
+    let completedCells = 0;
+    let totalCells = 0;
     const reportedReasonRunIds = new Set();
     const cellLabel = (cell) => {
       const agent = { "claude-code": "Claude Code", codex: "Codex" }[cell.adapterId] ?? cell.adapterId;
       const repeat = cell.repeatTotal > 1 ? ` · repeat ${cell.repeatOrdinal}/${cell.repeatTotal}` : "";
       return `[${cell.ordinal}/${cell.total}] ${cell.taskId} · ${cell.conditionId} · ${agent}${repeat}`;
     };
+    const renderActiveProgress = ({ start = false } = {}) => {
+      if (activeCells.size === 0) return;
+      let label;
+      if (activeCells.size === 1) {
+        const { cell, phase } = activeCells.values().next().value;
+        label = `${cellLabel(cell)} · ${phase}`;
+      } else {
+        const phases = new Map();
+        for (const { phase } of activeCells.values()) phases.set(phase, (phases.get(phase) ?? 0) + 1);
+        label = `${activeCells.size} active · ${completedCells}/${totalCells} done · `
+          + [...phases].map(([phase, count]) => `${count} ${phase}`).join(" · ");
+      }
+      progress[start ? "start" : "update"](label);
+    };
     const terminalObserver = { observe(event) {
-      if (event.kind === "cell-started") {
-        cellStartedAt = Date.now();
-        progress.start(`${cellLabel(event.cell)} · Evaluating`);
+      if (event.kind === "matrix-ready") {
+        totalCells = event.total;
+      } else if (event.kind === "cell-started") {
+        const start = activeCells.size === 0;
+        activeCells.set(event.cell.ordinal, { cell: event.cell, startedAt: Date.now(), phase: "Evaluating" });
+        renderActiveProgress({ start });
+      } else if (event.kind === "cell-attempt-started") {
+        const active = activeCells.get(event.cell.ordinal);
+        if (!active) return;
+        if (active.executionId) executionCells.delete(active.executionId);
+        active.executionId = event.executionId;
+        executionCells.set(event.executionId, event.cell.ordinal);
+      } else if (event.kind === "environment-status") {
+        const ordinal = executionCells.get(event.executionId);
+        const onlyActive = activeCells.size === 1 ? activeCells.values().next().value : null;
+        const active = ordinal === undefined && onlyActive && !onlyActive.executionId
+          ? onlyActive : activeCells.get(ordinal);
+        if (!active) return;
+        active.phase = ENVIRONMENT_STATUS_LABELS[event.status];
+        renderActiveProgress();
+      } else if (event.kind === "cell-finalizing") {
+        const active = activeCells.get(event.cell.ordinal);
+        if (!active) return;
+        active.phase = "Finalizing results";
+        renderActiveProgress();
       } else if (event.kind === "cell-completed") {
+        const active = activeCells.get(event.cell.ordinal);
         const verdict = event.terminal.verdict;
         const method = verdict === "pass" ? "succeed" : verdict === "fail" ? "fail" : "warn";
+        activeCells.delete(event.cell.ordinal);
+        if (active?.executionId) executionCells.delete(active.executionId);
+        completedCells += 1;
         progress[method](
           `${cellLabel(event.cell)} · ${verdict}`,
-          `${Math.max(0, Math.floor((Date.now() - cellStartedAt) / 1000))}s`,
+          `${Math.max(0, Math.floor((Date.now() - (active?.startedAt ?? Date.now())) / 1000))}s`,
         );
         const reasons = projectVerdictReasons([
           ...(event.terminal.runTrustReasons ?? []),
@@ -950,6 +1385,7 @@ async function runCliMain(argv, io, dependencies) {
         ]);
         for (const reason of reasons) progress.detail(`${reason.code}: ${reason.summary}`);
         if (reasons.length > 0) reportedReasonRunIds.add(event.terminal.id);
+        renderActiveProgress({ start: true });
       }
     } };
     const progressObserver = { observe(event) {
@@ -994,7 +1430,9 @@ async function runCliMain(argv, io, dependencies) {
               apiKey: runtimeSecrets.e2bApiKey,
               progressObserver,
             })
-          : dependencies.createLocalExecutionEnvironment(),
+          : runtimeProfile.environment.kind === "together"
+            ? dependencies.createTogetherExecutionEnvironment({ apiKey: runtimeSecrets.togetherApiKey, progressObserver })
+            : dependencies.createLocalExecutionEnvironment(),
         ...(judge === null ? {} : { judge }),
         progressObserver,
       });
@@ -1005,6 +1443,7 @@ async function runCliMain(argv, io, dependencies) {
         agentSelections: options.agentSelections,
         repeat: options.repeat,
         retries: options.retries,
+        concurrency: options.concurrency,
         experimentVersion: options.experimentVersion,
         credentials,
         environmentSettings: runtimeProfile.environment.settings,
@@ -1090,7 +1529,7 @@ async function runCliMain(argv, io, dependencies) {
         { useColor },
       ));
     }
-    io.stdout.write(`${runFact("Store", displayStore(runtimeProfile, io.cwd), { useColor })}\n`);
+    io.stdout.write(`${runFact(runtimeProfile.resultStore.kind === "postgres" ? "Artifacts" : "Results", displayResultsPath(runtimeProfile, io.cwd), { useColor })}\n`);
     if (interruptedSignal === "SIGINT") return 130;
     if (interruptedSignal === "SIGTERM") return 143;
     const runExitCode = counts.fail + counts.incomplete + counts.unknown === 0 ? 0 : 1;
@@ -1157,6 +1596,10 @@ export async function main(argv, io = {
 }) {
   const versionResult = versionCommand(argv, io);
   if (versionResult !== null) return versionResult;
+  // Configuration, discovery and help need no credentials or readable project environment.
+  if (!argv.length || ["runtime", "suites", "ls", "help", "--help", "-h"].includes(argv[0]) || hasHelpFlag(argv.slice(1))) {
+    return createFrameworkCli({ env: {} }).main(argv, io);
+  }
   let configured;
   try { configured = loadProjectEnvironment(io.cwd); }
   catch (error) {

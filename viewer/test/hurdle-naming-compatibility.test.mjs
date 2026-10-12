@@ -90,6 +90,30 @@ test("a read-only browser still returns the previous preference", () => {
   assert.equal(readStoredPreference({ getItem: key => key === "tae-theme" ? "dark" : null, setItem() { throw new Error("disabled"); } }, "hurdle-theme"), "dark");
 });
 
+test("shared sidebar preferences retain an existing app or transcript layout and give the shared choice precedence", () => {
+  for (const [oldKey, sharedKey, value] of [
+    ["hurdle-app-rail-width", "hurdle-sidebar-width", "300"],
+    ["hurdle-transcript-rail-width", "hurdle-sidebar-width", "460"],
+    ["tae-transcript-rail-width", "hurdle-sidebar-width", "320"],
+    ["hurdle-app-rail-collapsed", "hurdle-sidebar-collapsed", "false"],
+    ["tae-app-rail-collapsed", "hurdle-sidebar-collapsed", "true"],
+  ]) {
+    const saved = storage({ [oldKey]: value });
+    assert.equal(readStoredPreference(saved, sharedKey), value);
+    assert.equal(saved.getItem(sharedKey), value);
+    saved.setItem(sharedKey, "new");
+    assert.equal(readStoredPreference(saved, sharedKey), "new");
+    assert.equal(saved.getItem(oldKey), value);
+  }
+  const saved = storage({ "hurdle-app-rail-width": "300", "hurdle-transcript-rail-width": "400" });
+  assert.equal(readStoredPreference(saved, "hurdle-sidebar-width"), "300", "conflicting old widths resolve consistently on both pages");
+});
+
+test("shared sidebar preferences are readable from request cookies without a writable storage interface", () => {
+  assert.equal(readStoredPreference({ getItem: key => key === "hurdle-transcript-rail-width" ? "350" : null }, "hurdle-sidebar-width"), "350");
+  assert.equal(readStoredPreference({ getItem: key => key === "hurdle-app-rail-collapsed" ? "true" : null, setItem() { throw new Error("read only"); } }, "hurdle-sidebar-collapsed"), "true");
+});
+
 test("pre-paint theme keeps the existing choice and respects the new choice", () => {
   const source = readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8");
   const script = source.match(/const THEME_SCRIPT = `([\s\S]*?)`;/)[1];

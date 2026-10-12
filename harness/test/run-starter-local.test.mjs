@@ -270,6 +270,8 @@ test("Run Engine reports accepted cell progress from the stored terminal referen
         repeatTotal: 1,
       },
     },
+    { kind: "cell-attempt-started", cell: events[1].cell, executionId: run.id },
+    { kind: "cell-finalizing", cell: events[1].cell },
     {
       kind: "cell-completed",
       cell: {
@@ -563,7 +565,7 @@ test("Run Engine expands every selected Task and Condition cell", async (t) => {
     progressObserver: { observe(event) { progressEvents.push(event); } },
   });
 
-  const result = await engine.run({ runPlan, requestedModel: "test-model" });
+  const result = await engine.run({ runPlan, requestedModel: "test-model", concurrency: 1 });
   assert.equal(result.runs.length, 4);
   const records = await Promise.all(result.runs.map(({ id }) => store.getRun(id)));
   assert.deepEqual(
@@ -589,12 +591,20 @@ test("Run Engine expands every selected Task and Condition cell", async (t) => {
     [
       ["matrix-ready", 4],
       ["cell-started", 1, 4],
+      ["cell-attempt-started", 1, 4],
+      ["cell-finalizing", 1, 4],
       ["cell-completed", 1, 4],
       ["cell-started", 2, 4],
+      ["cell-attempt-started", 2, 4],
+      ["cell-finalizing", 2, 4],
       ["cell-completed", 2, 4],
       ["cell-started", 3, 4],
+      ["cell-attempt-started", 3, 4],
+      ["cell-finalizing", 3, 4],
       ["cell-completed", 3, 4],
       ["cell-started", 4, 4],
+      ["cell-attempt-started", 4, 4],
+      ["cell-finalizing", 4, 4],
       ["cell-completed", 4, 4],
     ],
   );

@@ -12,8 +12,8 @@ const TOGETHER_CHAT_MODEL = "meta-llama/Llama-3.3-70B-Instruct-Turbo";
 const REQUEST_TIMEOUT_MS = 20_000;
 const RESPONSE_LIMIT_BYTES = 64 * 1024;
 
-function result(provider, status, message) {
-  return Object.freeze({ provider, status, message });
+function result(provider, status, message, code) {
+  return Object.freeze({ provider, status, message, ...(code ? { code } : {}) });
 }
 
 function requestSignal() {
@@ -157,9 +157,9 @@ export async function checkPostgresCredential(connectionString, { createPool } =
       return result("Postgres", "fail", "connection succeeded; both tae and hurdle schemas contain results; resolve the schema conflict before setup");
     }
     if (schema.rows?.[0]?.runs) return result("Postgres", "pass", "connection succeeded; hurdle schema is present");
-    return result("Postgres", "pass", schema.rows?.[0]?.legacy_runs
-      ? "connection succeeded; legacy schema needs upgrade; run npx hurdle setup --store postgres"
-      : "connection succeeded; hurdle schema is not initialized; run npx hurdle setup --store postgres");
+    return result("Postgres", "warning", schema.rows?.[0]?.legacy_runs
+      ? "connected, but the result schema needs upgrading"
+      : "connected, but the result schema needs initializing", "postgres.setup-required");
   } catch (error) {
     if (error?.code === "28P01" || error?.code === "28000") {
       return result("Postgres", "fail", "credential rejected");
@@ -180,4 +180,17 @@ export async function runCredentialPreflight(environment, dependencies = {}) {
     checkE2bCredential(environment.E2B_API_KEY, dependencies),
     checkPostgresCredential(hurdleEnvironmentValue(environment, RESULT_STORE_DATABASE_URL_ENV), dependencies),
   ]);
+}
+
+// Read-only access check; never allocate a VM or retain provider response data.
+export async function checkTogetherSandboxCredential(apiKey, { loadSdk = () => import('together-sandbox') } = {}) {
+  if (typeof apiKey !== 'string' || !apiKey.trim()) return { status: 'fail', message: 'sandbox API key is missing' };
+  try {
+    const { TogetherSandbox } = await loadSdk();
+    const sdk = new TogetherSandbox({ apiKey, baseUrl: 'https://api.bartender.codesandbox.io', retry: { maxAttempts: 1 } });
+    await sdk.snapshots.list({ limit: 1 });
+    return { status: 'pass', message: 'sandbox API access verified' };
+  } catch (error) {
+    return { status: 'fail', message: error.status === 401 || error.status === 403 ? 'sandbox access denied; check the key and organization enablement' : 'sandbox API access could not be verified' };
+  }
 }

@@ -5,21 +5,23 @@ import { initializeRuntime } from "../lib/runtime-init.mjs";
 import { terminalHeader, terminalStatus, terminalFact, terminalUsesColor, terminalNext } from "../lib/terminal-output.mjs";
 
 function usage(message) {
-  process.stderr.write(terminalStatus("fail", message ?? "Choose e2b, postgres, or e2b-postgres.", process.stderr));
-  process.stderr.write("Usage: npm run runtime:init -- <e2b|postgres|e2b-postgres> [--template NAME]\n");
+  process.stderr.write(terminalStatus("fail", message ?? "Choose e2b, postgres, e2b-postgres, together, or together-postgres.", process.stderr));
+  process.stderr.write("Usage: npm run runtime:init -- <e2b|postgres|e2b-postgres|together|together-postgres> [--template NAME | --snapshot ALIAS]\n");
   return 2;
 }
 
 function argumentsFrom(argv) {
   const [mode, ...options] = argv;
-  if (!mode || !["e2b", "postgres", "e2b-postgres"].includes(mode)) return null;
+  if (!mode || !["e2b", "postgres", "e2b-postgres", "together", "together-postgres"].includes(mode)) return null;
   let template;
+  let snapshot;
   for (let index = 0; index < options.length; index += 1) {
-    if (options[index] !== "--template" || !options[index + 1] || template) return null;
-    template = options[index + 1];
+    if (!["--template", "--snapshot"].includes(options[index]) || !options[index + 1]) return null;
+    if (options[index] === "--template") { if (template || !mode.startsWith("e2b")) return null; template = options[index + 1]; }
+    else { if (snapshot || !mode.startsWith("together")) return null; snapshot = options[index + 1]; }
     index += 1;
   }
-  return { mode, template };
+  return { mode, template, snapshot };
 }
 
 const selected = argumentsFrom(process.argv.slice(2));
@@ -27,7 +29,7 @@ if (!selected) {
   process.exitCode = usage();
 } else {
   try {
-    const usesE2b = selected.mode !== "postgres";
+    const usesE2b = selected.mode.startsWith("e2b");
     const template = selected.template ?? (
       usesE2b ? loadProjectEnvironment(process.cwd()).environment.E2B_TEMPLATE : undefined
     );
@@ -41,6 +43,7 @@ if (!selected) {
         cwd: process.cwd(),
         mode: selected.mode,
         template,
+        snapshot: selected.snapshot,
       });
       process.stdout.write(terminalHeader(process.stdout)
         + terminalStatus("pass", "Runtime created", process.stdout) + "\n"

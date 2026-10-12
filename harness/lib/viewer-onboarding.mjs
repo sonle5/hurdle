@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
 import { relative, resolve } from "node:path";
+import { defaultProjectSuite, discoverProjectSuites, resolveProjectSuite } from "./project-suites.mjs";
+import { quoteCommandArgument } from "./terminal-output.mjs";
 
-function shellWord(value) {
-  return /^[a-zA-Z0-9_./:@=-]+$/.test(value)
-    ? value
-    : `'${value.replaceAll("'", "'\\''")}'`;
+function displayText(value, maximum = 32768) {
+  return typeof value === "string" && value.length <= maximum
+    && !/[\u0000-\u0008\u000b-\u001f\u007f]/.test(value);
 }
 
 // Only display metadata crosses into the read-only Viewer. Never pass runtime
@@ -12,36 +13,65 @@ function shellWord(value) {
 export function validateViewerOnboarding(value) {
   const fields = ["projectDirectory", "commands", "setupCommand", "runtimeLabel"];
   if (!value || typeof value !== "object" || Array.isArray(value)
-      || Object.keys(value).length !== fields.length
-      || Object.keys(value).some(key => !fields.includes(key))
-      || fields.some(key => key === "commands" && value[key] === null ? false
-        : typeof value[key] !== "string" || value[key].length > 32768
-          || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(value[key]))) {
+      || Object.keys(value).some(key => ![...fields, "steps"].includes(key))
+      || fields.some(key => key === "commands" && value[key] === null ? false : !displayText(value[key]))
+      || (value.steps !== undefined && (!Array.isArray(value.steps) || value.steps.length < 1 || value.steps.length > 3
+        || value.steps.some(step => !step || typeof step !== "object" || Array.isArray(step)
+          || Object.keys(step).length !== 2 || !Object.hasOwn(step, "title") || !Object.hasOwn(step, "command")
+          || !displayText(step.title, 96) || !step.title.trim() || /[\r\n]/.test(step.title)
+          || !displayText(step.command) || !step.command.trim())))) {
     throw new TypeError("Viewer onboarding context is invalid");
   }
-  return Object.fromEntries(fields.map(key => [key, value[key]]));
+  return {
+    projectDirectory: value.projectDirectory,
+    commands: value.commands,
+    setupCommand: value.setupCommand,
+    runtimeLabel: value.runtimeLabel,
+    ...(value.steps === undefined ? {} : { steps: value.steps.map(({ title, command }) => ({ title, command })) }),
+  };
 }
 
-export function createViewerOnboarding({ cwd, cliPath, sourceCheckout, suite, runtimeProfile, storeOverride = false }) {
-  const prefix = sourceCheckout ? "hurdle" : "npx hurdle";
-  const prelude = [`cd ${shellWord(cwd)}`];
-  if (sourceCheckout) prelude.push(`alias hurdle=${shellWord(`node ${shellWord(cliPath)}`)}`);
-  const defaultSuite = existsSync(resolve(cwd, "evals/example.suite.mjs"))
-    ? "evals/example.suite.mjs" : "example.suite.mjs";
-  const suiteArg = suite === defaultSuite ? "" : ` ${shellWord(suite)}`;
-  let runtimeArg;
-  // A standalone --store override may no longer match the saved Runtime.
-  // Do not suggest a command that would write to a different results folder.
-  if (runtimeProfile.sourcePath && !storeOverride) {
-    runtimeArg = ` --runtime ${shellWord(relative(cwd, runtimeProfile.sourcePath) || runtimeProfile.sourcePath)}`;
-  } else if (!runtimeProfile.sourcePath && runtimeProfile.environment.kind === "local") {
-    runtimeArg = ` --environment local --store ${shellWord(relative(cwd, runtimeProfile.resultStore.root) || runtimeProfile.resultStore.root)}`;
+export function createViewerOnboarding({ cwd, suite, runtimeProfile, storeOverride = false }) {
+  let discovered = [];
+  try { discovered = discoverProjectSuites(cwd); } catch { /* Explicit Suite paths remain usable. */ }
+  let selected = suite ?? defaultProjectSuite(cwd, discovered);
+  try { selected = resolveProjectSuite(cwd, selected).path ?? selected; } catch { /* Use the explicit selection. */ }
+  const steps = [];
+  let createdDefault = false;
+  if (!selected || !existsSync(resolve(cwd, selected))) {
+    let destination = "evals";
+    if (existsSync(resolve(cwd, destination))) {
+      destination = "evals/my-eval";
+      for (let suffix = 2; existsSync(resolve(cwd, destination)); suffix += 1) destination = `evals/my-eval-${suffix}`;
+    }
+    steps.push({ title: "Create an evaluation", command: `npx hurdle init${destination === "evals" ? "" : ` ${quoteCommandArgument(destination)}`}` });
+    selected = `${destination}/example.suite.mjs`;
+    createdDefault = destination === "evals";
   }
-  return validateViewerOnboarding({
-    projectDirectory: cwd,
-    commands: runtimeArg === undefined ? null
-      : [...prelude, "", `${prefix} validate${suiteArg}${runtimeArg}`, `${prefix} run${suiteArg}${runtimeArg}`].join("\n"),
-    setupCommand: `${sourceCheckout ? `node ${shellWord(cliPath)}` : prefix} setup${suiteArg}`,
-    runtimeLabel: runtimeProfile.environment.kind === "e2b" ? "E2B sandbox" : "Local",
-  });
+  const defaultSuite = defaultProjectSuite(cwd, discovered);
+  const match = discovered.find(item => item.path === selected);
+  const name = match && !match.ambiguous && !match.name.startsWith("-") ? match.name : selected;
+  const suiteArg = createdDefault || selected === defaultSuite ? "" : ` ${quoteCommandArgument(name)}`;
+  const setupCommand = `npx hurdle setup${suiteArg}`;
+  const runtimeLabel = runtimeProfile.environment.kind === "together" ? "Together sandbox"
+    : runtimeProfile.environment.kind === "e2b" ? "E2B sandbox" : "Local";
+  const context = { projectDirectory: cwd, commands: null, setupCommand, runtimeLabel };
+  // Preserve the selected store: an override of a saved remote Runtime cannot
+  // be replayed safely without its execution configuration.
+  if (storeOverride && runtimeProfile.sourcePath && runtimeProfile.environment.kind !== "local") {
+    return validateViewerOnboarding(context);
+  }
+  let runtimeArg = "";
+  if (runtimeProfile.sourcePath && !storeOverride) {
+    if (resolve(runtimeProfile.sourcePath) !== resolve(cwd, ".hurdle/runtime/default.json")) {
+      runtimeArg = ` --runtime ${quoteCommandArgument(relative(cwd, runtimeProfile.sourcePath) || runtimeProfile.sourcePath)}`;
+    }
+  } else if (runtimeProfile.environment.kind === "local" && runtimeProfile.resultStore.kind === "local"
+    && (storeOverride || resolve(runtimeProfile.resultStore.root) !== resolve(cwd, ".hurdle/results-v1"))) {
+    runtimeArg = ` --environment local --store ${quoteCommandArgument(relative(cwd, runtimeProfile.resultStore.root) || runtimeProfile.resultStore.root)}`;
+  } else if (!runtimeProfile.sourcePath) {
+    steps.push({ title: "Set up your sandbox", command: setupCommand });
+  }
+  steps.push({ title: "Run and view results", command: `npx hurdle run${suiteArg}${runtimeArg} --view` });
+  return validateViewerOnboarding({ ...context, commands: steps.map(step => step.command).join("\n"), steps });
 }

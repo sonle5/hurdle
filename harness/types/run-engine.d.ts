@@ -26,6 +26,8 @@ export interface RunRequestBase {
   readonly environmentSettings?: JsonObject;
   readonly repeat?: number;
   readonly retries?: number;
+  /** Maximum concurrent cells, including retries and finalization. Default: 3. */
+  readonly concurrency?: number;
   readonly experimentVersion?: string | null;
   readonly credentials?: Readonly<Record<string, string>>;
   readonly signal?: AbortSignal | null;
@@ -131,13 +133,22 @@ export interface ExecutionProgressCell {
 
 export type ExecutionProgressEvent =
   | Readonly<{ kind: "matrix-ready"; total: number }>
-  | Readonly<{ kind: "cell-started"; cell: ExecutionProgressCell }>
+  | Readonly<{ kind: "cell-started" | "cell-finalizing"; cell: ExecutionProgressCell }>
+  | Readonly<{ kind: "cell-attempt-started"; cell: ExecutionProgressCell; executionId: string }>
+  | Readonly<{
+      kind: "environment-status";
+      executionId: string;
+      environmentId: "e2b" | "together";
+      status: "starting-guardian" | "guardian-started" | "starting-sandbox"
+        | "sandbox-started" | "preparing-environment" | "preparing-workspace"
+        | "agent-running" | "collecting-results" | "stopping-sandboxes";
+    }>
   | Readonly<{
       kind: "environment-resource-allocated";
       executionId: string;
-      environmentId: "e2b";
+      environmentId: "e2b" | "together";
       resource: Readonly<{
-        provider: "e2b";
+        provider: "e2b" | "together";
         role: "guardian" | "agent";
         id: string;
       }>;

@@ -432,7 +432,7 @@ test("the CLI previews the showcase denominator and billable services before exe
   assert.equal(exit, 0, events.filter(([kind]) => kind === "stderr").flat().join(""));
   const output = events.filter(([kind]) => kind === "stdout").map(([, value]) => value).join("");
   assert.match(output, /^  Plan\s+12 runs · 4 tasks · 3 conditions$/m);
-  assert.match(output, /^  Runtime\s+Local · Filesystem$/m);
+  assert.match(output, /^  Runtime\s+runtime.json\n  Execution\s+Local\n  Store\s+Filesystem$/m);
   assert.match(output, /^  Scoring\s+Judge$/m);
   assert.match(output, /^  Usage\s+Agent, Judge, and external API may be billed$/m);
   assert.match(

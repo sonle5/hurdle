@@ -136,6 +136,12 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   for (const path of [
     "LICENSE",
     "examples/copy-message/example.suite.mjs",
+    "examples/concurrency-smoke/example.suite.mjs",
+    ...["copy-alpha", "copy-beta", "copy-gamma"].flatMap(task => [
+      `examples/concurrency-smoke/tasks/${task}/prompt.md`,
+      `examples/concurrency-smoke/tasks/${task}/checks.mjs`,
+      `examples/concurrency-smoke/tasks/${task}/fixtures/message.txt`,
+    ]),
     "harness/bin/hurdle.mjs",
     "harness/bin/tae.mjs",
     "harness/lib/hurdle-environment.mjs",
@@ -305,6 +311,15 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   const togetherValidated = cli("validate", "together-evals/example.suite.mjs", "--offline");
   assert.equal(togetherValidated.status, 0, togetherValidated.stderr);
   assert.match(readFileSync(join(consumerRoot, "together-evals/tasks/together-api/fixtures/request.json"), "utf8"), /max_tokens/);
+
+  const concurrentInitialized = cli("init", "concurrent-tasks", "--example", "concurrency-smoke");
+  assert.equal(concurrentInitialized.status, 0, concurrentInitialized.stderr);
+  const concurrentValidated = cli("validate", "concurrent-tasks/example.suite.mjs", "--offline");
+  assert.equal(concurrentValidated.status, 0, concurrentValidated.stderr);
+  assert.match(concurrentValidated.stdout, /3 tasks · 1 condition/);
+  for (const task of ["copy-alpha", "copy-beta", "copy-gamma"]) {
+    assert.ok(existsSync(join(consumerRoot, "concurrent-tasks/tasks", task, "fixtures/message.txt")));
+  }
 
   const customInitialized = cli("init", "custom-evals", "--agent", "codex", "--model", "gpt-6.1-sol", "--effort", "high");
   assert.equal(customInitialized.status, 0, customInitialized.stderr);

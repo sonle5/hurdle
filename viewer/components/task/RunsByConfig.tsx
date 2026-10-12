@@ -54,7 +54,7 @@ export function RunsByConfig({
         r.durationSec,
         r.toolCalls ?? "",
         r.totalTokensIn,
-        r.costUsd.toFixed(4),
+        r.costUsd?.toFixed(4) ?? "",
         r.corrections,
         r.needsFollowup ? "true" : "false",
         r.id,

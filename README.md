@@ -33,9 +33,9 @@ See [authoring](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/authoring.md) fo
 Starters pin Claude Opus 5.5 or GPT-6.1 Sol with medium reasoning effort.
 Use `init --model MODEL --effort LEVEL` to choose another configuration.
 
-## E2B sandbox
+## Together sandbox
 
-In a new project, add `E2B_API_KEY`, `TOGETHER_API_KEY`, and your agent credentials to `.env.local`:
+In a new project, add `TOGETHER_API_KEY` and your agent credentials to `.env.local`:
 
 ```sh
 npx hurdle init --example together-api
@@ -43,7 +43,8 @@ npx hurdle setup --yes
 npx hurdle run --view
 ```
 
-Setup builds the E2B template. Sandbox and API usage may be billed.
+Setup builds or reuses a Together snapshot. Sandbox and API usage may be billed.
+For E2B, add `E2B_API_KEY` and use `npx hurdle setup --sandbox e2b --yes`.
 See [setup](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/sandbox-setup.md) for existing templates and Postgres.
 
 For an existing Postgres database, set `HURDLE_RESULT_STORE_DATABASE_URL` in `.env.local`,

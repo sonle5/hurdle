@@ -156,15 +156,15 @@ function requireActive(signal) {
   if (signal?.aborted) throw new EnvironmentCancellation("cancelled");
 }
 
-function validateEnvelope(envelope) {
+export function validateSandboxEnvelope(envelope, providerName = "E2B") {
   if (!envelope || typeof envelope !== "object") {
-    throw new TypeError("E2B execution requires an execution envelope");
+    throw new TypeError(`${providerName} execution requires an execution envelope`);
   }
   if (!Array.isArray(envelope.credentialBindings)) {
-    throw new TypeError("E2B credential bindings must be an array");
+    throw new TypeError(`${providerName} credential bindings must be an array`);
   }
   if (typeof envelope.workspaceArtifactMetadata !== "boolean") {
-    throw new TypeError("E2B workspace metadata selection must be boolean");
+    throw new TypeError(`${providerName} workspace metadata selection must be boolean`);
   }
   const routes = envelope.capture?.routes ?? [];
   const blockedRequests = envelope.capture?.blockedRequests ?? [];
@@ -185,7 +185,7 @@ function validateEnvelope(envelope) {
       ))
     ))
   ) {
-    throw new TypeError("E2B selected-field capture is not supported by this profile");
+    throw new TypeError(`${providerName} selected-field capture is not supported by this profile`);
   }
   if (
     !Array.isArray(blockedRequests)
@@ -210,7 +210,7 @@ function validateEnvelope(envelope) {
     || new Set(blockedRequests.map(({ method, path }) => `${method}\n${path}`)).size
       !== blockedRequests.length
   ) {
-    throw new TypeError("E2B request blocking is not supported by this profile");
+    throw new TypeError(`${providerName} request blocking is not supported by this profile`);
   }
   const captureHosts = new Set(routes.map(({ host }) => host));
   for (const binding of envelope.credentialBindings) {
@@ -224,7 +224,7 @@ function validateEnvelope(envelope) {
       || !Array.isArray(delivery.headerNames)
       || delivery.headerNames.length === 0
     ) {
-      throw new TypeError("E2B credential delivery is not supported by this capture profile");
+      throw new TypeError(`${providerName} credential delivery is not supported by this capture profile`);
     }
   }
   if (
@@ -245,7 +245,7 @@ function validateEnvelope(envelope) {
       )
     )
   ) {
-    throw new TypeError("E2B capture request is not supported by this capture profile");
+    throw new TypeError(`${providerName} capture request is not supported by this capture profile`);
   }
 }
 
@@ -343,7 +343,7 @@ export function createE2BExecutionEnvironment({
       });
     },
     async execute(envelope) {
-      validateEnvelope(envelope);
+      validateSandboxEnvelope(envelope);
       if (envelope.workspaceArtifactMetadata && !workspaceArtifactMetadataSupported) {
         throw new TypeError("E2B workspace artifact metadata is unsupported by this provider");
       }
@@ -360,6 +360,10 @@ export function createE2BExecutionEnvironment({
         let guardianSession = null;
         let workload = null;
         let phase = "acquire";
+        const reportStatus = (status) => reportExecutionProgress(progress, {
+          kind: "environment-status", executionId: envelope.executionId,
+          environmentId: "e2b", status,
+        });
         let coordinatorFailure = null;
         try {
           if (envelope.signal?.aborted) {
@@ -369,6 +373,7 @@ export function createE2BExecutionEnvironment({
               "E2B execution was cancelled before resource allocation.",
             ));
           } else {
+            reportStatus("starting-guardian");
             const capture = await provider.acquire({
               role: "capture",
               template: settings.guardianTemplate,
@@ -408,7 +413,9 @@ export function createE2BExecutionEnvironment({
               signal: envelope.signal,
             });
             requireActive(envelope.signal);
+            reportStatus("guardian-started");
             phase = "acquire";
+            reportStatus("starting-sandbox");
             workload = await provider.acquire({
               role: "execution",
               template: settings.workloadTemplate,
@@ -431,6 +438,8 @@ export function createE2BExecutionEnvironment({
               },
             });
             requireActive(envelope.signal);
+            reportStatus("sandbox-started");
+            reportStatus("preparing-environment");
             if (typeof provider.validate === "function") {
               await provider.validate(workload, {
                 cpuCount: settings.cpuCount,
@@ -475,6 +484,7 @@ export function createE2BExecutionEnvironment({
                     }
                     const remainingMs = program.maxElapsedMs - agentElapsedMs;
                     phase = "stage";
+                    reportStatus("preparing-workspace");
                     await provider.stage(workload, {
                       fixtures: firstTurn ? envelope.fixtures : [],
                       workspaceFiles: plan.workspaceFiles ?? [],
@@ -485,6 +495,7 @@ export function createE2BExecutionEnvironment({
                     phase = "execute";
                     const turnStdout = createBoundedControllerCapture(captureMaxBytes);
                     const turnStderr = createBoundedControllerCapture(captureMaxBytes);
+                    reportStatus("agent-running");
                     const processFacts = await provider.run(workload, {
                       launchPlan: {
                         ...plan,
@@ -561,6 +572,7 @@ export function createE2BExecutionEnvironment({
                     ));
                 }
                 const aggregate = aggregateProcesses(turns, stdout, stderr);
+                reportStatus("collecting-results");
                 try {
                   egress = await guardian.seal({
                     sandbox: capture,
@@ -660,6 +672,7 @@ export function createE2BExecutionEnvironment({
               "E2B execution failed before all controller evidence could be completed.",
             ));
         } finally {
+          if (resources.length) reportStatus("stopping-sandboxes");
           await disposeResources(provider, resources, integrityIssues);
         }
         if (coordinatorFailure) throw coordinatorFailure;

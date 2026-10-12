@@ -3,6 +3,18 @@ import { stripVTControlCharacters } from "node:util";
 const VERDICTS = new Set(["pass", "fail", "incomplete", "unknown"]);
 const RESOURCE_ROLES = new Set(["guardian", "agent"]);
 
+export const ENVIRONMENT_STATUS_LABELS = Object.freeze({
+  "starting-guardian": "Starting Guardian",
+  "guardian-started": "Guardian started",
+  "starting-sandbox": "Starting sandbox",
+  "sandbox-started": "Sandbox started",
+  "preparing-environment": "Preparing environment",
+  "preparing-workspace": "Preparing workspace",
+  "agent-running": "Agent running",
+  "collecting-results": "Collecting results",
+  "stopping-sandboxes": "Stopping sandboxes",
+});
+
 // Presentation only: callers supply already-redacted stored verdict reasons,
 // never provider exceptions, stderr or credentials. Keep terminal output small.
 export function projectVerdictReasons(value) {
@@ -66,27 +78,40 @@ function projectEvent(value) {
   if (value.kind === "matrix-ready" && positiveInteger(value.total)) {
     return Object.freeze({ kind: value.kind, total: value.total });
   }
-  if (value.kind === "cell-started") {
+  if (["cell-started", "cell-finalizing"].includes(value.kind)) {
     const cell = projectCell(value.cell);
     return cell ? Object.freeze({ kind: value.kind, cell }) : null;
+  }
+  if (value.kind === "cell-attempt-started") {
+    const cell = projectCell(value.cell);
+    return cell && boundedText(value.executionId)
+      ? Object.freeze({ kind: value.kind, cell, executionId: value.executionId }) : null;
+  }
+  if (value.kind === "environment-status") {
+    if (!["e2b", "together"].includes(value.environmentId)
+      || !boundedText(value.executionId)
+      || typeof value.status !== "string"
+      || !Object.hasOwn(ENVIRONMENT_STATUS_LABELS, value.status)) return null;
+    return Object.freeze({ kind: value.kind, executionId: value.executionId,
+      environmentId: value.environmentId, status: value.status });
   }
   if (value.kind === "environment-resource-allocated") {
     const resource = value.resource;
     if (
-      value.environmentId !== "e2b"
+      !["e2b", "together"].includes(value.environmentId)
       || !boundedText(value.executionId)
       || !resource
       || typeof resource !== "object"
-      || resource.provider !== "e2b"
+      || resource.provider !== value.environmentId
       || !RESOURCE_ROLES.has(resource.role)
       || !boundedText(resource.id)
     ) return null;
     return Object.freeze({
       kind: value.kind,
       executionId: value.executionId,
-      environmentId: "e2b",
+      environmentId: value.environmentId,
       resource: Object.freeze({
-        provider: "e2b",
+        provider: resource.provider,
         role: resource.role,
         id: resource.id,
       }),

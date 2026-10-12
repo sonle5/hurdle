@@ -124,9 +124,9 @@ test("Postgres preflight is read-only and reports migration state", async () => 
 
 test("Postgres preflight directs legacy stores to setup without changing either schema", async () => {
   for (const [runs, legacy_runs, status, message] of [
-    [null, "tae.runs", "pass", /legacy schema needs upgrade.*npx hurdle setup --store postgres/],
+    [null, "tae.runs", "warning", /result schema needs upgrading/],
     ["hurdle.runs", "tae.runs", "fail", /resolve the schema conflict/],
-    [null, null, "pass", /not initialized.*npx hurdle setup --store postgres/],
+    [null, null, "warning", /result schema needs initializing/],
   ]) {
     const queries = [];
     const result = await checkPostgresCredential("postgresql://example", { createPool: () => ({
@@ -135,6 +135,7 @@ test("Postgres preflight directs legacy stores to setup without changing either 
     }) });
     assert.equal(result.status, status);
     assert.match(result.message, message);
+    if (status === "warning") assert.equal(result.code, "postgres.setup-required");
     assert.ok(queries.every(sql => sql.startsWith("SELECT ")));
   }
 });

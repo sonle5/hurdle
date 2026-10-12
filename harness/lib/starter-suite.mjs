@@ -18,6 +18,11 @@ const STARTERS = Object.freeze({ "copy-message": [
 ], "together-api": [
   "README.md", "example.suite.mjs", "tasks/together-api/prompt.md",
   "tasks/together-api/checks.mjs", "tasks/together-api/fixtures/request.json",
+], "concurrency-smoke": [
+  "README.md", "example.suite.mjs",
+  ...["copy-alpha", "copy-beta", "copy-gamma"].flatMap(task => [
+    `tasks/${task}/prompt.md`, `tasks/${task}/checks.mjs`, `tasks/${task}/fixtures/message.txt`,
+  ]),
 ] });
 
 async function pathExists(path) {
@@ -52,7 +57,7 @@ export async function initializeSuite({ destination, agent = "claude-code", exam
   if (!["claude-code", "codex"].includes(agent)) {
     return initDiagnostic("init.agent-invalid", destination, "Choose claude-code or codex for the starter Agent.");
   }
-  if (!Object.hasOwn(STARTERS, example)) return initDiagnostic("init.example-invalid", destination, "Choose copy-message or together-api.");
+  if (!Object.hasOwn(STARTERS, example)) return initDiagnostic("init.example-invalid", destination, "Choose copy-message, together-api or concurrency-smoke.");
   model ??= STARTER_AGENT_MODELS[agent];
   if (typeof model !== "string" || !model.trim()) return initDiagnostic("init.model-invalid", destination, "Choose a nonblank Agent model.");
   if (!isAgentEffort(effort)) return initDiagnostic("init.effort-invalid", destination, "Choose low, medium, high, xhigh, or max effort.");

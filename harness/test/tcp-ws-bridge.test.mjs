@@ -242,6 +242,28 @@ test("TCP-over-WebSocket bridge preserves sequential and large binary streams", 
   }
 });
 
+test("Together bridge uses per-cell authentication without an SDK or E2B traffic token", async () => {
+  const echo = net.createServer(socket => socket.pipe(socket));
+  const targetPort = await listen(echo);
+  const guardianPort = await freePort(), agentPort = await freePort();
+  const token = randomBytes(32).toString('base64url');
+  let guardian, agent;
+  try {
+    guardian = startBridge('server', { EGRESS_BRIDGE_CELL_TOKEN: token,
+      EGRESS_BRIDGE_LISTEN_PORT: String(guardianPort), EGRESS_BRIDGE_TARGET_PORT: String(targetPort) });
+    await waitReady(guardian);
+    agent = startBridge('client', { EGRESS_BRIDGE_CELL_TOKEN: token,
+      EGRESS_BRIDGE_TRAFFIC_HEADER: 'none', EGRESS_BRIDGE_TRAFFIC_TOKEN: '',
+      EGRESS_BRIDGE_URL: `ws://127.0.0.1:${guardianPort}/proxy`, EGRESS_BRIDGE_LISTEN_PORT: String(agentPort) });
+    await waitReady(agent);
+    const bytes = randomBytes(256 * 1024);
+    assert.deepEqual(await roundTrip(agentPort, bytes), bytes);
+  } finally {
+    await stopBridge(agent); await stopBridge(guardian);
+    await new Promise(resolve => echo.close(resolve));
+  }
+});
+
 test("TCP-over-WebSocket bridge does not impose a simultaneous connection cap", async () => {
   const echoServer = net.createServer((socket) => socket.pipe(socket));
   const targetPort = await listen(echoServer);
@@ -572,5 +594,87 @@ test("selective agent proxy routes exact Together destinations without cumulativ
     await stopBridge(agent);
     await stopBridge(guardian);
     await new Promise((resolve) => guardianTarget.close(resolve));
+  }
+});
+
+async function reverseFixture(t, upstream) {
+  const targetPort = await listen(upstream);
+  const guardianPort = await freePort(), agentPort = await freePort(), controlPort = await freePort();
+  const token = randomBytes(32).toString('base64url');
+  const guardian = startBridge('server', { EGRESS_BRIDGE_CELL_TOKEN: token,
+    EGRESS_BRIDGE_LISTEN_PORT: String(guardianPort), EGRESS_BRIDGE_TARGET_PORT: String(targetPort) });
+  const agent = startBridge('reverse-client', { EGRESS_BRIDGE_CELL_TOKEN: token,
+    EGRESS_BRIDGE_URL: `ws://127.0.0.1:${guardianPort}/proxy`,
+    EGRESS_BRIDGE_TRAFFIC_HEADER: 'none', EGRESS_BRIDGE_LISTEN_PORT: String(agentPort),
+    EGRESS_BRIDGE_PUBLIC_LISTEN_PORT: String(controlPort) });
+  let relay;
+  const sockets = new Set();
+  upstream.on('connection', socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
+  t.after(async () => {
+    relay?.close(); await stopBridge(agent); await stopBridge(guardian);
+    for (const socket of sockets) socket.destroy();
+    await new Promise(resolve => upstream.close(resolve));
+  });
+  await waitReady(guardian); await waitReady(agent);
+  // Both listeners must be live, regardless of which READY line arrives first.
+  while (!agent.getStdout().includes('READY client') || !agent.getStdout().includes('READY reverse'))
+    await new Promise(resolve => setTimeout(resolve, 10));
+  const { startTogetherControllerRelay } = await import('../lib/execution-environments/together-controller-relay.mjs');
+  const connect = async (cellToken = token, signal) => {
+    relay = await startTogetherControllerRelay({ cellToken, signal,
+      workloadUrl: `ws://127.0.0.1:${controlPort}`, guardianUrl: `ws://127.0.0.1:${guardianPort}/proxy` });
+    return relay;
+  };
+  return { connect, agentPort, agent, guardian };
+}
+
+test('Together controller reverse relay preserves parallel binary streams and fails closed on cancellation', async t => {
+  const fixture = await reverseFixture(t, net.createServer(socket => socket.pipe(socket)));
+  await assert.rejects(fixture.connect('wrong-cell-token'), /handshake|authenticated/);
+  await assert.rejects(roundTrip(fixture.agentPort, Buffer.from('no authenticated controller')), /closed|ECONNRESET/);
+  const abort = new AbortController();
+  const relay = await fixture.connect(undefined, abort.signal);
+  await Promise.all(Array.from({ length: 12 }, async () => {
+    const bytes = randomBytes(3 * 1024 * 1024);
+    assert.deepEqual(await roundTrip(fixture.agentPort, bytes), bytes);
+  }));
+  relay.assertHealthy();
+  abort.abort();
+  assert.throws(() => relay.assertHealthy(), /authenticated transport/);
+  await assert.rejects(roundTrip(fixture.agentPort, Buffer.from('cancelled')), /closed|ECONNRESET/);
+});
+
+test('Together controller reverse relay drains a large final response before EOF', async t => {
+  const payload = randomBytes(8 * 1024 * 1024);
+  const fixture = await reverseFixture(t, net.createServer(socket => socket.end(payload)));
+  const relay = await fixture.connect();
+  assert.deepEqual(await readToEnd(fixture.agentPort, 10000), payload);
+  relay.assertHealthy();
+});
+
+test('Together controller relay marks a missing Guardian leg unhealthy and rejects the workload flow', async t => {
+  const fixture = await reverseFixture(t, net.createServer(socket => socket.pipe(socket)));
+  const relay = await fixture.connect();
+  await stopBridge(fixture.guardian);
+  await assert.rejects(roundTrip(fixture.agentPort, Buffer.from('missing guardian')), /closed/);
+  assert.throws(() => relay.assertHealthy(), /authenticated transport/);
+});
+
+
+test('Together controller keeps other channels alive when a client stops reading a response', async t => {
+  const block = randomBytes(64 * 1024);
+  const fixture = await reverseFixture(t, net.createServer(socket => {
+    const timer = setInterval(() => { if (!socket.destroyed) socket.write(block); }, 1);
+    socket.on('error', () => {}); socket.once('close', () => clearInterval(timer));
+  }));
+  const relay = await fixture.connect();
+  for (let index = 0; index < 5; index++) {
+    await new Promise((resolve, reject) => {
+      const socket = net.createConnection({ host: '127.0.0.1', port: fixture.agentPort });
+      socket.once('data', () => { socket.destroy(); resolve(); });
+      socket.once('error', reject);
+    });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    relay.assertHealthy();
   }
 });

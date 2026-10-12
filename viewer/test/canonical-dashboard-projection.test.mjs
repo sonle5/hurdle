@@ -23,6 +23,46 @@ const fixture = JSON.parse(readFileSync(
 ));
 const completeRecord = fixture.history.at(-1);
 
+test("runtime metadata uses the saved Run snapshot even before execution or without a transcript", async () => {
+  for (const original of [fixture.history[0], completeRecord]) {
+    for (const [provider, label, settings, template] of [
+      ["together", "Together sandbox", { snapshotAlias: "hurdle-claude-code-network@v1" }, "hurdle-claude-code-network@v1"],
+      ["e2b", "E2B sandbox", { workloadTemplate: "saved-workload", guardianTemplate: "private-guardian" }, "saved-workload"],
+      ["local", "Local", { cwd: "/private/workspace", snapshotAlias: "irrelevant" }, null],
+      ["custom", "custom", { snapshotAlias: "irrelevant" }, null],
+    ]) {
+      const record = structuredClone(original);
+      record.snapshot.environment = { environmentId: provider, settings: { ...settings, credential: "private" } };
+      if (record.execution) record.execution.environmentId = "different-provider";
+      const before = structuredClone(record);
+      const projection = createCanonicalDashboardProjection(fixtureReader(record));
+      const [summary] = await projection.listSessions(record.experimentVersion);
+      const expected = { provider, label, template };
+      assert.deepEqual(summary.runtime, expected);
+      const detail = await projection.findSession(summary.id);
+      assert.deepEqual(detail.runtime, expected);
+      assert.equal(detail.sessionJsonl, null, "runtime must not need transcript evidence");
+      assert.deepEqual(record, before, "presentation must not rewrite historical configuration");
+    }
+  }
+});
+
+test("missing runtime metadata is not inferred and malformed templates stay out of the Viewer", async () => {
+  for (const environment of [undefined, {}, { environmentId: "bad\nprovider" }]) {
+    const record = structuredClone(completeRecord);
+    record.snapshot.environment = environment;
+    const projection = createCanonicalDashboardProjection(fixtureReader(record));
+    assert.equal((await projection.findSession(`canonical--${record.id}`)).runtime, null);
+  }
+  for (const snapshotAlias of [null, {}, [], "", " ", "x".repeat(257), "alias\nwith-controls"]) {
+    const record = structuredClone(completeRecord);
+    record.snapshot.environment = { environmentId: "together", settings: { snapshotAlias } };
+    const projection = createCanonicalDashboardProjection(fixtureReader(record));
+    assert.deepEqual((await projection.findSession(`canonical--${record.id}`)).runtime,
+      { provider: "together", label: "Together sandbox", template: null });
+  }
+});
+
 test("Judge status distinguishes code-only runs from a configured Judge that did not run", async () => {
   for (const [availability, status, expected] of [
     ["disabled", "not_requested", "Not used"],
@@ -158,6 +198,7 @@ test("canonical local runs list through the mature dashboard without copying or 
     configDir: "default",
     model: "claude-sonnet-4-5",
     modelResolved: "claude-sonnet-4-5-20250929",
+    runtime: { provider: "local", label: "Local", template: null },
     task: "copy-message",
     taskName: "copy-message",
     durationSec: 4,
@@ -170,6 +211,7 @@ test("canonical local runs list through the mature dashboard without copying or 
     toolCalls: 7,
     totalTokensIn: 1_234,
     costUsd: 0.42,
+    costSource: "reported",
     mcpCalls: 0,
     skillInjections: 0,
     injectedSkills: [],

@@ -7,6 +7,8 @@ function versionId(record) {
     : value.startsWith(UNVERSIONED_ID) ? UNVERSIONED_ID + value : value;
 }
 
+import { projectRunCost } from "./run-cost.mjs";
+
 import { projectEvaluatorSourceSummaries } from "./canonical-results.mjs";
 
 const AGENTS = Object.freeze({
@@ -48,6 +50,20 @@ function projectToolVersions(value) {
     const version = value[name];
     return [name, typeof version === "string" && /^\d{1,4}\.\d{1,4}(?:\.\d{1,8})?(?:[-+][a-zA-Z0-9.-]{1,32})?$/.test(version) ? version : null];
   }));
+}
+
+function projectRuntime(environment) {
+  // Historical configuration comes only from this Run's immutable snapshot.
+  const provider = environment?.environmentId;
+  if (typeof provider !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(provider)) return null;
+  const labels = new Map([["together", "Together sandbox"], ["e2b", "E2B sandbox"], ["local", "Local"]]);
+  const selectedTemplate = provider === "together" ? environment.settings?.snapshotAlias
+    : provider === "e2b" ? environment.settings?.workloadTemplate : null;
+  const template = typeof selectedTemplate === "string"
+    && selectedTemplate.trim().length > 0 && selectedTemplate.length <= 256
+    && !/[\x00-\x1f\x7f]/.test(selectedTemplate)
+    ? selectedTemplate.trim() : null;
+  return { provider, label: labels.get(provider) ?? provider, template };
 }
 
 function note(record) {
@@ -102,6 +118,7 @@ function projectSummary(record) {
     configDir: conditionId,
     model: snapshot.agent.requestedModel,
     modelResolved: execution?.observedModel ?? null,
+    runtime: projectRuntime(snapshot.environment),
     task: snapshot.task.id,
     taskName: snapshot.task.id,
     durationSec: Number.isSafeInteger(execution?.durationMs)
@@ -119,11 +136,7 @@ function projectSummary(record) {
       : Number.isFinite(metrics.inputTokens)
         ? metrics.inputTokens
         : 0,
-    costUsd: Number.isFinite(metrics.costUsd)
-      ? metrics.costUsd
-      : Number.isFinite(metrics.reportedCostUsd)
-        ? metrics.reportedCostUsd
-        : 0,
+    ...projectRunCost(record),
     mcpCalls: Number.isFinite(metrics.mcpCalls) ? metrics.mcpCalls : 0,
     skillInjections: Number.isFinite(metrics.skillInjections) ? metrics.skillInjections : 0,
     injectedSkills: [],

@@ -1,0 +1,164 @@
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { createFrameworkCli } from "../bin/hurdle.mjs";
+import { initializeSuite } from "../lib/starter-suite.mjs";
+import { togetherSandboxDockerfile } from "../lib/together-sandbox-setup.mjs";
+
+async function fixture(t, example = "copy-message") {
+  const root = await mkdtemp(join(tmpdir(), "hurdle-together-setup-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  assert.equal(
+    (await initializeSuite({ destination: join(root, "evals"), example })).ok,
+    true,
+  );
+  const calls = [];
+  let text = "";
+  const io = {
+    cwd: root,
+    stdout: {
+      write: (value) => {
+        text += value;
+      },
+    },
+    stderr: {
+      write: (value) => {
+        text += value;
+      },
+    },
+  };
+  const dependencies = {
+    env: {
+      TOGETHER_API_KEY: "test-sandbox-secret",
+      ANTHROPIC_API_KEY: "test-agent-secret",
+    },
+    processTarget: new EventEmitter(),
+    assertRuntimeDependencies() {},
+    checkAgentReadiness: async () => ({ ok: true, checks: [] }),
+    loadTogetherSetupBackend: async () => ({
+      exists: async () => {
+        calls.push("exists");
+        return false;
+      },
+      build: async (...args) => {
+        calls.push(["build", ...args]);
+      },
+    }),
+  };
+  return {
+    root,
+    io,
+    calls,
+    dependencies,
+    output: () => text,
+    runtimePath: join(root, ".hurdle/runtime/default.json"),
+  };
+}
+test("setup defaults to Together, builds an agent snapshot, and validate discovers its private Runtime", async (t) => {
+  const f = await fixture(t);
+  const cli = createFrameworkCli({ ...f.dependencies, loadSetupBackend() { assert.fail("Default setup must not use E2B"); } });
+  assert.equal(
+    await cli.main(["setup", "--yes", "--json"], f.io),
+    0,
+    f.output(),
+  );
+  const report = JSON.parse(f.output());
+  assert.equal(report.executionEnvironment, "together");
+  assert.equal(report.target, "together");
+  assert.ok(report.checks.some(check => check.status === "pass" && check.message === "Setup complete · Together sandbox configured."));
+  assert.deepEqual(f.calls[1].slice(0, 3), [
+    "build",
+    "hurdle-claude-code@v1",
+    ["claude-code"],
+  ]);
+  const config = JSON.parse(await readFile(f.runtimePath, "utf8"));
+  assert.equal(config.environment.settings.maxLifetimeMs, 300000);
+  assert.equal(config.resultStore.root, "../together-results-v1");
+  assert.equal(config.judge, undefined);
+  assert.equal(existsSync(join(f.root, ".env.local")), false);
+  assert.doesNotMatch(f.output(), /test-sandbox-secret|test-agent-secret/);
+  assert.equal(await cli.main(["validate"], f.io), 0, f.output());
+});
+test("Together setup preserves an existing store, Judge and limits while reusing snapshots", async (t) => {
+  const f = await fixture(t);
+  const config = {
+    schemaVersion: 1,
+    environment: {
+      kind: "together",
+      apiKeyEnv: "TOGETHER_API_KEY",
+      settings: {
+        snapshotAlias: "existing@v1",
+        cpuCount: 2,
+        memoryMiB: 4096,
+        maxLifetimeMs: 120000,
+      },
+    },
+    resultStore: { kind: "local", root: "../../saved" },
+    viewer: { port: 3022 },
+  };
+  await mkdir(join(f.root, ".hurdle/runtime"), { recursive: true });
+  await writeFile(f.runtimePath, JSON.stringify(config));
+  const cli = createFrameworkCli({
+    ...f.dependencies,
+    loadTogetherSetupBackend: async () => ({
+      exists: async () => true,
+      build: () => assert.fail("must reuse snapshot"),
+    }),
+  });
+  assert.equal(
+    await cli.main(["setup"], f.io),
+    0,
+    f.output(),
+  );
+  const saved = JSON.parse(await readFile(f.runtimePath, "utf8"));
+  assert.deepEqual(saved.resultStore, config.resultStore);
+  assert.equal(saved.environment.settings.maxLifetimeMs, 120000);
+  assert.equal(saved.viewer.port, 3022);
+  assert.match(f.output(), /✓ Setup complete · Together sandbox configured\./);
+});
+test("Together API setup builds a network snapshot and configures a longer Guardian lifetime", async (t) => {
+  const f = await fixture(t, "together-api");
+  const cli = createFrameworkCli({
+    ...f.dependencies,
+  });
+  assert.equal(
+    await cli.main(["setup", "--yes"], f.io),
+    0,
+    f.output(),
+  );
+  assert.equal(f.calls[1][1], "hurdle-claude-code-network@v1");
+  const config = JSON.parse(await readFile(f.runtimePath, "utf8"));
+  assert.equal(config.environment.settings.maxLifetimeMs, 600000);
+  assert.match(f.output(), /separate Guardian VM/);
+});
+test("Together setup declines unapproved builds and missing caller-selected snapshots", async (t) => {
+  for (const flags of [[], ["--snapshot", "missing@v1", "--yes"]]) {
+    const f = await fixture(t);
+    assert.equal(
+      await createFrameworkCli(f.dependencies).main(
+        ["setup", "--sandbox", "together", ...flags],
+        f.io,
+      ),
+      1,
+    );
+    assert.ok(!f.calls.some((call) => Array.isArray(call)));
+    assert.equal(existsSync(f.runtimePath), false);
+  }
+});
+test("Together Dockerfile includes pinned agents and Linux controller dependencies", () => {
+  const text = togetherSandboxDockerfile([
+    "claude-code",
+    "codex",
+    "claude-code",
+  ]);
+  assert.match(text, /FROM node:22-bookworm/);
+  assert.match(text, /util-linux passwd/);
+  assert.match(text, /passwd iptables/);
+  assert.match(text, /@anthropic-ai\/claude-code@2\.1\.288/);
+  assert.match(text, /@openai\/codex@0\.141\.0/);
+  assert.throws(() => togetherSandboxDockerfile(["unknown-agent"]));
+});

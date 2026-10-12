@@ -62,6 +62,7 @@ function serializeSession(session: SessionSummary): CompareSession {
     rawResult: session.rawResult,
     auditVerdict: session.auditVerdict,
     costUsd: session.costUsd,
+    costSource: session.costSource,
     mcpCalls: session.mcpCalls,
     mcpMethods: session.mcpMethods,
     toolVersions: session.toolVersions,

@@ -391,7 +391,7 @@ ${CAPTURE_ROOT}/venv/bin/mitmdump --version | head -1`, {
 
 async function generateCa(sandbox, signal) {
   const processHandle = await sandbox.commands.run(
-    `exec ${CAPTURE_ROOT}/venv/bin/mitmdump -q --listen-host 127.0.0.1 --listen-port ${PROXY_PORT} --set upstream_cert=false`,
+    `exec ${CAPTURE_ROOT}/venv/bin/mitmdump -q --listen-host 127.0.0.1 --listen-port ${PROXY_PORT} --set upstream_cert=false --set confdir=/home/user/.mitmproxy`,
     { background: true, timeoutMs: PROCESS_TIMEOUT_MS, signal },
   );
   let certificate;
@@ -421,7 +421,7 @@ async function generateCa(sandbox, signal) {
   return certificate;
 }
 
-async function installWorkloadTrust(workload, certificate, hosts, signal) {
+async function installWorkloadTrust(workload, certificate, hosts, signal, firewallSuffix = "", firewallVerdict = "REJECT") {
   if (!certificate.includes("BEGIN CERTIFICATE") || certificate.includes("PRIVATE KEY")) {
     throw new Error("Refusing invalid Guardian CA material");
   }
@@ -502,11 +502,11 @@ if len(addresses) > 128:
     raise SystemExit("capture host resolution exceeded address bound")
 
 for address in sorted(addresses, key=lambda value: (value.version, int(value))):
-    binary = "/usr/sbin/iptables" if address.version == 4 else "/usr/sbin/ip6tables"
+    binary = ("/usr/sbin/iptables" if address.version == 4 else "/usr/sbin/ip6tables") + ${JSON.stringify(firewallSuffix)}
     if not os.path.isfile(binary):
         raise SystemExit(f"capture route firewall is unavailable for IPv{address.version}")
     destination = f"{address}/{32 if address.version == 4 else 128}"
-    rule = [binary, "--wait", "5", "OUTPUT", "-d", destination, "-j", "REJECT"]
+    rule = [binary, "--wait", "5", "OUTPUT", "-d", destination, "-j", ${JSON.stringify(firewallVerdict)}]
     checked = subprocess.run(
         [binary, "--wait", "5", "-C", *rule[3:]],
         stdout=subprocess.DEVNULL,
@@ -549,7 +549,16 @@ PY`, {
   return JSON.parse(result.stdout.trim().split("\n").at(-1));
 }
 
-export function createE2BGuardianController() {
+// Both providers use the same proxy, credential substitutions, policy bounds,
+// public trust material, draining and digest/sequence-verified sealing.
+export function createExternalGuardianController({
+  producer = "e2b-guardian",
+  requiresTrafficAccessToken = true,
+  firewallSuffix = "",
+  firewallVerdict = "REJECT",
+  bridgeEnvironment = () => ({}),
+  workloadBridgeMode = "client",
+} = {}) {
   return Object.freeze({
     async prepare({
       sandbox,
@@ -561,7 +570,7 @@ export function createE2BGuardianController() {
       signal,
     }) {
       if (profile !== "external-guardian-http-metadata-v1") {
-        throw new TypeError("unsupported E2B Guardian capture profile");
+        throw new TypeError("unsupported external Guardian capture profile");
       }
       const {
         hosts,
@@ -586,7 +595,7 @@ export function createE2BGuardianController() {
         denyOut: ["0.0.0.0/0"],
       }, { signal });
       const proxyProcess = await sandbox.commands.run(
-        `exec ${CAPTURE_ROOT}/venv/bin/mitmdump -q -s ${PROXY_PATH} --listen-host 127.0.0.1 --listen-port ${PROXY_PORT} --set upstream_cert=false`,
+        `exec ${CAPTURE_ROOT}/venv/bin/mitmdump -q -s ${PROXY_PATH} --listen-host 127.0.0.1 --listen-port ${PROXY_PORT} --set upstream_cert=false --set confdir=/home/user/.mitmproxy`,
         {
           background: true,
           timeoutMs: PROCESS_TIMEOUT_MS,
@@ -637,7 +646,7 @@ export function createE2BGuardianController() {
     },
     async attach({ workload, sandbox, session, signal }) {
       const trafficAccessToken = sandbox?.trafficAccessToken;
-      if (typeof trafficAccessToken !== "string" || !trafficAccessToken.trim()) {
+      if (requiresTrafficAccessToken && (typeof trafficAccessToken !== "string" || !trafficAccessToken.trim())) {
         throw new Error(
           "Guardian requires restricted public traffic and a traffic access token",
         );
@@ -647,21 +656,26 @@ export function createE2BGuardianController() {
         session.caCertificate,
         session.hosts,
         signal,
+        firewallSuffix,
+        firewallVerdict,
       );
       session.workload = workload;
       session.relayProcess = await workload.commands.run(
-        `exec node ${BRIDGE_PATH} client`,
+        `exec node ${BRIDGE_PATH} ${workloadBridgeMode}`,
         {
           background: true,
           timeoutMs: PROCESS_TIMEOUT_MS,
           signal,
           envs: {
             EGRESS_BRIDGE_URL: `wss://${session.guardianHost}/proxy`,
-            EGRESS_BRIDGE_TRAFFIC_TOKEN: trafficAccessToken,
+            ...(requiresTrafficAccessToken
+              ? { EGRESS_BRIDGE_TRAFFIC_TOKEN: trafficAccessToken }
+              : { EGRESS_BRIDGE_TRAFFIC_HEADER: "none" }),
             EGRESS_BRIDGE_CELL_TOKEN: session.bridgeToken,
             EGRESS_BRIDGE_LISTEN_PORT: String(RELAY_PORT),
             EGRESS_BRIDGE_SELECTIVE_PROXY: "1",
             TAE_EGRESS_CAPTURE_HOSTS: JSON.stringify(session.hosts),
+            ...bridgeEnvironment(session),
           },
         },
       );
@@ -736,7 +750,7 @@ export function createE2BGuardianController() {
         status: "captured",
         requests,
         provenance: {
-          producer: "e2b-guardian",
+          producer,
           authority: "environment",
           lifecyclePhase: "execution",
           capturedAt: new Date().toISOString(),
@@ -745,4 +759,8 @@ export function createE2BGuardianController() {
       };
     },
   });
+}
+
+export function createE2BGuardianController() {
+  return createExternalGuardianController();
 }

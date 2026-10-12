@@ -175,7 +175,7 @@ test("terminal progress updates a cell and preserves E2B details around the spin
 
   progress.start("Running evaluations");
   progress.update("[1/6] rag-search · baseline · Claude Code");
-  progress.detail("Guardian E2B  sandbox-capture-1  https://e2b.dev/dashboard");
+  progress.detail("Sandbox E2B  sandbox-agent-1  https://e2b.dev/dashboard");
   progress.succeed("[1/6] rag-search · baseline · pass", "42s");
   progress.update("[2/6] rag-search · mcp · Claude Code");
 
@@ -183,7 +183,7 @@ test("terminal progress updates a cell and preserves E2B details around the spin
     output,
     "\r\u001b[2K⠋ Running evaluations"
       + "\r\u001b[2K⠙ [1/6] rag-search · baseline · Claude Code"
-      + "\r\u001b[2K  Guardian E2B  sandbox-capture-1  https://e2b.dev/dashboard\n"
+      + "\r\u001b[2K  Sandbox E2B  sandbox-agent-1  https://e2b.dev/dashboard\n"
       + "\r\u001b[2K⠹ [1/6] rag-search · baseline · Claude Code"
       + "\r\u001b[2K✓ [1/6] rag-search · baseline · pass  42s\n"
       + "\r\u001b[2K⠋ [2/6] rag-search · mcp · Claude Code",

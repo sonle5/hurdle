@@ -1,4 +1,7 @@
-import { terminalStatus } from "./terminal-output.mjs";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { quoteCommandArgument, terminalStatus, cliExecutable } from "./terminal-output.mjs";
+import { discoverProjectSuites } from "./project-suites.mjs";
 
 // One JSON document per invocation; credential values and backend errors never
 // enter this report. Human output retains the shared terminal formatting.
@@ -24,5 +27,31 @@ export function createSetupOutput(io, { json = false, target = null } = {}) {
       else if (error) io.stdout.write(terminalStatus("fail", `hurdle [${error.code}] ${error.message}`, io.stdout));
       return exitCode;
     },
+  };
+}
+
+
+export function missingSuiteSetupGuidance(cwd, provider, suite) {
+  const executable = cliExecutable(cwd);
+  const init = `${executable} init${existsSync(resolve(cwd, "evals")) ? " evals/my-eval" : ""}`;
+  const missing = suite ? `Suite file not found: ${quoteCommandArgument(suite)}.\n\n` : "";
+  let suites = [];
+  try { suites = discoverProjectSuites(cwd).filter(suite => !suite.bundled); } catch { /* Listing reports discovery errors. */ }
+  if (suites.length) {
+    const list = `${executable} suites`;
+    const setup = `${executable} setup ${quoteCommandArgument(suites[0].ambiguous ? suites[0].path : suites[0].name)} --sandbox ${provider}`;
+    return {
+      message: `${missing}Choose an existing Suite:\n\n  ${list}\n\nFor example:\n  ${setup}`,
+      nextCommands: [list, setup],
+    };
+  }
+  const example = "examples/copy-message/example.suite.mjs";
+  if (!existsSync(resolve(cwd, example))) return {
+    message: `${missing}Create an evaluation first:\n\n  ${init}`, nextCommands: [init],
+  };
+  const setup = `${executable} setup ${example} --sandbox ${provider} --yes`;
+  return {
+    message: `${missing}Try the bundled copy-message Suite:\n\n  ${setup}\n\nOr create your own evaluation:\n  ${init}`,
+    nextCommands: [setup, init],
   };
 }

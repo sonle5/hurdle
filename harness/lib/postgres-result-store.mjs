@@ -21,9 +21,10 @@ async function assertSchema(pool) {
     const result = await pool.query(
       "SELECT version FROM hurdle.schema_migrations WHERE version IN (1, 2)",
     );
-    if (result.rowCount !== 2) throw new Error("required schema migrations are not applied");
+    if (result.rowCount !== 2) throw Object.assign(new Error("required schema migrations are not applied"), { code: "store.schema-not-ready" });
   } catch (error) {
     const wrapped = new Error("Postgres Result Store schema migration is not applied. Run npx hurdle setup --store postgres to initialize or upgrade the hurdle schema");
+    if (["42P01", "3F000", "store.schema-not-ready"].includes(error?.code)) wrapped.code = "store.schema-not-ready";
     wrapped.cause = error;
     throw wrapped;
   }

@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import test from "node:test";
 import { createFrameworkCli } from "../bin/hurdle.mjs";
-import { quoteCommandArgument } from "../lib/terminal-output.mjs";
+import { quoteCommandArgument, cliExecutable } from "../lib/terminal-output.mjs";
 import { createQuickstartViewerOutput } from "../lib/source-quickstart.mjs";
+
+const sourceExecutable = cliExecutable();
+const cliPath = fileURLToPath(new URL("../bin/hurdle.mjs", import.meta.url));
 
 function output(cwd, isTTY) {
   let stdout = "", stderr = "";
@@ -38,8 +41,8 @@ test("init, validation, setup, and help share terminal styling without ANSI in r
     assert.equal((text.match(/^Hurdle$/gm) ?? []).length, 4);
     assert.match(text, /✓ Evaluation created/);
     assert.match(text, /! Readiness not checked/);
-    assert.match(text, /✗ hurdle \[setup\.credentials-missing\] Missing credentials: E2B_API_KEY/);
-    assert.match(text, new RegExp(`Next      npx hurdle setup ${name}/example.suite.mjs`));
+    assert.match(text, /✗ hurdle \[setup\.credentials-missing\] Missing credentials: TOGETHER_API_KEY/);
+    assert.ok(text.includes(`Next      ${sourceExecutable} setup ${name}/example.suite.mjs`));
     assert.equal(existsSync(join(root, ".hurdle")), false);
     if (isTTY && !noColor) {
       assert.match(raw.stdout, /\u001b\[1mHurdle/);
@@ -60,16 +63,67 @@ test("custom-suite next steps are concise and round-trip shell metacharacters sa
   const capture = output(root, false);
   const cli = createFrameworkCli();
   assert.equal(await cli.main(["init", directory, "--example", "together-api"], capture.io), 0);
-  const commands = capture.read().stdout.split("\n").filter(line => line.includes("npx hurdle setup") || line.includes("npx hurdle run"));
+  const commands = capture.read().stdout.split("\n").filter(line => line.includes(`${sourceExecutable} setup`) || line.includes(`${sourceExecutable} run`));
   assert.equal(commands.length, 2);
   for (const line of commands) {
-    const command = line.slice(line.indexOf("npx hurdle"));
+    const command = line.slice(line.indexOf(sourceExecutable));
     const parsed = spawnSync("/bin/sh", ["-c", `set -- ${command}; printf '%s\\n' "$@"`], { cwd: root, encoding: "utf8" });
     assert.equal(parsed.status, 0, parsed.stderr);
-    assert.deepEqual(parsed.stdout.trimEnd().split("\n"), ["npx", "hurdle", command.includes(" setup ") ? "setup" : "run", suite, ...(command.endsWith(" --view") ? ["--view"] : [])]);
+    assert.deepEqual(parsed.stdout.trimEnd().split("\n"), ["node", cliPath, command.includes(" setup ") ? "setup" : "run", suite, ...(command.endsWith(" --view") ? ["--view"] : [])]);
   }
   assert.equal(existsSync(join(root, "unexpected")), false);
   assert.equal(quoteCommandArgument("evals/together-api/example.suite.mjs"), "evals/together-api/example.suite.mjs");
+});
+
+test("a source init Next command executes the same CLI from a fresh project", t => {
+  const cwd = mkdtempSync(join(tmpdir(), "hurdle-source-next-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const initialized = spawnSync(process.execPath, [cliPath, "init"], { cwd, encoding: "utf8" });
+  assert.equal(initialized.status, 0, initialized.stderr);
+  const next = initialized.stdout.split("\n").find(line => /^  Next\s+/.test(line)).replace(/^  Next\s+/, "");
+  assert.equal(next, `${sourceExecutable} validate`);
+  assert.ok(initialized.stdout.includes(`see ${sourceExecutable} help init`));
+  const followed = spawnSync("/bin/sh", ["-c", `${next} --offline`], { cwd, encoding: "utf8" });
+  assert.equal(followed.status, 0, followed.stderr);
+  assert.match(followed.stdout, /claude-opus-5-5 · medium effort/);
+  const unknown = spawnSync(process.execPath, [cliPath, "unknown"], { cwd, encoding: "utf8" });
+  assert.equal(unknown.status, 2);
+  assert.ok(unknown.stderr.includes(`Run ${sourceExecutable} help.`));
+});
+
+test("checkout guidance uses npx only when the project bin resolves to this CLI", async t => {
+  const checkout = fileURLToPath(new URL("../../", import.meta.url));
+  assert.equal(cliExecutable(checkout), "npx hurdle");
+  const capture = output(checkout, false);
+  assert.equal(await createFrameworkCli().main(["suites"], capture.io), 0);
+  assert.match(capture.read().stdout, /Run by name or path:\n  npx hurdle run /);
+
+  const cwd = mkdtempSync(join(tmpdir(), "hurdle-checkout-bin-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "hurdle", bin: { hurdle: "cli.mjs" } }));
+  writeFileSync(join(cwd, "cli.mjs"), "// A different CLI must not be selected by a recovery hint.\n");
+  assert.equal(cliExecutable(cwd), sourceExecutable);
+  rmSync(join(cwd, "cli.mjs"));
+  symlinkSync(cliPath, join(cwd, "cli.mjs"));
+  assert.equal(cliExecutable(cwd), "npx hurdle", "a project's linked bin can safely use npx");
+});
+
+test("source executable paths with shell metacharacters round-trip safely", async t => {
+  const root = mkdtempSync(join(tmpdir(), "hurdle-source-path-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const checkout = join(root, "clone ' $(touch unexpected) `touch unexpected`");
+  mkdirSync(join(checkout, "harness/lib"), { recursive: true });
+  mkdirSync(join(checkout, "harness/bin"));
+  mkdirSync(join(checkout, "viewer"));
+  writeFileSync(join(checkout, "viewer/package.json"), "{}");
+  writeFileSync(join(checkout, "harness/bin/hurdle.mjs"), "console.log(JSON.stringify(process.argv.slice(2)));\n");
+  copyFileSync(fileURLToPath(new URL("../lib/terminal-output.mjs", import.meta.url)), join(checkout, "harness/lib/terminal-output.mjs"));
+  const { suiteCommand } = await import(pathToFileURL(join(checkout, "harness/lib/terminal-output.mjs")));
+  const next = suiteCommand("validate", "evals/example.suite.mjs");
+  const followed = spawnSync("/bin/sh", ["-c", `${next} --offline`], { cwd: root, encoding: "utf8" });
+  assert.equal(followed.status, 0, followed.stderr);
+  assert.deepEqual(JSON.parse(followed.stdout), ["validate", "--offline"]);
+  assert.equal(existsSync(join(root, "unexpected")), false);
 });
 
 test("source runtime tools share formatting without making provider requests", t => {
@@ -110,5 +164,6 @@ test("source quickstart stops its spinner when the current Viewer output is read
   assert.doesNotMatch(plain, /^Hurdle$/m);
   assert.match(plain, /✓ Viewer ready/);
   assert.match(plain, /URL       http:\/\/127.0.0.1:3000/);
-  assert.match(plain, /Store     hurdle-output-results/);
+  assert.match(plain, /Store     Filesystem/);
+  assert.match(plain, /Results   hurdle-output-results/);
 });

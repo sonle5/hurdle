@@ -48,11 +48,41 @@ launching an agent. A rejected credential stops the command with recovery steps.
 Use the same `--runtime FILE` and agent/model filters as your run to check the
 configuration you intend to execute.
 
-For guided sandbox configuration, use `npx hurdle setup`. E2B is the default
-sandbox provider. The saved project Runtime is used automatically by validate,
-run, and view; explicit Runtime or run topology options override it. Create a
-Together API demo with `init --example together-api`. See
+Use `npx hurdle setup` to configure the project Runtime: execution, result
+storage, Judge and Viewer settings. Execution can use Local, Together sandbox
+or E2B sandbox. Sandbox setup defaults to Together; use `--sandbox e2b` for E2B.
+Without a saved Runtime, runs use Local execution and filesystem storage.
+The saved project Runtime is used by validate, run, and view; explicit Runtime
+or run topology options override it. Create a Together API demo with
+`init --example together-api`. See
 [sandbox setup](./sandbox-setup.md) for credentials, templates, and usage limits.
+
+List the Suites already in your project:
+
+```sh
+npx hurdle suites
+```
+
+`suites` lists paths and short names without executing Suite code.
+For example, `evals/sandbox-smoke/example.suite.mjs` becomes `sandbox-smoke`.
+Use a unique name with `setup`, `validate` or `run`; ambiguous names require
+the full path. Use `suites --json` for scripts.
+
+For example, configure Together and Postgres in separate steps, then run:
+
+```sh
+npx hurdle setup sandbox-smoke
+npx hurdle setup --store postgres
+npx hurdle run sandbox-smoke --view
+```
+
+Add `--yes` to build a missing sandbox image without prompting.
+Storage setup preserves the sandbox configuration.
+
+With no Suite argument, Hurdle uses `evals/example.suite.mjs`, then
+`example.suite.mjs`, then a sole discovered project Suite. Bundled files under
+`examples/` are never selected automatically. If several project Suites exist
+without a conventional default, select one by name or path.
 
 For definition-only CI or offline work:
 
@@ -71,6 +101,7 @@ import { defineSuite } from "hurdle";
 export default defineSuite({
   tasks: ["./tasks/copy-message"],
   agents: [{ runner: "claude-code", model: "claude-opus-5-5", effort: "medium" }],
+  concurrency: 3,
   verdict: "code",
 });
 ```
@@ -85,6 +116,9 @@ export default defineSuite({
   omitted, the Suite has one empty `baseline` Condition.
 - `repeats` runs every selected cell independently, even after a failure. It
   defaults to `1`.
+- `concurrency` limits active evaluation cells (Task × Condition × Agent × repeat).
+  It defaults to `3` and accepts integers from `1` to `100`. A slot includes
+  retries, sandbox cleanup, and judging. Results retain their matrix order.
 - `verdict` chooses code checks, a Judge, or both.
 
 Omitted `skills` or `mcpServers` are empty. Skills and MCP servers are selected
@@ -148,7 +182,7 @@ run.expect.tool("lookup_inventory", { count: 1 });
 ```
 
 Required request and tool checks need a Runtime that can capture trusted
-traffic, such as E2B. Native Local runs cannot prove those observations.
+traffic, such as E2B or Together Sandbox. Native Local runs cannot prove those observations.
 
 ### Block an expensive or destructive request
 
@@ -167,7 +201,7 @@ export default defineGuard((guard) => {
 });
 ```
 
-During an E2B run, the Guardian returns a synthetic `403` before it substitutes
+During an E2B or Together run, the Guardian returns a synthetic `403` before it substitutes
 the real API credential or contacts the target. Hurdle automatically records a
 deterministic check for every guard: it passes when the Agent never tries the
 request and fails when the Guardian blocks an attempt. The blocked attempt is
@@ -175,8 +209,8 @@ retained as trusted, payload-free request evidence.
 
 Blocking is deliberately narrow in this release: `method` and `path` are exact,
 the path cannot contain a query or fragment, and request bodies are not
-inspected. A Task that declares a blocker requires the E2B Runtime; Local runs
-are rejected before the Agent starts.
+inspected. A Task that declares a blocker requires execution in an E2B or
+Together sandbox; Local runs are rejected before the Agent starts.
 
 ## 4. Choose how a run is scored
 
@@ -214,6 +248,23 @@ npx hurdle run --view
 Use `--task`, `--condition`, `--agent`, or `--model` to narrow selections already
 defined by the Suite. These flags do not add new Suite entries.
 
+Override the Suite concurrency for one invocation:
+
+```sh
+npx hurdle run --concurrency 2 --view
+```
+
+For a small three-task concurrency check, create the bundled smoke example:
+
+```sh
+npx hurdle init concurrent-tasks --example concurrency-smoke
+npx hurdle setup concurrent-tasks
+npx hurdle run concurrent-tasks --view
+```
+
+This runs three copy tasks in up to three Together VMs. Skip setup if your
+Runtime is already configured. Use `--concurrency 1` for sequential execution.
+
 Label runs that you want to compare:
 
 ```sh
@@ -242,4 +293,6 @@ still avoid asking Agents to print secrets and review results before sharing
 them.
 
 Local runs execute Agent code on the host and are not a security sandbox. Use
-the optional E2B Runtime when you need isolation or trusted HTTP/tool evidence.
+a Runtime configured for E2B or Together sandbox for isolation and trusted
+HTTP/tool evidence.
+See [sandbox setup](./sandbox-setup.md#together-sandbox).

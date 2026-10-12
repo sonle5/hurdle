@@ -1,10 +1,11 @@
 # Copy a message
 
 A product-neutral code-checked Task. It needs the selected Agent's authentication,
-but no Together key, Judge, database or sandbox account. The default Claude
-starter pins `claude-opus-5-5` with `effort: "medium"`. Use `hurdle init --agent codex` for
-a starter pinned to `gpt-6.1-sol` with medium effort, and provide its authentication.
-Use `init --model MODEL --effort LEVEL` or edit the Suite to change these settings.
+but no Judge or database. Local execution needs no sandbox account; Together
+sandbox execution needs `TOGETHER_API_KEY`. The default Claude starter pins
+`claude-opus-5-5` with medium effort. Use `hurdle init --agent codex` for
+`gpt-6.1-sol` with medium effort. Use `init --model MODEL --effort LEVEL` or
+edit the Suite to change these settings.
 
 The agent reads `fixtures/message.txt` and writes its exact contents into
 `answer.txt`. A successful run shows `Passed` and opens the results viewer.
@@ -37,3 +38,18 @@ Suite to run independent repeats.
 
 Local execution runs code on your host with network access; it is not a security
 sandbox. Use only trusted Suites, checks and task inputs.
+
+
+## Run the bundled Suite on Together sandbox
+
+From the Hurdle repository root:
+
+```sh
+node harness/bin/hurdle.mjs setup examples/copy-message/example.suite.mjs --sandbox together --yes
+node harness/bin/hurdle.mjs run examples/copy-message/example.suite.mjs --view
+```
+
+Setup builds or reuses the Agent snapshot and saves the Runtime. Agent inference,
+snapshot builds, and sandbox use may be billed. The Together API starter needs
+trusted HTTP capture through a separate Guardian VM. Copy-message uses only an
+Agent VM.

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_RUN_CONCURRENCY, mapConcurrentRunCells, normalizeRunConcurrency } from "./run-concurrency.mjs";
 
 import { runDeterministicEvaluator } from "./evaluator-runtime.mjs";
 import { evaluateAuthority } from "./evaluation-authority.mjs";
@@ -678,6 +679,7 @@ async function runOne({
   invocation,
   credentials,
   signal,
+  onExecutionStarted,
 }) {
   const id = `run_${randomUUID()}`;
   const evidenceRedaction = prepared.snapshot.task.evidenceRedaction;
@@ -728,6 +730,8 @@ async function runOne({
   };
 
   try {
+    onExecutionStarted?.(id);
+    if (signal?.aborted) throw new ExpectedExecutionError(new Error("Evaluation cancelled before execution."));
     let observed = null;
     let launchPlan = prepared.launchPlan ?? null;
     if (!launchPlan) {
@@ -745,6 +749,7 @@ async function runOne({
       assertValidLaunchPlan(launchPlan);
       launchPlan = bindLaunchPlan(launchPlan, prepared, credentials);
     }
+    if (signal?.aborted) throw new ExpectedExecutionError(new Error("Evaluation cancelled before execution."));
     const envelope = createExecutionEnvelope({
       executionId: id,
       settings: prepared.snapshot.environment.settings,
@@ -1426,6 +1431,7 @@ export function createRunEngineWithWriter({
       environmentSettings: rawEnvironmentSettings = {},
       repeat = 1,
       retries = 0,
+      concurrency = DEFAULT_RUN_CONCURRENCY,
       experimentVersion = null,
       credentials: runtimeCredentials = {},
       signal = null,
@@ -1443,6 +1449,8 @@ export function createRunEngineWithWriter({
           repeat,
         );
       }
+      try { concurrency = normalizeRunConcurrency(concurrency); }
+      catch (error) { return selectionRejection(error, repeat); }
       if (!["task", "disabled", "required"].includes(judging)) {
         return selectionRejection(
           new TypeError("judging must be task, disabled, or required"),
@@ -1743,95 +1751,100 @@ export function createRunEngineWithWriter({
           });
         }
         const groupId = `group_${randomUUID()}`;
-        const runs = [];
-        const terminalRuns = [];
         const total = preparedCells.length * repeat;
         reportExecutionProgress(progress, { kind: "matrix-ready", total });
         const retryPolicy = fixedRetryPolicy(retries);
-        for (const prepared of preparedCells) {
+        const jobs = preparedCells.flatMap((prepared, index) => Array.from({ length: repeat }, (_, repeatIndex) => ({
+          prepared, repeatIndex, ordinal: index * repeat + repeatIndex + 1,
+        })));
+        const results = await mapConcurrentRunCells(jobs, { concurrency, signal }, async ({ prepared, repeatIndex, ordinal }, cellSignal) => {
           const task = runPlan.definition.tasks[prepared.snapshot.task.id];
-          for (let repeatIndex = 0; repeatIndex < repeat; repeatIndex += 1) {
-            const ordinal = terminalRuns.length + 1;
-            const progressCell = {
-              ordinal,
-              total,
-              taskId: prepared.snapshot.task.id,
-              conditionId: prepared.snapshot.condition.id,
-              adapterId: prepared.agent.adapter.id,
-              repeatOrdinal: repeatIndex + 1,
-              repeatTotal: repeat,
-            };
-            reportExecutionProgress(progress, {
-              kind: "cell-started",
-              cell: progressCell,
-            });
-            let rootRunId = null;
-            let retryOf = null;
-            let trigger = null;
-            let terminal = null;
-            let terminalAttempt = null;
-            for (let attemptIndex = 0; attemptIndex <= retries; attemptIndex += 1) {
-              const completed = await runOne({
-                writer,
-                judgePhase,
-                prepared,
-                task,
-                agentAdapter: prepared.agent.adapter,
-                executionEnvironment,
-                agentSettings: prepared.agent.settings,
-                experimentVersion,
-                invocation: {
-                  groupId,
-                  ordinal,
-                  total,
-                  repeatOrdinal: repeatIndex + 1,
-                  repeatTotal: repeat,
-                  retryPolicy,
-                  attemptOrdinal: attemptIndex + 1,
-                  rootRunId,
-                  retryOf,
-                  retryTrigger: trigger,
-                },
-                credentials: selectedCredentialsByTask[prepared.snapshot.task.id],
-                signal,
-              });
-              terminalAttempt = completed;
-              terminal = completed.reference;
-              runs.push(terminal);
-              rootRunId ??= terminal.id;
-              if (attemptIndex >= retries) break;
-              trigger = retryTrigger(completed.integrityIssueCodes);
-              if (!trigger) break;
-              retryOf = terminal.id;
-            }
-            const selectedCredentials = selectedCredentialsByTask[
-              prepared.snapshot.task.id
-            ];
-            const settled = await judgePhase.settle({
-              plan: prepared.judgePlan,
-              deterministic: terminalAttempt.record,
-              evaluatorStatus: terminalAttempt.evaluatorStatus,
-              sources: terminalAttempt.judgeSources,
-              preparedRequest: terminalAttempt.preparedJudgeRequest,
-              redactText(value) {
-                return redactTargetText(
-                  redactControllerText(prepared.agent.adapter, value),
-                  selectedCredentials,
-                  prepared.snapshot.task.evidenceRedaction,
-                );
+          const attemptRuns = [];
+          const progressCell = {
+            ordinal,
+            total,
+            taskId: prepared.snapshot.task.id,
+            conditionId: prepared.snapshot.condition.id,
+            adapterId: prepared.agent.adapter.id,
+            repeatOrdinal: repeatIndex + 1,
+            repeatTotal: repeat,
+          };
+          reportExecutionProgress(progress, {
+            kind: "cell-started",
+            cell: progressCell,
+          });
+          let rootRunId = null;
+          let retryOf = null;
+          let trigger = null;
+          let terminal = null;
+          let terminalAttempt = null;
+          for (let attemptIndex = 0; attemptIndex <= retries; attemptIndex += 1) {
+            const completed = await runOne({
+              writer,
+              judgePhase,
+              prepared,
+              task,
+              agentAdapter: prepared.agent.adapter,
+              executionEnvironment,
+              agentSettings: prepared.agent.settings,
+              experimentVersion,
+              invocation: {
+                groupId,
+                ordinal,
+                total,
+                repeatOrdinal: repeatIndex + 1,
+                repeatTotal: repeat,
+                retryPolicy,
+                attemptOrdinal: attemptIndex + 1,
+                rootRunId,
+                retryOf,
+                retryTrigger: trigger,
               },
-              signal,
+              credentials: selectedCredentialsByTask[prepared.snapshot.task.id],
+              signal: cellSignal,
+              onExecutionStarted(executionId) {
+                reportExecutionProgress(progress, { kind: "cell-attempt-started", cell: progressCell, executionId });
+              },
             });
-            terminal = runReference(settled);
-            runs[runs.length - 1] = terminal;
-            terminalRuns.push(terminal);
-            reportExecutionProgress(progress, {
-              kind: "cell-completed",
-              cell: progressCell,
-              terminal,
-            });
+            terminalAttempt = completed;
+            terminal = completed.reference;
+            attemptRuns.push(terminal);
+            rootRunId ??= terminal.id;
+            if (cellSignal.aborted || attemptIndex >= retries) break;
+            trigger = retryTrigger(completed.integrityIssueCodes);
+            if (!trigger) break;
+            retryOf = terminal.id;
           }
-        }
+          const selectedCredentials = selectedCredentialsByTask[
+            prepared.snapshot.task.id
+          ];
+          reportExecutionProgress(progress, { kind: "cell-finalizing", cell: progressCell });
+          const settled = await judgePhase.settle({
+            plan: prepared.judgePlan,
+            deterministic: terminalAttempt.record,
+            evaluatorStatus: terminalAttempt.evaluatorStatus,
+            sources: terminalAttempt.judgeSources,
+            preparedRequest: terminalAttempt.preparedJudgeRequest,
+            redactText(value) {
+              return redactTargetText(
+                redactControllerText(prepared.agent.adapter, value),
+                selectedCredentials,
+                prepared.snapshot.task.evidenceRedaction,
+              );
+            },
+            signal: cellSignal,
+          });
+          terminal = runReference(settled);
+          attemptRuns[attemptRuns.length - 1] = terminal;
+          reportExecutionProgress(progress, {
+            kind: "cell-completed",
+            cell: progressCell,
+            terminal,
+          });
+          return { runs: attemptRuns, terminal };
+        });
+        const runs = results.flatMap(result => result.runs);
+        const terminalRuns = results.map(result => result.terminal);
         return deepFreeze({
           status: "complete",
           groupId,

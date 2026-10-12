@@ -8,27 +8,7 @@ import { cn } from "@/lib/utils";
 import { VersionCombobox } from "@/components/ui/VersionCombobox";
 import { ThemeToggle } from "./ThemeToggle";
 import { TogetherCredit } from "./TogetherCredit";
-
-// Sidebar toggle icons — the bar inside the frame previews the *future*
-// state when clicked (thick = will expand, thin = will collapse).
-
-function SidebarCollapseIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden className={className}>
-      <rect x="-0.35" y="0.35" width="13.3" height="13.3" rx="2.65" transform="matrix(-1 0 0 1 13.3 0)" stroke="currentColor" strokeWidth="0.7" />
-      <rect width="1.5" height="10" rx="0.75" transform="matrix(-1 0 0 1 3.5 2)" fill="currentColor" />
-    </svg>
-  );
-}
-
-function SidebarExpandIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden className={className}>
-      <rect x="-0.35" y="0.35" width="13.3" height="13.3" rx="2.65" transform="matrix(-1 0 0 1 13.3 0)" stroke="currentColor" strokeWidth="0.7" />
-      <rect width="4" height="10" rx="1" transform="matrix(-1 0 0 1 6 2)" fill="currentColor" />
-    </svg>
-  );
-}
+import { SidebarToggle } from "./ResizableSidebarShell";
 
 export type RailFilters = {
   versions: { id: string; name: string; description: string | null; kind?: "weekly" | "experiment" | "smoke" | null; runAt?: string | null; createdAt?: string | null; model?: string | null; ccVersion?: string | null }[];
@@ -157,13 +137,7 @@ export function LeftRail({
             </Link>
           </div>
         </div>
-        <button
-          onClick={() => onCollapsedChange(false)}
-          aria-label="Expand sidebar"
-          className="mt-2 inline-flex h-8 w-8 items-center justify-center rounded-md text-fg-muted hover:text-foreground hover:bg-foreground/5"
-        >
-          <SidebarExpandIcon className="h-3.5 w-3.5" />
-        </button>
+        <div className="mt-2"><SidebarToggle collapsed={collapsed} onCollapsedChange={onCollapsedChange} /></div>
       </aside>
     );
   }
@@ -179,13 +153,7 @@ export function LeftRail({
             <Activity className="h-3.5 w-3.5 text-fg-muted" strokeWidth={2.25} />
             hurdle
           </Link>
-          <button
-            onClick={() => onCollapsedChange(true)}
-            aria-label="Collapse sidebar"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-fg-faint hover:text-foreground hover:bg-foreground/5"
-          >
-            <SidebarCollapseIcon className="h-3.5 w-3.5" />
-          </button>
+          <SidebarToggle collapsed={collapsed} onCollapsedChange={onCollapsedChange} />
         </div>
       </div>
 

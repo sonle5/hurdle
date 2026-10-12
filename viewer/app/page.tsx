@@ -7,6 +7,7 @@ import { getAllSessions, getDefaultEvalVersionId, getPreviousComparableVersion, 
 import { formatModel } from "@/lib/utils";
 import { evalVersionDisplayNameById } from "@/lib/version-display";
 import { getViewerOnboarding } from "@/lib/viewer-onboarding.server";
+import { GettingStarted } from "@/components/GettingStarted";
 
 export const dynamic = "force-dynamic";
 
@@ -28,41 +29,7 @@ export default async function Home({
     const onboarding = getViewerOnboarding();
     return (
       <CanonicalShell>
-        <div className="mx-auto max-w-2xl py-12 text-center sm:py-20">
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-fg-faint">
-            No runs yet
-          </p>
-          <h1 className="text-balance text-2xl font-semibold tracking-tight sm:text-3xl">
-            Run your first evaluation
-          </h1>
-          <p className="mx-auto mt-3 max-w-lg text-pretty text-sm leading-6 text-fg-muted">
-            {onboarding?.commands
-              ? "Check readiness, then run your evaluation in the terminal. Reload this page when it finishes to see your results."
-              : "Run a Suite with a runtime that saves results to this folder, then reload this page."}
-          </p>
-          {onboarding?.commands && (
-            <div className="mt-6 overflow-hidden rounded-xl border border-rule bg-surface text-left">
-              <div className="border-b border-rule px-4 py-3 text-xs font-medium text-fg-muted">
-                {onboarding.runtimeLabel} · Check readiness and run
-              </div>
-              <pre className="whitespace-pre-wrap break-words p-4 text-xs leading-6 text-foreground">
-                <code>{onboarding.commands}</code>
-              </pre>
-            </div>
-          )}
-          {onboarding?.commands && (
-            <p className="mt-4 text-sm leading-6 text-fg-muted">
-              Need to configure a sandbox or its credentials? Run <code className="text-foreground">{onboarding.setupCommand}</code> first.
-            </p>
-          )}
-          <p className="mt-4 text-xs leading-5 text-fg-faint">
-            Already tried a run? Check your terminal for errors. Agent and sandbox usage may be billed.
-          </p>
-          <details className="mt-8 text-left text-xs text-fg-muted">
-            <summary className="cursor-pointer rounded-md py-2 focus-visible:outline-2 focus-visible:outline-offset-2">Results folder</summary>
-            <code className="mt-2 block break-all rounded-lg border border-rule bg-surface p-3 leading-5">{canonicalSource.root}</code>
-          </details>
-        </div>
+        <GettingStarted steps={onboarding?.steps} needsRunOptions={onboarding?.commands === null} />
       </CanonicalShell>
     );
   }
@@ -120,7 +87,8 @@ export default async function Home({
     createdAt?: string;
     toolCalls: number | null;
     totalTokensIn: number;
-    costUsd: number;
+    costUsd: number | null;
+    costSource?: "reported" | "estimated" | "unavailable";
     needsFollowup?: boolean;
     followupReason?: string | null;
     failureAnalysis?: unknown;
@@ -150,6 +118,7 @@ export default async function Home({
     toolCalls: session.toolCalls,
     totalTokensIn: session.totalTokensIn,
     costUsd: session.costUsd,
+    costSource: session.costSource,
     needsFollowup: session.needsFollowup,
     followupReason: session.followupReason,
     failureAnalysis: session.failureAnalysis,
