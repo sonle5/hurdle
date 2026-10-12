@@ -37,7 +37,7 @@ function buildConfigs(
   type Accum = {
     label: string; pass: number; total: number;
     durTotal: number; durN: number; costTotal: number; costN: number;
-    corrTotal: number; corrN: number; toolTotal: number; toolN: number;
+    toolTotal: number; toolN: number;
     tokTotal: number; tokN: number; hallu: number; mcpCalls: number; skills: Set<string>;
   };
   const byConfig = new Map<string, Accum>();
@@ -47,7 +47,7 @@ function buildConfigs(
     const a = byConfig.get(s.configId) ?? {
       label: s.configLabel, pass: 0, total: 0,
       durTotal: 0, durN: 0, costTotal: 0, costN: 0,
-      corrTotal: 0, corrN: 0, toolTotal: 0, toolN: 0,
+      toolTotal: 0, toolN: 0,
       tokTotal: 0, tokN: 0, hallu: 0, mcpCalls: 0, skills: new Set<string>(),
     };
     if (scored) {
@@ -55,9 +55,8 @@ function buildConfigs(
       if (s.passed === true) a.pass += 1;
       if (s.durationSec > 0) { a.durTotal += s.durationSec; a.durN += 1; }
       if (s.costUsd !== null && s.costUsd >= 0) { a.costTotal += s.costUsd; a.costN += 1; }
-      a.corrTotal += s.corrections; a.corrN += 1;
       if (s.toolCalls != null) { a.toolTotal += s.toolCalls; a.toolN += 1; }
-      if (s.totalTokensIn > 0) { a.tokTotal += s.totalTokensIn; a.tokN += 1; }
+      if (s.totalTokens !== null) { a.tokTotal += s.totalTokens; a.tokN += 1; }
       a.mcpCalls += s.mcpCalls || 0;
       for (const sk of s.injectedSkills || []) a.skills.add(sk);
     }
@@ -68,9 +67,8 @@ function buildConfigs(
       id, label: a.label, total: a.total, pass: a.pass,
       avgDurationSec: a.durN ? Math.round(a.durTotal / a.durN) : 0,
       avgCostUsd: a.costN ? a.costTotal / a.costN : 0,
-      avgCorrections: a.corrN ? a.corrTotal / a.corrN : 0,
-      avgToolCalls: a.toolN ? a.toolTotal / a.toolN : 0,
-      avgTokensIn: a.tokN ? Math.round(a.tokTotal / a.tokN) : 0,
+      avgToolCalls: a.toolN ? a.toolTotal / a.toolN : null,
+      avgTokens: a.tokN ? Math.round(a.tokTotal / a.tokN) : null,
       hallu: 0, mcpCalls: a.mcpCalls, skillsInjected: a.skills.size, hallucinations: a.hallu,
     }))
     .sort((a, b) => a.id.localeCompare(b.id));
@@ -190,10 +188,10 @@ export default async function TaskPage({
         passed: s.passed,
         durationSec: s.durationSec,
         toolCalls: s.toolCalls,
-        totalTokensIn: s.totalTokensIn,
+        totalTokens: s.totalTokens,
+        tokenUsage: s.tokenUsage,
         costUsd: s.costUsd,
         costSource: s.costSource,
-        corrections: s.corrections,
         createdAt: s.createdAt.toISOString(),
         needsFollowup: s.needsFollowup,
         manualOverride: s.manualOverride ? { reason: s.manualOverride.reason } : null,
@@ -280,7 +278,7 @@ export default async function TaskPage({
                     { label: "Runs", value: kpi.runs.toString(), sub: excludedSub(kpi) },
                     { label: "Pass rate", value: `${kpi.total > 0 ? Math.round((kpi.pass / kpi.total) * 100) : 0}%`, sub: `${kpi.pass} of ${kpi.total} scored`, tone: tonePassRate(kpi.total > 0 ? Math.round((kpi.pass / kpi.total) * 100) : 0) },
                     { label: "Avg duration", value: kpi.avgDuration > 0 ? `${Math.floor(kpi.avgDuration / 60)}m ${kpi.avgDuration % 60}s` : "—" },
-                    { label: "Avg cost", value: kpi.avgCost > 0 ? `$${kpi.avgCost.toFixed(2)}` : "—" },
+                    { label: "Avg agent cost", value: kpi.avgCost > 0 ? `$${kpi.avgCost.toFixed(2)}` : "—" },
                   ]}
                 />
               )}

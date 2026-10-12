@@ -16,12 +16,78 @@ import {
 import {
   createCanonicalDashboardProjection,
 } from "../lib/canonical-dashboard-projection.mjs";
+import { createClaudeCodeAdapter } from "../../harness/lib/agent-adapters/claude-code.mjs";
 
 const fixture = JSON.parse(readFileSync(
   new URL("../../harness/test/fixtures/canonical-run-record-v2.json", import.meta.url),
   "utf8",
 ));
 const completeRecord = fixture.history.at(-1);
+
+test("new and existing Claude runs show the same full usage and tools without changing stored runs", async () => {
+  const usage = { input_tokens: 8, output_tokens: 1158, cache_read_input_tokens: 74793, cache_creation_input_tokens: 4734 };
+  const tool = id => ({ type: "assistant", message: { role: "assistant", id: "message-one", usage: { ...usage, output_tokens: 40 }, content: [{ type: "tool_use", id, name: "Bash", input: {} }] } });
+  const jsonl = [tool("tool-one"), tool("tool-one"), tool("tool-two"), tool("tool-three"), { type: "result", usage }].map(frame => JSON.stringify(frame)).join("\n");
+  const decoded = createClaudeCodeAdapter({ runtimeEnv: {} }).decodeControllerEvidence({ stdout: jsonl });
+  for (const existing of [false, true]) {
+    const record = structuredClone(completeRecord);
+    record.metrics = { common: { ...decoded.metrics.common }, adapters: { "claude-code": { ...decoded.metrics.adapter } } };
+    record.execution.durationMs = 27126;
+    record.evidence.egress = [];
+    if (existing) {
+      record.metrics.common.toolCalls = null;
+      record.metrics.adapters["claude-code"] = {};
+    }
+    const before = structuredClone(record);
+    let reads = 0;
+    const projection = createCanonicalDashboardProjection({ ...fixtureReader(record),
+      async readEvidence(reference, options) {
+        reads++;
+        assert.equal(reference, record.evidence.transcript);
+        assert.equal(options.maxBytes, 32 * 1024 * 1024);
+        return Buffer.from(jsonl);
+      },
+    });
+    const [summary] = await projection.listSessions(record.experimentVersion);
+    const [again] = await projection.listSessions(record.experimentVersion);
+    assert.deepEqual(again, summary);
+    assert.equal(reads, existing ? 1 : 0, "only old summaries need a bounded, cached transcript read");
+    const detail = await projection.findSession(summary.id);
+    for (const row of [summary, detail]) {
+      assert.equal(row.totalTokens, 80693);
+      assert.deepEqual(row.tokenUsage, { input: 8, output: 1158, cacheRead: 74793, cacheCreate: 4734, totalIn: 79535 });
+      assert.equal(row.toolCalls, 3, "duplicate tool frames are one call");
+      assert.equal(row.durationSec, 27);
+      assert.equal(row.result, record.verdict);
+    }
+    assert.deepEqual(record, before);
+  }
+});
+
+test("missing or unreadable usage stays unavailable, while recorded zero usage is meaningful", async () => {
+  for (const bytes of [null, Buffer.from("broken transcript")]) {
+    const record = structuredClone(completeRecord);
+    record.metrics = { common: { inputTokens: 4, outputTokens: 202, toolCalls: null }, adapters: {} };
+    record.evidence.egress = [];
+    if (!bytes) record.evidence.transcript = null;
+    const projection = createCanonicalDashboardProjection({ ...fixtureReader(record), async readEvidence() { return bytes; } });
+    const [summary] = await projection.listSessions(record.experimentVersion);
+    const detail = await projection.findSession(summary.id);
+    for (const row of [summary, detail]) {
+      assert.equal(row.totalTokens, null, "uncached input alone is not a run total");
+      assert.equal(row.tokenUsage, null);
+      assert.equal(row.toolCalls, null);
+    }
+  }
+  const record = structuredClone(completeRecord);
+  record.metrics = { common: { inputTokens: 0, outputTokens: 0, toolCalls: 0 },
+    adapters: { "claude-code": { cacheReadInputTokens: 0, cacheCreationInputTokens: 0 } } };
+  record.evidence.transcript = null;
+  const [zero] = await createCanonicalDashboardProjection(fixtureReader(record)).listSessions(record.experimentVersion);
+  assert.equal(zero.totalTokens, 0);
+  assert.equal(zero.toolCalls, 0);
+  assert.equal(zero.tokenUsage.totalIn, 0);
+});
 
 test("runtime metadata uses the saved Run snapshot even before execution or without a transcript", async () => {
   for (const original of [fixture.history[0], completeRecord]) {
@@ -144,7 +210,7 @@ function fixtureReader(record = completeRecord) {
       throw new Error("dashboard projection must not inspect Run history");
     },
     async readEvidence() {
-      throw new Error("dashboard listing must not read evidence bytes");
+      throw new Error("fixture evidence is unavailable");
     },
   };
 }
@@ -202,14 +268,14 @@ test("canonical local runs list through the mature dashboard without copying or 
     task: "copy-message",
     taskName: "copy-message",
     durationSec: 4,
-    corrections: 0,
     passed: true,
     result: "pass",
     rawResult: "pass",
     auditVerdict: null,
     manualOverride: null,
     toolCalls: 7,
-    totalTokensIn: 1_234,
+    totalTokens: 1_234,
+    tokenUsage: null,
     costUsd: 0.42,
     costSource: "reported",
     mcpCalls: 0,

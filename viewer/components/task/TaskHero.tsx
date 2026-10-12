@@ -45,7 +45,7 @@ export function TaskHero({
             { label: "Runs", value: runs.toString(), sub: excluded > 0 ? `${excluded} excluded` : undefined },
             { label: "Pass rate", value: `${passPct}%`, sub: `${pass} of ${total} scored`, tone: tonePassRate(passPct) },
             { label: "Avg duration", value: fmtTime(avgDuration) },
-            { label: "Avg cost", value: avgCost > 0 ? `$${avgCost.toFixed(2)}` : "—" },
+            { label: "Avg agent cost", value: avgCost > 0 ? `$${avgCost.toFixed(2)}` : "—" },
           ]}
         />
       )}

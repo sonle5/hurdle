@@ -61,9 +61,7 @@ export type SessionStats = {
   taskNotifications: number;
   effectiveUserMessages: number;
   interactions: number; // AskUserQuestion tool calls
-  corrections: number; // non-first user messages that aren't skill/task-notif/interaction responses
   model: string | null;
-  stack: string | null;
   harnessVersion: string | null;
 };
 
@@ -85,7 +83,6 @@ export type Session = {
   shareUrl?: string;
   outcome?: {
     passed: boolean | null;
-    corrections: number | null;
     notes?: string;
     skills?: string[];
   };
@@ -274,15 +271,10 @@ export function computeStats(messages: ParsedMessage[], reportedUsage: unknown =
         )
       : 0;
 
-  // Detect stack from Write file extensions and Bash commands
-  const stack = detectStack(messages);
-
   // Count AskUserQuestion as interactions
   const interactions = toolBreakdown["AskUserQuestion"] || 0;
 
-  // Corrections = effective user messages minus the first prompt, minus interactions
   const effectiveUserMessages = userMessages - skillInjections - taskNotifications;
-  const corrections = Math.max(0, effectiveUserMessages - 1 - interactions);
 
   return {
     durationSec,
@@ -301,53 +293,9 @@ export function computeStats(messages: ParsedMessage[], reportedUsage: unknown =
     taskNotifications,
     effectiveUserMessages,
     interactions,
-    corrections,
     model,
-    stack,
     harnessVersion: null,
   };
-}
-
-function detectStack(messages: ParsedMessage[]): string | null {
-  const signals: Record<string, number> = {};
-
-  for (const m of messages) {
-    for (const block of m.blocks) {
-      if (block.type !== "tool_use") continue;
-      const inp = block.input as Record<string, unknown>;
-
-      if (block.name === "Write" || block.name === "Edit") {
-        const fp = String(inp.file_path ?? "");
-        if (fp.endsWith(".py")) signals["Python"] = (signals["Python"] || 0) + 2;
-        if (fp.endsWith(".ts") || fp.endsWith(".tsx")) signals["TypeScript"] = (signals["TypeScript"] || 0) + 2;
-        if (fp.endsWith(".js") || fp.endsWith(".jsx")) signals["JavaScript"] = (signals["JavaScript"] || 0) + 2;
-      }
-
-      if (block.name === "Bash") {
-        const cmd = String(inp.command ?? "");
-        if (/\bnpx create-next-app\b/.test(cmd)) signals["Next.js"] = (signals["Next.js"] || 0) + 5;
-        if (/\bnext\b/.test(cmd) && /\bbuild\b/.test(cmd)) signals["Next.js"] = (signals["Next.js"] || 0) + 3;
-        if (/\bflask\b/i.test(cmd) || /\bpip install.*flask\b/i.test(cmd)) signals["Flask"] = (signals["Flask"] || 0) + 3;
-        if (/\bexpress\b/i.test(cmd) || /\bnpm.*install.*express\b/i.test(cmd)) signals["Express"] = (signals["Express"] || 0) + 3;
-        if (/\btsx\b/.test(cmd)) signals["Express"] = (signals["Express"] || 0) + 1;
-        if (/\bpython3?\s/.test(cmd)) signals["Python"] = (signals["Python"] || 0) + 1;
-        if (/\bnpm\b|\bnpx\b|\bnode\b|\btsx\b/.test(cmd)) signals["Node.js"] = (signals["Node.js"] || 0) + 1;
-      }
-    }
-  }
-
-  if (Object.keys(signals).length === 0) return null;
-
-  // Build a concise label: framework first, then language
-  const sorted = Object.entries(signals).sort((a, b) => b[1] - a[1]);
-  const frameworks = ["Next.js", "Flask", "Express"];
-  const fw = sorted.find(([k]) => frameworks.includes(k));
-  const lang = sorted.find(([k]) => ["Python", "TypeScript", "JavaScript"].includes(k));
-
-  if (fw && lang) return `${fw[0]} / ${lang[0]}`;
-  if (fw) return fw[0];
-  if (lang) return lang[0];
-  return sorted[0][0];
 }
 
 export function formatDuration(sec: number): string {
@@ -376,7 +324,6 @@ export function parseSessionFromJsonl(
     configFull: string;
     configDir: string;
     result: string | null;
-    corrections: number;
     note: string | null;
     skills: string[] | null;
     taskPrompt?: string | null;
@@ -455,7 +402,6 @@ export function parseSessionFromJsonl(
 
   const outcome = {
     passed: meta.result === "pass" ? true : meta.result === "fail" ? false : null,
-    corrections: meta.corrections,
     notes: meta.note || undefined,
     skills: meta.skills || undefined,
   };

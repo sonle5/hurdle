@@ -1,6 +1,7 @@
 "use client";
 
 import { RunCost } from "@/components/RunCost";
+import { AgentTokens } from "@/components/TokensDisplay";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { cn, formatModel } from "@/lib/utils";
@@ -21,10 +22,10 @@ export type RunRowData = {
   passed: boolean | null;
   durationSec: number;
   toolCalls: number | null;
-  totalTokensIn: number;
+  totalTokens: number | null;
+  tokenUsage: import("@/lib/session-usage.mjs").TokenUsage | null;
   costUsd: number | null;
   costSource?: "reported" | "estimated" | "unavailable";
-  corrections: number;
   createdAt?: string;
   needsFollowup?: boolean;
   manualOverride?: { reason?: string | null } | null;
@@ -36,13 +37,6 @@ function fmtDuration(sec: number) {
   if (sec <= 0) return "—";
   if (sec < 60) return `${sec}s`;
   return `${Math.floor(sec / 60)}m ${sec % 60}s`;
-}
-
-function fmtTokens(n: number) {
-  if (!n) return "—";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return n.toString();
 }
 
 function ElapsedTimer({ startedAt }: { startedAt: string }) {
@@ -104,7 +98,7 @@ export function RunRow({ s, showTask = true, density = "comfortable", className 
         <span className="w-14 text-right">
           {isRunning && s.createdAt ? <ElapsedTimer startedAt={s.createdAt} /> : fmtDuration(s.durationSec)}
         </span>
-        <span className="w-12 text-right hidden md:inline">{fmtTokens(s.totalTokensIn)}</span>
+        <span className="w-12 text-right hidden md:inline"><AgentTokens total={s.totalTokens} usage={s.tokenUsage} /></span>
         <span className="w-14 text-right"><RunCost value={s.costUsd} source={s.costSource} /></span>
       </div>
 

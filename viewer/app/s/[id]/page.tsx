@@ -9,7 +9,7 @@ import { SessionReviewSummary } from "@/components/SessionReviewSummary";
 import { parseSessionFromJsonl, formatDuration, type ParsedMessage } from "@/lib/sessions";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
-import { TokensDisplay } from "@/components/TokensDisplay";
+import { AgentTokens, TokensDisplay } from "@/components/TokensDisplay";
 import { ConversationView } from "@/components/ConversationView";
 import { ResizableSessionShell } from "@/components/ResizableSessionShell";
 import { readSidebarLayout } from "@/lib/browser-layout-storage";
@@ -216,7 +216,7 @@ export default async function SessionPage({
             <div className="text-sm"><span className="text-fg-muted mr-2">Execution:</span><ExecutionDetails runtime={dbSession.runtime} /></div>
             {dbSession.durationSec > 0 && <p className="text-sm text-fg-muted">Duration: {Math.floor(dbSession.durationSec / 60)}m {dbSession.durationSec % 60}s</p>}
             {dbSession.toolCalls != null && <p className="text-sm text-fg-muted">Tool calls: {dbSession.toolCalls}</p>}
-            <p className="text-sm text-fg-muted">Cost: <RunCost value={dbSession.costUsd} source={dbSession.costSource} /></p>
+            <p className="text-sm text-fg-muted">Agent cost: <RunCost value={dbSession.costUsd} source={dbSession.costSource} /></p>
             <ToolVersionBadges items={toolVersions} />
             {dbSession.note && <p className="text-sm text-fg-muted">{dbSession.note}</p>}
             <CanonicalSessionReview prompt={dbSession.prompt} checks={canonicalStoredChecks(dbSessionRecord.storedChecks)} judge={canonicalJudgeReview(dbSessionRecord.deepAudit)} runId={readString(dbSessionRecord.canonicalRunId)} evaluatorSources={canonicalEvaluatorSources(dbSessionRecord.evaluatorSources)} />
@@ -244,7 +244,6 @@ export default async function SessionPage({
     configFull: dbSession.configFull,
     configDir: dbSession.configDir,
     result: dbSession.result || null,
-    corrections: dbSession.corrections,
     note: dbSession.note,
     skills: dbSession.injectedSkills as string[] | null,
     taskPrompt: dbSession.prompt,
@@ -367,6 +366,8 @@ export default async function SessionPage({
   }
 
   const { stats } = session;
+  // Run duration comes from the execution record, not the message timestamp span.
+  stats.durationSec = dbSession.durationSec;
   const toolsUsed = Object.entries(stats.toolBreakdown).sort((a, b) => b[1] - a[1]);
 
   session.stats.costUsd = dbSession.costUsd;
@@ -454,14 +455,13 @@ export default async function SessionPage({
           )}
           <SessionReviewSummary
             statusKind={statusKind}
-            corrections={session.outcome?.corrections ?? stats.corrections}
             auditVerdict={canonicalJudge?.verdict}
             judgeStatusLabel={readString(dbSessionRecord.judgeStatusLabel)}
             deterministicOverall={storedDeterministicOverall}
             deterministicNote={storedDeterministicOverall ? "stored evaluation result" : undefined}
             startedAt={stats.firstTimestamp}
             duration={formatDuration(stats.durationSec)}
-            toolCalls={stats.toolCalls}
+            toolCalls={dbSession.toolCalls}
             costUsd={stats.costUsd}
             costSource={dbSession.costSource}
           />
@@ -516,20 +516,6 @@ export default async function SessionPage({
                           </TableCell>
                         </TableRow>
                       )}
-                      {stats.stack && (
-                        <TableRow>
-                          <TableCell className="text-fg-muted w-36 font-medium">Stack</TableCell>
-                          <TableCell>
-                            <span className="inline-flex gap-1.5">
-                              {stats.stack.split(" / ").map((part) => (
-                                <span key={part} className="text-xs font-medium px-2 py-0.5 rounded-full border border-rule bg-surface text-foreground">
-                                  {part}
-                                </span>
-                              ))}
-                            </span>
-                          </TableCell>
-                        </TableRow>
-                      )}
                       <TableRow>
                         <TableCell className="text-fg-muted w-36 font-medium">Date</TableCell>
                         <TableCell>{new Date(stats.firstTimestamp).toLocaleString()}</TableCell>
@@ -539,17 +525,8 @@ export default async function SessionPage({
                         <TableCell>
                           <span className="inline-flex items-center gap-2">
                             <StatusBadge kind={statusKind} />
-                            {session.outcome?.corrections != null && session.outcome.corrections > 0 && (
-                              <span className="text-fg-muted text-sm">
-                                ({session.outcome.corrections} correction{session.outcome.corrections !== 1 ? "s" : ""})
-                              </span>
-                            )}
                           </span>
                         </TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell className="text-fg-muted font-medium">Corrections</TableCell>
-                        <TableCell className="tabular-nums">{session.outcome?.corrections ?? stats.corrections}</TableCell>
                       </TableRow>
                       {stats.interactions > 0 && (
                         <TableRow>
@@ -618,16 +595,19 @@ export default async function SessionPage({
                       </TableRow>
                       <TableRow>
                         <TableCell className="text-fg-muted font-medium">Tool Calls</TableCell>
-                        <TableCell className="tabular-nums">{stats.toolCalls}</TableCell>
+                        <TableCell className="tabular-nums">{dbSession.toolCalls ?? "—"}</TableCell>
                       </TableRow>
                       <TableRow>
-                        <TableCell className="text-fg-muted font-medium">Tokens</TableCell>
+                        <TableCell className="text-fg-muted font-medium">Agent tokens</TableCell>
                         <TableCell>
-                          <TokensDisplay tokens={stats.tokens} />
+                          <div className="flex flex-col gap-2">
+                            <div className="tabular-nums"><AgentTokens total={dbSession.totalTokens} usage={dbSession.tokenUsage} />{dbSession.totalTokens !== null && " total"}</div>
+                            {dbSession.tokenUsage && <TokensDisplay tokens={dbSession.tokenUsage} />}
+                          </div>
                         </TableCell>
                       </TableRow>
                       <TableRow>
-                        <TableCell className="text-fg-muted font-medium">Cost</TableCell>
+                        <TableCell className="text-fg-muted font-medium">Agent cost</TableCell>
                         <TableCell className="tabular-nums"><RunCost value={stats.costUsd} source={dbSession.costSource} /></TableCell>
                       </TableRow>
                     </TableBody>

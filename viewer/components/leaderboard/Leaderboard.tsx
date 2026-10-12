@@ -22,13 +22,13 @@ type SessionData = {
   configLabel: string;
   task: string;
   durationSec: number;
-  corrections: number;
   interactions: number;
   passed: boolean | null;
   result?: string | null;
   createdAt?: string;
   toolCalls: number | null;
-  totalTokensIn: number;
+  totalTokens: number | null;
+  tokenUsage: import("@/lib/session-usage.mjs").TokenUsage | null;
   costUsd: number | null;
   costSource?: "reported" | "estimated" | "unavailable";
   needsFollowup?: boolean;
@@ -394,10 +394,10 @@ export function Leaderboard({
           passed: s.passed,
           durationSec: s.durationSec,
           toolCalls: s.toolCalls,
-          totalTokensIn: s.totalTokensIn,
+          totalTokens: s.totalTokens,
+          tokenUsage: s.tokenUsage,
           costUsd: s.costUsd,
           costSource: s.costSource,
-          corrections: s.corrections,
           createdAt: s.createdAt,
           needsFollowup: s.needsFollowup,
           manualOverride: s.manualOverride,
@@ -431,7 +431,7 @@ export function Leaderboard({
                   { label: "Runs", value: kpi.runs.toString(), sub: runsSub },
                   { label: "Strict pass", value: `${kpi.passPct}%`, sub: `${kpi.pass} of ${kpi.total} scored`, tone: tonePassRate(kpi.passPct), delta: deltas.pass },
                   { label: "Avg duration", value: fmtTimeShort(kpi.avgDuration), delta: deltas.duration },
-                  { label: "Avg cost", value: kpi.avgCost > 0 ? `$${kpi.avgCost.toFixed(2)}` : "—", delta: deltas.cost },
+                  { label: "Avg agent cost", value: kpi.avgCost > 0 ? `$${kpi.avgCost.toFixed(2)}` : "—", delta: deltas.cost },
                 ]}
               />
               <MatrixTable data={data} />

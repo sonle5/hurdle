@@ -63,7 +63,6 @@ export type SessionSummary = {
   task: string;
   taskName: string;
   durationSec: number;
-  corrections: number;
   // Stored canonical Decision; never recomputed from the Judge or process exit.
   passed: boolean | null;
   result: string | null;
@@ -71,7 +70,8 @@ export type SessionSummary = {
   auditVerdict: string | null;  // separately stored Judge verdict
   manualOverride?: { reason: string } | null;
   toolCalls: number | null;
-  totalTokensIn: number;
+  totalTokens: number | null;
+  tokenUsage: import("@/lib/session-usage.mjs").TokenUsage | null;
   costUsd: number | null;
   costSource?: "reported" | "estimated" | "unavailable";
   mcpCalls: number;

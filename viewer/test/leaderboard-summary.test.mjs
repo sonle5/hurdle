@@ -11,7 +11,7 @@ test("the home leaderboard keeps four run KPIs and omits review summaries", () =
   assert.match(leaderboard, /label: "Runs"/);
   assert.match(leaderboard, /label: "Strict pass"/);
   assert.match(leaderboard, /label: "Avg duration"/);
-  assert.match(leaderboard, /label: "Avg cost"/);
+  assert.match(leaderboard, /label: "Avg agent cost"/);
   assert.doesNotMatch(leaderboard, /label: "Reviewed"/);
   assert.doesNotMatch(leaderboard, /ReviewedAttributionBreakdown/);
   assert.doesNotMatch(leaderboard, /AutomatedTriageBreakdown/);

@@ -35,7 +35,7 @@ export function RunsByConfig({
         ),
       };
     }
-    const headers = ["task", "config", "configLabel", "agent", "run", "result", "passed", "duration_sec", "tool_calls", "tokens_in", "cost_usd", "corrections", "needs_followup", "session_id"];
+    const headers = ["task", "config", "configLabel", "agent", "run", "result", "passed", "duration_sec", "tool_calls", "agent_tokens", "agent_cost_usd", "needs_followup", "session_id"];
     const esc = (v: string | number | boolean | null | undefined) => {
       if (v === null || v === undefined) return "";
       const s = String(v);
@@ -53,9 +53,8 @@ export function RunsByConfig({
         r.passed === true ? "true" : r.passed === false ? "false" : "",
         r.durationSec,
         r.toolCalls ?? "",
-        r.totalTokensIn,
+        r.totalTokens,
         r.costUsd?.toFixed(4) ?? "",
-        r.corrections,
         r.needsFollowup ? "true" : "false",
         r.id,
       ].map(esc).join(","));

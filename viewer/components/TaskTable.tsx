@@ -1,6 +1,7 @@
 "use client";
 
 import { RunCost } from "@/components/RunCost";
+import { AgentTokens } from "@/components/TokensDisplay";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ChevronRight, ArrowUp, ArrowDown } from "lucide-react";
@@ -13,12 +14,6 @@ const formatDuration = (sec: number) => {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
-};
-
-const formatTokens = (n: number) => {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return n.toString();
 };
 
 const agentLabel = (a: string) =>
@@ -34,13 +29,13 @@ type SessionRow = {
   configLabel: string;
   task: string;
   durationSec: number;
-  corrections: number;
   interactions: number;
   passed: boolean | null;
   result?: string | null;
   createdAt?: string;
   toolCalls: number | null;
-  totalTokensIn: number;
+  totalTokens: number | null;
+  tokenUsage: import("@/lib/session-usage.mjs").TokenUsage | null;
   costUsd: number | null;
   costSource?: "reported" | "estimated" | "unavailable";
   needsFollowup?: boolean;
@@ -52,7 +47,7 @@ type SessionRow = {
 
 type SortKey =
   | "configId" | "agent" | "passed" | "durationSec"
-  | "toolCalls" | "totalTokensIn" | "costUsd";
+  | "toolCalls" | "totalTokens" | "costUsd";
 
 const columns: { key: SortKey; label: string; thClassName?: string; cellClassName?: string; hideOnMobile?: boolean; align?: "left" | "right" }[] = [
   { key: "configId",       label: "Config",      thClassName: "w-44 pl-5", cellClassName: "pl-5" },
@@ -60,8 +55,8 @@ const columns: { key: SortKey; label: string; thClassName?: string; cellClassNam
   { key: "passed",         label: "Result",      thClassName: "w-28",      cellClassName: "w-28" },
   { key: "durationSec",    label: "Time",        align: "right",           thClassName: "w-24", cellClassName: "w-24" },
   { key: "toolCalls",      label: "Tool Calls",  hideOnMobile: true, align: "right", thClassName: "w-24", cellClassName: "w-24" },
-  { key: "totalTokensIn",  label: "Tokens",      hideOnMobile: true, align: "right", thClassName: "w-24", cellClassName: "w-24" },
-  { key: "costUsd",        label: "Cost",        align: "right",           thClassName: "w-24", cellClassName: "w-24" },
+  { key: "totalTokens",    label: "Agent tokens", hideOnMobile: true, align: "right", thClassName: "w-28", cellClassName: "w-28" },
+  { key: "costUsd",        label: "Agent cost",  align: "right",           thClassName: "w-24", cellClassName: "w-24" },
 ];
 
 export function TaskTable({ sessions }: { sessions: SessionRow[] }) {
@@ -76,8 +71,8 @@ export function TaskTable({ sessions }: { sessions: SessionRow[] }) {
       const bv = b.passed === true ? 0 : b.passed === false ? 1 : 2;
       return sortAsc ? av - bv : bv - av;
     }
-    const av = a[sortKey] ?? 999;
-    const bv = b[sortKey] ?? 999;
+    const av = a[sortKey] ?? Infinity;
+    const bv = b[sortKey] ?? Infinity;
     if (av < bv) return sortAsc ? -1 : 1;
     if (av > bv) return sortAsc ? 1 : -1;
     if (a.durationSec !== b.durationSec) return a.durationSec - b.durationSec;
@@ -157,7 +152,7 @@ export function TaskTable({ sessions }: { sessions: SessionRow[] }) {
                 {s.toolCalls ?? "—"}
               </TableCell>
               <TableCell className={cn("text-right tabular-nums text-fg-muted py-3 w-24", hide)}>
-                {formatTokens(s.totalTokensIn)}
+                <AgentTokens total={s.totalTokens} usage={s.tokenUsage} />
               </TableCell>
               <TableCell className="text-right tabular-nums text-fg-muted py-3 w-24">
                 <RunCost value={s.costUsd} source={s.costSource} />

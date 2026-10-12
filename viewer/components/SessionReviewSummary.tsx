@@ -94,7 +94,6 @@ function DeterministicStatusLabel({
 
 export function SessionReviewSummary({
   statusKind,
-  corrections,
   auditVerdict,
   auditConfidence,
   judgeStatusLabel,
@@ -107,7 +106,6 @@ export function SessionReviewSummary({
   costSource,
 }: {
   statusKind: StatusKind;
-  corrections: number | null | undefined;
   auditVerdict?: string | null;
   auditConfidence?: string | null;
   judgeStatusLabel?: string | null;
@@ -115,7 +113,7 @@ export function SessionReviewSummary({
   deterministicNote?: string;
   startedAt: string;
   duration: string;
-  toolCalls: number;
+  toolCalls: number | null;
   costUsd: number | null;
   costSource?: "reported" | "estimated" | "unavailable";
 }) {
@@ -136,11 +134,6 @@ export function SessionReviewSummary({
           </div>
           <div className="flex min-h-6 items-center gap-2">
             <StatusBadge kind={statusKind} size="md" />
-            {corrections != null && corrections > 0 && (
-              <span className="text-xs text-fg-muted tabular-nums">
-                {corrections} correction{corrections === 1 ? "" : "s"}
-              </span>
-            )}
           </div>
         </div>
 
@@ -180,7 +173,7 @@ export function SessionReviewSummary({
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-fg-muted tabular-nums">
             <span>{runStart.zone && `${runStart.zone} · `}{duration}</span>
-            <span>{toolCalls} tools · <RunCost value={costUsd} source={costSource} /></span>
+            <span>{toolCalls ?? "—"} tools · Agent cost <RunCost value={costUsd} source={costSource} /></span>
           </div>
         </div>
       </div>

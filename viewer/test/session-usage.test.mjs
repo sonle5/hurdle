@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { readSessionTokenUsage, summarizeSessionTokens } from "../lib/session-usage.mjs";
+import { projectAgentUsage, readSessionTokenUsage, summarizeSessionTokens } from "../lib/session-usage.mjs";
 
 const usageA = { input_tokens: 2, output_tokens: 7, cache_read_input_tokens: 15990, cache_creation_input_tokens: 2897 };
 const usageB = { input_tokens: 2, output_tokens: 46, cache_read_input_tokens: 18887, cache_creation_input_tokens: 186 };
@@ -11,6 +11,19 @@ const messages = [
   { role: "assistant", uuid: "block-b", providerMessageId: "msg-a", usage: usageA },
   { role: "assistant", uuid: "block-c", providerMessageId: "msg-b", usage: usageB },
 ];
+
+test("Codex totals include output once and treat cached input as a subset of input", () => {
+  const record = { state: "complete", snapshot: { agent: { adapterId: "codex" } }, metrics: {
+    common: { inputTokens: 100, outputTokens: 20, toolCalls: 0 },
+    adapters: { codex: { cachedInputTokens: 80, reasoningOutputTokens: 10 } },
+  } };
+  assert.deepEqual(projectAgentUsage(record), { totalTokens: 120, toolCalls: 0,
+    tokenUsage: { input: 20, output: 20, cacheRead: 80, cacheCreate: 0, totalIn: 100 } });
+  delete record.metrics.adapters.codex.cachedInputTokens;
+  assert.deepEqual(projectAgentUsage(record), { totalTokens: 120, toolCalls: 0, tokenUsage: null });
+  record.state = "running";
+  assert.deepEqual(projectAgentUsage(record), { totalTokens: null, toolCalls: null, tokenUsage: null });
+});
 
 test("final Claude usage replaces partial block usage, including completed output counts", () => {
   assert.deepEqual(summarizeSessionTokens(messages, reported), {
@@ -55,7 +68,7 @@ test("the Viewer session parser consumes final result usage without hiding messa
   const script = `import {parseSessionFromJsonl} from ${JSON.stringify(source)};
     import {readFileSync} from 'node:fs';
     const frames=JSON.parse(readFileSync(0,'utf8'));
-    const meta={id:'run-test',version:'test',run:'run1',task:'copy-message',agent:'CC',configId:'baseline',configLabel:'Baseline',configFull:'Baseline',configDir:'baseline',result:'pass',corrections:0,note:null,skills:null};
+    const meta={id:'run-test',version:'test',run:'run1',task:'copy-message',agent:'CC',configId:'baseline',configLabel:'Baseline',configFull:'Baseline',configDir:'baseline',result:'pass',note:null,skills:null};
     const parse=value=>parseSessionFromJsonl(value.map(f=>JSON.stringify(f)).join('\\n'),meta);
     const s=parse(frames);
     const zero=parse([...frames,{type:'result',usage:{input_tokens:0,output_tokens:0},total_cost_usd:0}]);

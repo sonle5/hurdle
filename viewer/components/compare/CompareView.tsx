@@ -541,7 +541,7 @@ function buildKpis(metrics: KpiMetrics): Kpi[] {
         : undefined,
     },
     {
-      label: "Avg cost / run",
+      label: "Avg agent cost / run",
       value: fmtCost(avgCost(cur)),
       sub: avgCost(base) > 0 ? `was ${fmtCost(avgCost(base))}` : undefined,
       delta: avgCost(cur) > 0 && avgCost(base) > 0 && costDelta !== 0

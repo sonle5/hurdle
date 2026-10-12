@@ -80,13 +80,13 @@ export default async function Home({
     configLabel: string;
     task: string;
     durationSec: number;
-    corrections: number;
     interactions: number;
     passed: boolean | null;
     result?: string | null;
     createdAt?: string;
     toolCalls: number | null;
-    totalTokensIn: number;
+    totalTokens: number | null;
+    tokenUsage: import("@/lib/session-usage.mjs").TokenUsage | null;
     costUsd: number | null;
     costSource?: "reported" | "estimated" | "unavailable";
     needsFollowup?: boolean;
@@ -110,13 +110,13 @@ export default async function Home({
     configLabel: session.configLabel,
     task: session.task,
     durationSec: session.durationSec,
-    corrections: session.corrections,
     interactions: 0,
     passed: session.passed,
     result: session.result,
     createdAt: session.createdAt.toISOString(),
     toolCalls: session.toolCalls,
-    totalTokensIn: session.totalTokensIn,
+    totalTokens: session.totalTokens,
+    tokenUsage: session.tokenUsage,
     costUsd: session.costUsd,
     costSource: session.costSource,
     needsFollowup: session.needsFollowup,

@@ -12,9 +12,8 @@ export type ConfigSummary = {
   pass: number;
   avgDurationSec: number;
   avgCostUsd: number;
-  avgCorrections: number;
-  avgToolCalls: number;
-  avgTokensIn: number;
+  avgToolCalls: number | null;
+  avgTokens: number | null;
   hallucinations: number;     // total models retried/hallucinated across runs
   mcpCalls: number;           // total
   skillsInjected: number;     // unique skills injected (count of distinct)
@@ -27,7 +26,7 @@ function fmtTime(sec: number) {
 }
 
 function fmtTokens(n: number) {
-  if (n <= 0) return "—";
+  if (n === 0) return "0";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return n.toString();
@@ -86,32 +85,24 @@ function buildMetrics(configs: ConfigSummary[]): Metric[] {
     empty: (c) => c.avgDurationSec <= 0,
   },
   {
-    key: "corrections",
-    label: "Avg corrections",
-    betterDirection: "lower",
-    render: (c) => <span className="tabular-nums text-[12px] text-foreground">{c.avgCorrections.toFixed(1)}</span>,
-    raw: (c) => c.avgCorrections,
-    empty: (c) => c.total === 0,
-  },
-  {
     key: "tools",
     label: "Avg tool calls",
     betterDirection: "lower",
-    render: (c) => <span className="tabular-nums text-[12px] text-foreground">{c.avgToolCalls.toFixed(0)}</span>,
-    raw: (c) => c.avgToolCalls || Infinity,
-    empty: (c) => c.avgToolCalls <= 0,
+    render: (c) => <span className="tabular-nums text-[12px] text-foreground">{c.avgToolCalls === null ? "—" : c.avgToolCalls.toFixed(0)}</span>,
+    raw: (c) => c.avgToolCalls ?? Infinity,
+    empty: (c) => c.avgToolCalls === null,
   },
   {
     key: "tokens",
-    label: "Avg tokens in",
+    label: "Avg agent tokens",
     betterDirection: "lower",
-    render: (c) => <span className="tabular-nums text-[12px] text-foreground">{fmtTokens(c.avgTokensIn)}</span>,
-    raw: (c) => c.avgTokensIn || Infinity,
-    empty: (c) => c.avgTokensIn <= 0,
+    render: (c) => <span className="tabular-nums text-[12px] text-foreground">{c.avgTokens === null ? "—" : fmtTokens(c.avgTokens)}</span>,
+    raw: (c) => c.avgTokens ?? Infinity,
+    empty: (c) => c.avgTokens === null,
   },
   {
     key: "cost",
-    label: "Avg cost",
+    label: "Avg agent cost",
     betterDirection: "lower",
     render: (c) => <span className="tabular-nums text-[12px] text-foreground">{fmtCost(c.avgCostUsd)}</span>,
     raw: (c) => c.avgCostUsd || Infinity,
@@ -172,7 +163,7 @@ export function MetricComparison({ configs }: { configs: ConfigSummary[] }) {
     <div className="rounded-lg border border-rule bg-background overflow-hidden">
       <div className="px-5 py-3 border-b border-rule">
         <h2 className="text-[13px] font-semibold text-foreground">Config comparison</h2>
-        <p className="text-[11px] text-fg-faint mt-0.5">Best value per row marked ↑ — lower is better for time, corrections, cost, hallucinations.</p>
+        <p className="text-[11px] text-fg-faint mt-0.5">Best value per row marked ↑ — lower is better for duration and agent cost.</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full border-collapse">

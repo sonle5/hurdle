@@ -1,5 +1,5 @@
 import {
-  normalizePrintControllerTranscript,
+  decodeControllerJsonl,
   parseClaudeControllerMetadata,
 } from "../controller-transcript.mjs";
 import {
@@ -284,7 +284,7 @@ export function createClaudeCodeAdapter({
       return redactSecretBytes(value, secrets);
     },
     decodeControllerEvidence({ stdout, exitCode = null }) {
-      const transcript = normalizePrintControllerTranscript(stdout);
+      const { transcript, frames } = decodeControllerJsonl(stdout);
       const metadata = parseClaudeControllerMetadata(transcript) ?? {};
       const usage = metadata.usage && typeof metadata.usage === "object"
         ? metadata.usage
@@ -295,6 +295,14 @@ export function createClaudeCodeAdapter({
         : null;
       if (continuationHandle) continuationHandles.set(continuationHandle, sessionId);
       const operatorReason = claudeOperatorReason(metadata);
+      const toolIds = new Set();
+      const assistantFrames = frames.filter(frame => frame.message?.role === "assistant");
+      assistantFrames.forEach((frame, index) => {
+        if (!Array.isArray(frame.message.content)) return;
+        frame.message.content.forEach((block, blockIndex) => {
+          if (block?.type === "tool_use") toolIds.add(block.id || `${index}:${blockIndex}`);
+        });
+      });
       return deepFreeze({
         transcript,
         observedModel: metadata.model ?? null,
@@ -312,11 +320,13 @@ export function createClaudeCodeAdapter({
             outputTokens: usage.output_tokens ?? null,
             reportedCostUsd: metadata.total_cost_usd ?? null,
             turns: metadata.num_turns ?? null,
-            toolCalls: null,
+            toolCalls: assistantFrames.length ? toolIds.size : null,
           },
           adapter: {
             subtype: metadata.subtype ?? null,
             isError: metadata.is_error ?? null,
+            cacheReadInputTokens: usage.cache_read_input_tokens ?? null,
+            cacheCreationInputTokens: usage.cache_creation_input_tokens ?? null,
           },
         },
       });

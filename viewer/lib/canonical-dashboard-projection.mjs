@@ -8,6 +8,7 @@ function versionId(record) {
 }
 
 import { projectRunCost } from "./run-cost.mjs";
+import { projectAgentUsage, readTranscriptAgentUsage } from "./session-usage.mjs";
 
 import { projectEvaluatorSourceSummaries } from "./canonical-results.mjs";
 
@@ -86,7 +87,7 @@ function note(record) {
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
-function projectSummary(record) {
+function projectSummary(record, usage = projectAgentUsage(record)) {
   const snapshot = record.snapshot;
   const conditionId = snapshot.condition.id;
   const condition = CONDITIONS[conditionId] ?? {
@@ -124,18 +125,14 @@ function projectSummary(record) {
     durationSec: Number.isSafeInteger(execution?.durationMs)
       ? Math.round(execution.durationMs / 1_000)
       : 0,
-    corrections: 0,
     passed: passed(verdict),
     result: verdict,
     rawResult: verdict,
     auditVerdict: record.judge?.kind === "result" ? record.judge.outcome : null,
     manualOverride: null,
-    toolCalls: Number.isFinite(metrics.toolCalls) ? metrics.toolCalls : null,
-    totalTokensIn: Number.isFinite(metrics.totalTokens)
-      ? metrics.totalTokens
-      : Number.isFinite(metrics.inputTokens)
-        ? metrics.inputTokens
-        : 0,
+    toolCalls: usage.toolCalls,
+    totalTokens: usage.totalTokens,
+    tokenUsage: usage.tokenUsage,
     ...projectRunCost(record),
     mcpCalls: Number.isFinite(metrics.mcpCalls) ? metrics.mcpCalls : 0,
     skillInjections: Number.isFinite(metrics.skillInjections) ? metrics.skillInjections : 0,
@@ -304,12 +301,13 @@ async function togetherRequests(reader, record) {
 }
 
 async function projectDetail(reader, record) {
-  const summary = projectSummary(record);
   const resources = record.snapshot.condition.definition?.resources ?? {};
   const [sessionJsonl, requestProjection] = await Promise.all([
     transcript(reader, record),
     togetherRequests(reader, record),
   ]);
+  const summary = projectSummary(record, projectAgentUsage(record,
+    readTranscriptAgentUsage(sessionJsonl, record.snapshot.agent.adapterId)));
   return {
     ...summary,
     readOnly: true,
@@ -351,6 +349,26 @@ export function createCanonicalDashboardProjection(reader) {
     return reader.listRuns({ limit: 10_000 });
   }
 
+  // Cache small recovered summaries, not transcripts. New records already carry
+  // full usage; older records are read sequentially to bound evidence I/O.
+  const usageCache = new Map();
+  async function summary(record) {
+    let usage = projectAgentUsage(record);
+    if (record.state === "complete" && (!usage.tokenUsage || usage.toolCalls === null)) {
+      const key = `${record.id}:${record.evidence?.transcript?.key}`;
+      let observed = usageCache.get(key);
+      if (!observed) {
+        observed = readTranscriptAgentUsage(await transcript(reader, record), record.snapshot.agent.adapterId);
+        if (observed.tokenUsage || observed.toolCalls !== null) {
+          if (usageCache.size >= 1_024) usageCache.delete(usageCache.keys().next().value);
+          usageCache.set(key, observed);
+        }
+      }
+      usage = projectAgentUsage(record, observed);
+    }
+    return projectSummary(record, usage);
+  }
+
   return Object.freeze({
     async listVersions() {
       const byId = new Map();
@@ -366,9 +384,11 @@ export function createCanonicalDashboardProjection(reader) {
     },
 
     async listSessions(experimentVersion) {
-      return Object.freeze((await records())
-        .filter((record) => versionId(record) === experimentVersion)
-        .map(projectSummary));
+      const sessions = [];
+      for (const record of (await records()).filter(record => versionId(record) === experimentVersion)) {
+        sessions.push(await summary(record));
+      }
+      return Object.freeze(sessions);
     },
 
     async findSession(sessionId) {
