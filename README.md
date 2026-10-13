@@ -1,57 +1,83 @@
 ![Hurdle. Test how Claude Code and Codex use your API, SDK, or docs.](https://cdn.jsdelivr.net/npm/hurdle@0.2.9/docs/assets/readme-hero.png)
 
-# Hurdle — Together Agent Evals
+# Hurdle
 
 Evaluate Claude Code and Codex on real tasks. Score results and inspect transcripts,
 API calls, tool use, and artifacts in the results viewer.
 
 ## Quick start
 
-Requires Node.js 22.13+ and Claude Code.
+Install Node.js 22.13+ and Claude Code, then create an evaluation:
 
 ```sh
 mkdir my-evals && cd my-evals
 npx hurdle init
 ```
 
-Set `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in `.env.local`.
-For subscription access, generate a token with `claude setup-token`.
+Add your Anthropic API key to `.env.local`:
+
+```dotenv
+ANTHROPIC_API_KEY=your-api-key
+```
+
+Check readiness, run the starter, and open the results viewer:
 
 ```sh
 npx hurdle validate
 npx hurdle run --view
 ```
 
-Results are saved in `.hurdle/`. Local execution is not a security sandbox;
-use trusted tasks and keep credentials out of version control. Agent usage may be billed.
+Local execution is not a security sandbox. Use trusted tasks and keep `.env.local`
+out of version control. Agent usage may be billed.
 
-Check your installed version with `npx hurdle --version` (or `npx hurdle version`).
+Results are saved in `.hurdle/`. Reopen them with `npx hurdle view`.
 
-For Codex, install its CLI, use `npx hurdle init --agent codex`, and set `OPENAI_API_KEY` instead.
-See [authoring](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/authoring.md) for other authentication options.
+## Choose an agent
 
-Starters pin Claude Opus 5.5 or GPT-6.1 Sol with medium reasoning effort.
-Use `init --model MODEL --effort LEVEL` to choose another configuration, or
-`run --model MODEL` to override the selected runner’s model for one run.
-Use `models --agent claude-code` or `models --agent codex` for up to 10 recent
-text/code choices. Add `--all` for the full catalog.
+| Agent | Create a starter | Credential in `.env.local` |
+| --- | --- | --- |
+| Claude Code | `npx hurdle init` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` |
+| Codex | `npx hurdle init --agent codex` | `OPENAI_API_KEY` |
 
-## Together sandbox
+Install the selected agent CLI. Generate a Claude subscription token with `claude setup-token`.
 
-In a new project, add `TOGETHER_API_KEY` and your agent credentials to `.env.local`:
+Starters use Opus 5.5 or GPT-6.1 Sol with medium effort. Discover other models:
 
 ```sh
-npx hurdle init --example together-api
-npx hurdle setup --yes
-npx hurdle run --view
+npx hurdle models --agent claude-code
+npx hurdle models --agent codex
 ```
 
-Setup builds or reuses a Together snapshot. Sandbox and API usage may be billed.
-For E2B, add `E2B_API_KEY` and use `npx hurdle setup --sandbox e2b --yes`.
-See [setup](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/sandbox-setup.md) for existing templates and Postgres.
+See [authoring](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/authoring.md)
+for authentication options, model overrides, and reasoning effort.
 
-For an existing Postgres database, set `HURDLE_RESULT_STORE_DATABASE_URL` in `.env.local`,
-then run `npx hurdle setup --store postgres`.
+## Try the Together API
+
+Create a Together API key:
+
+1. Sign in to [Together](https://api.together.ai) and select your project.
+2. Open [API Keys](https://api.together.ai/settings/projects/~current/api-keys),
+   click **Create key**, name it `hurdle-evals`, then click **Create Key**.
+3. Copy the key immediately (it's shown only once) and add it to `.env.local`
+   alongside your agent credentials:
+
+```dotenv
+TOGETHER_API_KEY=your-together-api-key
+```
+
+Run the API example in Together Sandbox and inspect captured HTTP activity:
+
+```sh
+npx hurdle init api-evals --example together-api
+npx hurdle setup api-evals --yes
+npx hurdle run api-evals --view
+```
+
+The agent lists models, makes a short completion, and saves `completion.json`.
+Setup builds or reuses a sandbox image. Sandbox and API usage may be billed.
+
+See [sandbox and storage setup](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/sandbox-setup.md)
+for E2B, existing images, and Postgres.
 
 ## Tasks and checks
 
@@ -87,7 +113,8 @@ export default defineChecks((run) => {
 });
 ```
 
-Score with `code`, an LLM `judge`, or `hybrid` checks.
+Score with `code`, an LLM `judge`, or `hybrid` checks. See
+[authoring](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/authoring.md) to write your own Suite and Tasks.
 
 ## From source
 
