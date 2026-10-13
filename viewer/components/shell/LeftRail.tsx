@@ -6,8 +6,7 @@ import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { Activity, FileText, GitCompareArrows } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { VersionCombobox } from "@/components/ui/VersionCombobox";
-import { ThemeToggle } from "./ThemeToggle";
-import { TogetherCredit } from "./TogetherCredit";
+import { SidebarFooter } from "./SidebarFooter";
 import { SidebarToggle } from "./ResizableSidebarShell";
 
 export type RailFilters = {
@@ -322,10 +321,7 @@ export function LeftRail({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-rule px-5 py-4">
-        <TogetherCredit />
-        <ThemeToggle />
-      </div>
+      <SidebarFooter />
     </aside>
   );
 }

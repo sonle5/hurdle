@@ -253,10 +253,10 @@ html.theme-changing *::after {
 /* The desktop resizable rail is removed from layout below Tailwind's `lg`
    breakpoint so the content panel keeps the full viewport width on mobile. */
 @media (max-width: 1023px) {
-  #app-rail,
-  #app-rail-resizer,
-  #session-transcript-rail,
-  #session-transcript-resizer {
+  #app-shell-rail,
+  #app-shell-resizer,
+  #session-shell-rail,
+  #session-shell-resizer {
     display: none !important;
   }
 }

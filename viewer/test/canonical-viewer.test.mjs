@@ -111,6 +111,7 @@ test("the Viewer follows the system theme by default and exposes a three-state c
   const layout = source("../app/layout.tsx");
   const sessionSidebar = source("../components/SessionSidebar.tsx");
   const leftRail = source("../components/shell/LeftRail.tsx");
+  const sidebarFooter = source("../components/shell/SidebarFooter.tsx");
   const themeToggle = source("../components/shell/ThemeToggle.tsx");
 
   assert.doesNotMatch(layout, /dark h-full antialiased/);
@@ -119,8 +120,9 @@ test("the Viewer follows the system theme by default and exposes a three-state c
   assert.match(layout, /: 'system'/);
   assert.match(layout, /prefers-color-scheme: dark/);
   assert.match(layout, /preference\.addEventListener\('change', apply\)/);
-  assert.match(sessionSidebar, /<ThemeToggle \/>/);
-  assert.match(leftRail, /<ThemeToggle \/>/);
+  assert.match(sessionSidebar, /<SidebarFooter \/>/);
+  assert.match(leftRail, /<SidebarFooter \/>/);
+  assert.match(sidebarFooter, /<ThemeToggle \/>/);
   assert.match(themeToggle, /useState<ThemeChoice>\("system"\)/);
   assert.match(themeToggle, /value: "light"/);
   assert.match(themeToggle, /value: "system"/);
@@ -159,6 +161,7 @@ test("the app shell pins the rail footer while only the content pane scrolls", (
   const shell = source("../components/shell/ResizableAppShell.tsx");
   const sidebarShell = source("../components/shell/ResizableSidebarShell.tsx");
   const rail = source("../components/shell/LeftRail.tsx");
+  const footer = source("../components/shell/SidebarFooter.tsx");
   const credit = source("../components/shell/TogetherCredit.tsx");
 
   assert.match(layout, /<body className="h-full overflow-hidden flex flex-col">/);
@@ -173,8 +176,8 @@ test("the app shell pins the rail footer while only the content pane scrolls", (
   assert.equal((rail.match(/hidden h-full w-full/g) ?? []).length, 2);
   assert.doesNotMatch(rail, /sticky top-0/);
   assert.match(
-    rail,
-    /flex flex-wrap items-center justify-between gap-2 border-t border-rule px-5 py-4/,
+    footer,
+    /flex shrink-0 flex-wrap items-center justify-between/,
   );
   assert.match(credit, /inline-flex items-center gap-2 text-\[11px\]/);
   assert.match(credit, /src="\/together-logo-light\.png"[\s\S]*dark:hidden/);
@@ -313,16 +316,6 @@ test("button feedback is immediate and has no press movement", () => {
     styles,
     /button,\s*\n\s*button \*[\s\S]*transition-duration: 0s !important;[\s\S]*transition-delay: 0s !important;/,
   );
-});
-
-test("token metrics use their original independent tooltips", () => {
-  const tokens = source("../components/TokensDisplay.tsx");
-
-  assert.match(tokens, /function TokenItem/);
-  assert.match(tokens, /<TooltipProvider delay=\{0\}>/);
-  assert.match(tokens, /<TooltipContent>\{label\}<\/TooltipContent>/);
-  assert.doesNotMatch(tokens, /createHandle|tooltipHandle|payload=|closeDelay|timeout=/);
-  assert.equal((tokens.match(/<TokenItem /g) ?? []).length, 4);
 });
 
 test("the check-code drawer resizes from its left edge", () => {

@@ -214,10 +214,11 @@ test("help shows project-specific examples without credentials and safely quotes
   f.file("my evals/smoke test/example.suite.mjs");
   mkdirSync(join(f.root, ".env.local"));
   assert.equal(await main(["help", "setup"], f.io), 0);
-  assert.match(f.stdout(), /Available Suites/);
-  assert.ok(f.stdout().includes(`Together sandbox (default):\n    ${sourceExecutable} setup 'smoke test'\n`));
+  assert.doesNotMatch(f.stdout(), /Available Suites/);
+  assert.ok(f.stdout().includes(`${sourceExecutable} setup 'smoke test'`));
+  assert.ok(f.stdout().includes(`${sourceExecutable} setup 'smoke test' --sandbox e2b`));
   assert.ok(f.stdout().includes(`${sourceExecutable} setup --store postgres`));
-  assert.match(f.stdout(), /\n\n  Postgres results \(separate step\):/);
+  assert.ok(f.stdout().includes(`${sourceExecutable} run 'smoke test' --view`));
   assert.equal(f.stderr(), "");
   assert.equal(existsSync(join(f.root, ".hurdle")), false);
 });

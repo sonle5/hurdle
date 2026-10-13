@@ -5,8 +5,7 @@ import type { ParsedMessage } from "@/lib/sessions";
 import Link from "next/link";
 import { Activity, User, Bot, Terminal, FileText, Pencil, Search, Globe, Zap, ListChecks, CheckCircle, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ThemeToggle } from "@/components/shell/ThemeToggle";
-import { TogetherCredit } from "@/components/shell/TogetherCredit";
+import { SidebarFooter } from "@/components/shell/SidebarFooter";
 import { SidebarToggle } from "@/components/shell/ResizableSidebarShell";
 
 const toolIcons: Record<string, typeof Terminal> = {
@@ -97,10 +96,7 @@ export function SessionSidebar({ messages, collapsed, onCollapsedChange }: {
         </div>
       </div>
 
-      <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-rule px-4 py-3">
-        <TogetherCredit />
-        <ThemeToggle />
-      </div>
+      <SidebarFooter />
     </div>
   );
 }

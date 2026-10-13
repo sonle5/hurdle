@@ -2,7 +2,8 @@ import { RunCost } from "@/components/RunCost";
 import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Package, Terminal } from "lucide-react";
+import { AgentLogo, type AgentCode } from "@/components/AgentLogo";
 import { TogetherRequestsCard } from "@/components/TogetherRequestsCard";
 import { SessionDetailTabs } from "@/components/SessionDetailTabs";
 import { SessionReviewSummary } from "@/components/SessionReviewSummary";
@@ -118,12 +119,29 @@ function formatRequestedResolved(entry: unknown): string | null {
   return resolved || requested;
 }
 
-function toolVersionItems(raw: unknown): ToolVersionItem[] {
+function ModelDetails({ requested, observed }: { requested: string | null; observed: string | null }) {
+  const requestedModel = readString(requested);
+  const observedModel = readString(observed);
+  const model = observedModel || requestedModel;
+  if (!model) return <span className="text-fg-muted">Not recorded</span>;
+  return (
+    <span className="inline-flex flex-wrap items-baseline gap-x-2 gap-y-1">
+      <span className="font-mono text-sm break-all">{model}</span>
+      {!observedModel ? (
+        <span className="text-xs text-fg-muted">requested</span>
+      ) : requestedModel && requestedModel !== observedModel ? (
+        <span className="text-xs text-fg-muted">requested <span className="font-mono break-all">{requestedModel}</span></span>
+      ) : null}
+    </span>
+  );
+}
+
+function toolVersionItems(raw: unknown, agentName: string): ToolVersionItem[] {
   if (!raw || typeof raw !== "object") return [];
   const record = raw as Record<string, unknown>;
   const items: ToolVersionItem[] = [];
   const runner = readString(record.runner);
-  if (runner) items.push({ key: "runner", label: "Runner", value: runner });
+  if (runner) items.push({ key: "runner", label: agentName || "Agent CLI", value: runner });
   for (const [key, label] of [["node", "Node"], ["python", "Python"], ["pip", "pip"]]) {
     const value = readString(record[key]);
     if (value) items.push({ key, label, value });
@@ -147,12 +165,27 @@ function toolVersionItems(raw: unknown): ToolVersionItem[] {
   return items;
 }
 
-function ToolVersionBadges({ items }: { items: ToolVersionItem[] }) {
+function ToolVersionIcon({ tool, agent }: { tool: string; agent: string }) {
+  if (tool === "runner") {
+    if (["CC", "CDX", "OC", "Pi"].includes(agent)) {
+      return <AgentLogo agent={agent as AgentCode} className="h-3.5 w-3.5" />;
+    }
+    return <Terminal aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />;
+  }
+  if (tool === "node" || tool === "python") {
+    return <img src={`/${tool}-logo.svg`} alt="" width={14} height={14} className="h-3.5 w-3.5 shrink-0" />;
+  }
+  if (tool === "pip") return <Package aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />;
+  return null;
+}
+
+function ToolVersionBadges({ items, agent }: { items: ToolVersionItem[]; agent: string }) {
   if (items.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1.5">
       {items.map((item) => (
-        <span key={item.key} className="inline-flex items-center gap-1 rounded-sm border border-rule bg-surface px-1.5 py-0.5 text-[11px] text-fg-muted">
+        <span key={item.key} className="inline-flex items-center gap-1.5 rounded-sm border border-rule bg-surface px-1.5 py-0.5 text-[11px] text-fg-muted">
+          <ToolVersionIcon tool={item.key} agent={agent} />
           <span className="font-medium text-foreground">{item.label}</span>
           <span className="font-mono">{item.value}</span>
         </span>
@@ -188,7 +221,7 @@ export default async function SessionPage({
   const sidebarLayout = readSidebarLayout({ getItem: key => cookieStore.get(key)?.value ?? null });
   const dbSession = await getSessionById(id);
   if (!dbSession) notFound();
-  const toolVersions = toolVersionItems(dbSession.toolVersions);
+  const toolVersions = toolVersionItems(dbSession.toolVersions, dbSession.agentName);
 
   const statusKind = statusFromResult(dbSession.result, dbSession.passed);
   const dbSessionRecord = dbSession as Record<string, unknown>;
@@ -214,10 +247,11 @@ export default async function SessionPage({
               <StatusBadge kind={statusKind} size="md" />
             </div>
             <div className="text-sm"><span className="text-fg-muted mr-2">Execution:</span><ExecutionDetails runtime={dbSession.runtime} /></div>
+            <div className="text-sm"><span className="text-fg-muted mr-2">Model:</span><ModelDetails requested={dbSession.model} observed={dbSession.modelResolved} /></div>
             {dbSession.durationSec > 0 && <p className="text-sm text-fg-muted">Duration: {Math.floor(dbSession.durationSec / 60)}m {dbSession.durationSec % 60}s</p>}
             {dbSession.toolCalls != null && <p className="text-sm text-fg-muted">Tool calls: {dbSession.toolCalls}</p>}
             <p className="text-sm text-fg-muted">Agent cost: <RunCost value={dbSession.costUsd} source={dbSession.costSource} /></p>
-            <ToolVersionBadges items={toolVersions} />
+            <ToolVersionBadges items={toolVersions} agent={dbSession.agent} />
             {dbSession.note && <p className="text-sm text-fg-muted">{dbSession.note}</p>}
             <CanonicalSessionReview prompt={dbSession.prompt} checks={canonicalStoredChecks(dbSessionRecord.storedChecks)} judge={canonicalJudgeReview(dbSessionRecord.deepAudit)} runId={readString(dbSessionRecord.canonicalRunId)} evaluatorSources={canonicalEvaluatorSources(dbSessionRecord.evaluatorSources)} />
             {togetherRequests.length > 0 && (
@@ -502,17 +536,15 @@ export default async function SessionPage({
                         <TableCell className="text-fg-muted w-36 font-medium">Execution</TableCell>
                         <TableCell className="text-sm"><ExecutionDetails runtime={dbSession.runtime} /></TableCell>
                       </TableRow>
-                      {stats.model && (
-                        <TableRow>
-                          <TableCell className="text-fg-muted w-36 font-medium">Model</TableCell>
-                          <TableCell className="font-mono text-sm">{stats.model}</TableCell>
-                        </TableRow>
-                      )}
+                      <TableRow>
+                        <TableCell className="text-fg-muted w-36 font-medium">Model</TableCell>
+                        <TableCell><ModelDetails requested={dbSession.model} observed={dbSession.modelResolved} /></TableCell>
+                      </TableRow>
                       {toolVersions.length > 0 && (
                         <TableRow>
                           <TableCell className="text-fg-muted w-36 font-medium">Tool Versions</TableCell>
                           <TableCell>
-                            <ToolVersionBadges items={toolVersions} />
+                            <ToolVersionBadges items={toolVersions} agent={dbSession.agent} />
                           </TableCell>
                         </TableRow>
                       )}
@@ -600,8 +632,8 @@ export default async function SessionPage({
                       <TableRow>
                         <TableCell className="text-fg-muted font-medium">Agent tokens</TableCell>
                         <TableCell>
-                          <div className="flex flex-col gap-2">
-                            <div className="tabular-nums"><AgentTokens total={dbSession.totalTokens} usage={dbSession.tokenUsage} />{dbSession.totalTokens !== null && " total"}</div>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span className="shrink-0 tabular-nums"><AgentTokens total={dbSession.totalTokens} usage={dbSession.tokenUsage} showTooltip={false} />{dbSession.totalTokens !== null && " total"}</span>
                             {dbSession.tokenUsage && <TokensDisplay tokens={dbSession.tokenUsage} />}
                           </div>
                         </TableCell>
@@ -624,9 +656,9 @@ export default async function SessionPage({
 
                 {toolsUsed.length > 0 && (
                   <details open className="group">
-                    <summary className="flex items-center justify-between py-3 cursor-pointer select-none border-b border-rule">
+                    <summary className="flex min-h-8 items-center justify-between cursor-pointer select-none">
                       <h2 className="text-sm font-medium">Tool Breakdown</h2>
-                      <span className="text-xs text-fg-muted tabular-nums">{toolsUsed.length} tools</span>
+                      <span className="text-xs text-fg-muted tabular-nums">{toolsUsed.length} {toolsUsed.length === 1 ? "tool" : "tools"}</span>
                     </summary>
                     <div className="pt-3">
                       <div className="rounded-lg border border-rule overflow-hidden">

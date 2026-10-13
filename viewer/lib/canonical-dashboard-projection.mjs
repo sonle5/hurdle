@@ -1,6 +1,7 @@
+import { formatVersionDateRange, UNVERSIONED_ID } from "./version-date.mjs";
+
 // Presentation-only bucket: default CLI runs legitimately have no version label.
 // Escape an explicit matching prefix so user labels cannot collide with it.
-const UNVERSIONED_ID = "__tae_unversioned__";
 function versionId(record) {
   const value = record.experimentVersion;
   return value == null ? UNVERSIONED_ID
@@ -157,8 +158,8 @@ function versionFromRecord(record) {
   const timestamp = completeAt(record);
   return {
     id: versionId(record),
-    name: record.experimentVersion ?? "Unversioned runs",
-    description: "Canonical Run Records",
+    name: record.experimentVersion ?? formatVersionDateRange(timestamp) ?? "Date unavailable",
+    description: null,
     kind: "experiment",
     runAt: timestamp,
     createdAt: timestamp,
@@ -373,9 +374,17 @@ export function createCanonicalDashboardProjection(reader) {
     async listVersions() {
       const byId = new Map();
       for (const record of await records()) {
-        const current = byId.get(versionId(record));
-        if (!current || Date.parse(completeAt(record)) > Date.parse(current.runAt)) {
-          byId.set(versionId(record), versionFromRecord(record));
+        const id = versionId(record);
+        const timestamp = completeAt(record);
+        const current = byId.get(id);
+        if (!current || Date.parse(timestamp) > Date.parse(current.runAt)) {
+          byId.set(id, versionFromRecord(record));
+        }
+        if (id === UNVERSIONED_ID) {
+          const version = byId.get(id);
+          const first = current && Date.parse(current.createdAt) < Date.parse(timestamp) ? current.createdAt : timestamp;
+          version.createdAt = first;
+          version.name = formatVersionDateRange(first, version.runAt) ?? "Date unavailable";
         }
       }
       return Object.freeze([...byId.values()].sort((left, right) => (

@@ -12,19 +12,17 @@ const formatTokens = (n: number): string => {
 
 function TokenItem({ icon: Icon, value, label }: { icon: typeof ArrowUp; value: number; label: string }) {
   return (
-    <Tooltip>
-      <TooltipTrigger className="inline-flex items-center gap-1 cursor-default">
-        <Icon className="h-3 w-3 text-muted-foreground" />
-        <span className="text-fg-muted text-xs">{label.replace(" tokens", "")}</span>
-        {formatTokens(value)}
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <span className="inline-flex items-center gap-1 whitespace-nowrap" aria-label={`${label}: ${value.toLocaleString("en-US")} tokens`}>
+      <Icon className="h-3 w-3 text-muted-foreground" aria-hidden />
+      <span className="text-fg-muted">{label}</span>
+      {formatTokens(value)}
+    </span>
   );
 }
 
-export function AgentTokens({ total, usage }: { total: number | null; usage: TokenUsage | null }) {
-  if (total === null) return <span title="Agent token usage is unavailable">—</span>;
+export function AgentTokens({ total, usage, showTooltip = true }: { total: number | null; usage: TokenUsage | null; showTooltip?: boolean }) {
+  if (total === null) return <span aria-label="Agent token usage is unavailable">—</span>;
+  if (!showTooltip) return <span className="tabular-nums" aria-label={`${total.toLocaleString("en-US")} total agent tokens`}>{formatTokens(total)}</span>;
   return (
     <TooltipProvider delay={0}>
       <Tooltip>
@@ -46,13 +44,11 @@ export function AgentTokens({ total, usage }: { total: number | null; usage: Tok
 
 export function TokensDisplay({ tokens }: { tokens: { input: number; output: number; cacheRead: number; cacheCreate: number } }) {
   return (
-    <TooltipProvider delay={0}>
-      <span className="inline-flex items-center gap-3 flex-wrap tabular-nums text-sm">
-        <TokenItem icon={ArrowUp} value={tokens.input} label="Uncached input tokens" />
-        <TokenItem icon={ArrowDown} value={tokens.output} label="Output tokens" />
-        <TokenItem icon={BookOpen} value={tokens.cacheRead} label="Cache read tokens" />
-        <TokenItem icon={PenLine} value={tokens.cacheCreate} label="Cache write tokens" />
-      </span>
-    </TooltipProvider>
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 tabular-nums text-xs">
+      <TokenItem icon={ArrowUp} value={tokens.input} label="Uncached input" />
+      <TokenItem icon={ArrowDown} value={tokens.output} label="Output" />
+      <TokenItem icon={BookOpen} value={tokens.cacheRead} label="Cache read" />
+      <TokenItem icon={PenLine} value={tokens.cacheCreate} label="Cache write" />
+    </span>
   );
 }

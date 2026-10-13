@@ -188,14 +188,29 @@ test("ordinary unversioned runs have a selectable dashboard bucket without rewri
     ...fixtureReader(record), async listRuns() { return [record, explicit]; },
   });
   const versions = await projection.listVersions();
-  const unversioned = versions.find(version => version.name === "Unversioned runs");
+  const unversioned = versions.find(version => version.id === "__tae_unversioned__");
   assert.ok(unversioned?.id, "Home needs a nonempty selectable version ID");
+  assert.equal(unversioned.name, "Aug 21, 2026");
   const sessions = await projection.listSessions(unversioned.id);
   assert.deepEqual(sessions.map(session => session.canonicalRunId), [record.id]);
   assert.equal(sessions[0].version, unversioned.id);
   assert.equal(sessions[0].result, record.verdict);
   assert.equal(new Set(versions.map(version => version.id)).size, 2);
+  assert.equal(versions.find(version => version.id !== unversioned.id).name, explicit.experimentVersion);
   assert.equal(record.experimentVersion, null);
+
+  const later = structuredClone(record);
+  later.id = "run_44444444-4444-4444-8444-444444444444";
+  later.completedAt = "2026-08-23T03:00:00.000Z";
+  const ranged = createCanonicalDashboardProjection({
+    ...fixtureReader(record), async listRuns() { return [later, explicit, record]; },
+  });
+  const range = (await ranged.listVersions()).find(version => version.id === unversioned.id);
+  assert.equal(range.name.replace(/\s+/g, " "), "Aug 21 – 23, 2026");
+  assert.equal(range.runAt, later.completedAt);
+  assert.equal(range.createdAt, record.completedAt);
+  assert.deepEqual((await ranged.listSessions(range.id)).map(session => session.canonicalRunId), [later.id, record.id]);
+  assert.equal(later.experimentVersion, null);
 });
 
 function fixtureReader(record = completeRecord) {
@@ -238,7 +253,7 @@ test("canonical local runs list through the mature dashboard without copying or 
   assert.deepEqual(await projection.listVersions(), [{
     id: "viewer-fixture-v1",
     name: "viewer-fixture-v1",
-    description: "Canonical Run Records",
+    description: null,
     kind: "experiment",
     runAt: "2026-08-21T10:00:05.000Z",
     createdAt: "2026-08-21T10:00:05.000Z",

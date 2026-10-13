@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { ClipboardCheck, Database, MessagesSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type SessionTab = "review" | "evidence" | "transcript";
@@ -10,7 +9,6 @@ type TabSpec = {
   key: SessionTab;
   label: string;
   count: number;
-  icon: typeof ClipboardCheck;
 };
 
 const TAB_KEYS = new Set<SessionTab>(["review", "evidence", "transcript"]);
@@ -75,9 +73,9 @@ export function SessionDetailTabs({
   }, []);
 
   const tabs: TabSpec[] = [
-    { key: "review", label: "Review", count: reviewCount, icon: ClipboardCheck },
-    { key: "evidence", label: "Evidence", count: evidenceCount, icon: Database },
-    { key: "transcript", label: "Transcript", count: transcriptCount, icon: MessagesSquare },
+    { key: "review", label: "Review", count: reviewCount },
+    { key: "evidence", label: "Evidence", count: evidenceCount },
+    { key: "transcript", label: "Transcript", count: transcriptCount },
   ];
 
   const panels: Record<SessionTab, ReactNode> = {
@@ -92,10 +90,9 @@ export function SessionDetailTabs({
         <div
           role="tablist"
           aria-label="Session sections"
-          className="grid h-11 w-full grid-cols-3 rounded-lg border border-rule bg-surface/60 p-1"
+          className="flex h-11 gap-5 border-b border-rule sm:gap-7"
         >
           {tabs.map((tab) => {
-            const Icon = tab.icon;
             const selected = active === tab.key;
             return (
               <button
@@ -107,14 +104,13 @@ export function SessionDetailTabs({
                 id={`session-${tab.key}-tab`}
                 onClick={() => selectTab(tab.key)}
                 className={cn(
-                  "inline-flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-[color,background-color,box-shadow] duration-150",
+                  "-mb-px inline-flex min-w-0 items-center justify-center gap-1.5 border-b-2 px-0.5 text-xs font-medium transition-colors duration-150",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30",
                   selected
-                    ? "bg-background text-foreground ring-1 ring-foreground/[0.06]"
-                    : "text-fg-muted hover:bg-background/60 hover:text-foreground",
+                    ? "border-foreground text-foreground"
+                    : "border-transparent text-fg-muted hover:text-foreground",
                 )}
               >
-                <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 <span className="truncate">{tab.label}</span>
                 <span
                   className={cn(

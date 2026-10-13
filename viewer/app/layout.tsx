@@ -3,12 +3,10 @@ import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 
+// Replace app/icon.svg to change the favicon; Next generates its metadata and URL.
 export const metadata: Metadata = {
-  title: "Hurdle — Together Agent Evals",
+  title: "Hurdle",
   description: "Inspect canonical Run Records from an agent evaluation Result Store",
-  icons: {
-    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90' font-weight='bold' font-family='system-ui'>h</text></svg>",
-  },
 };
 
 // Resolve the saved preference before the first paint. With no saved choice,

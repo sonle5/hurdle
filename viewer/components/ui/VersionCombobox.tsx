@@ -5,6 +5,7 @@ import { Combobox } from "@base-ui/react/combobox";
 import { Check, ChevronsUpDown, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { evalVersionDisplayName } from "@/lib/version-display";
+import { formatVersionDateRange, UNVERSIONED_ID } from "@/lib/version-date.mjs";
 
 export type VersionComboboxOption = {
   id: string;
@@ -17,13 +18,6 @@ export type VersionComboboxOption = {
 
 type Item = { value: string; label: string; sub: string | null; description: string | null };
 type ItemGroup = { value: string; items: Item[] };
-
-const versionDateFormatter = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-  timeZone: "UTC",
-});
 
 function isWeeklyLike(option: VersionComboboxOption): boolean {
   if (option.kind) return option.kind === "weekly";
@@ -42,8 +36,7 @@ function formatVersionDate(option: VersionComboboxOption): string | null {
   const value = option.runAt ?? option.createdAt ?? (/^\d{4}-\d{2}-\d{2}$/.test(option.id) ? option.id : null);
   if (!value) return null;
 
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : versionDateFormatter.format(date);
+  return formatVersionDateRange(value);
 }
 
 function toItem(option: VersionComboboxOption): Item {
@@ -54,7 +47,7 @@ function toItem(option: VersionComboboxOption): Item {
   return {
     value: option.id,
     label: hasReadableName ? name : (date ?? "Date unavailable"),
-    sub: hasReadableName ? date : null,
+    sub: hasReadableName && option.id !== UNVERSIONED_ID && name !== date ? date : null,
     description: option.description?.trim() || null,
   };
 }

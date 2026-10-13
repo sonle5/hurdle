@@ -206,33 +206,13 @@ const HELP_TEXT = Object.freeze({
     "  hurdle setup [suite] [options]",
     "",
     "Configure the project Runtime: sandbox execution or result storage.",
-    "Use separate commands for sandbox and storage setup.",
-    "Saves .hurdle/runtime/default.json for validate, run, and view.",
-    "The project Runtime is the shared default for all Suites.",
-    "Sandbox setup defaults to Together; runs without a saved Runtime use Local.",
-    "",
-    "Sandbox setup checks credentials and reuses or builds an Agent image.",
-    "No Agent runs. Add --yes to build a missing image without prompting.",
-    "",
-    "Postgres URL (.env.local):",
-    '  HURDLE_RESULT_STORE_DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE"',
-    "  Replace the placeholders with your provider's full URL and TLS options.",
-    "  File values override matching shell variables; echo does not show them.",
-    "",
-    "Postgres setup checks the connection and applies schema migrations.",
-    "It preserves execution settings and creates no database.",
-    "",
-    "Credentials come from .env.local or the environment.",
-    "Missing values are reported without prompting unless --interactive is used.",
     "",
     "Options:",
-    "  --sandbox e2b|together  Select the sandbox provider (default: together)",
+    "  --sandbox PROVIDER     together (default) or e2b",
     "  --snapshot ALIAS       Reuse a Together snapshot",
-    "  --template NAME        Reuse an E2B template with the Suite's Agent CLIs",
-    "",
-    "  --store postgres       Configure Postgres storage; preserve execution",
-    "",
-    "  --yes                  Build a missing snapshot or template without prompting",
+    "  --template NAME        Reuse an E2B template",
+    "  --store postgres       Configure Postgres storage separately",
+    "  --yes                  Allow a missing image to be built",
     "  --interactive          Prompt for credentials and build approval",
     "  --json                 Emit one JSON result",
     "  -h, --help             Show this help",
@@ -390,12 +370,18 @@ function projectSuiteHelp(command, cwd, selectedSuite = null) {
   const selection = example ? quoteCommandArgument(suiteSelection(example)) : "evals/example.suite.mjs";
   const suiteRows = suites.map(suite => `  ${suiteSelection(suite).padEnd(22)} ${suite.path}${suite.path === defaultPath ? "  (default)" : ""}`);
   const heading = example ? `Examples using ${suiteSelection(example)}:` : "Examples after creating a Suite with init:";
-  const examples = command === "setup" ? [
-    "  Together sandbox (default):", `    ${executable} setup ${selection}`, "",
-    "  E2B sandbox:", `    ${executable} setup ${selection} --sandbox e2b`, "",
-    "  Postgres results (separate step):", `    ${executable} setup --store postgres`, "",
-    "  Run with the saved runtime:", `    ${executable} run ${selection} --view`,
-  ] : [`  ${executable} ${command} ${selection}${command === "run" ? " --view" : " --offline"}`];
+  if (command === "setup") {
+    const examples = [
+      [`${executable} setup ${selection}`, "Together sandbox (default)"],
+      [`${executable} setup ${selection} --sandbox e2b`, "E2B sandbox"],
+      [`${executable} setup --store postgres`, "Postgres storage (separate step)"],
+      [`${executable} run ${selection} --view`, "Run the evaluation"],
+    ];
+    const width = Math.max(...examples.map(([command]) => command.length));
+    return ["", heading, ...examples.map(([command, label]) => `  ${command.padEnd(width)}  # ${label}`),
+      "", `List Suites: ${executable} suites`, ""].join("\n");
+  }
+  const examples = [`  ${executable} ${command} ${selection}${command === "run" ? " --view" : " --offline"}`];
   return ["", ...(suiteRows.length ? ["Available Suites (name / path):", ...suiteRows, ""] : []),
     heading, ...examples, "", `List Suites: ${executable} suites`, ""].join("\n");
 }

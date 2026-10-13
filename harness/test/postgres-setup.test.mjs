@@ -338,7 +338,6 @@ test("storage help and invalid combinations do not connect or configure a sandbo
   const f = fixture(t); const cli = createFrameworkCli(f.dependencies);
   assert.equal(await cli.main(["help", "setup"], f.io), 0);
   assert.match(f.output(), /--store postgres/);
-  assert.match(f.output(), /HURDLE_RESULT_STORE_DATABASE_URL="postgresql:\/\/USER:PASSWORD@HOST:5432\/DATABASE"/);
   for (const args of [["--store"], ["--store", "local"], ["--store", "postgres", "--store", "postgres"], ["--store", "postgres", "--sandbox", "e2b"], ["--store", "postgres", "--template", "custom:v1"]]) {
     assert.equal(await cli.main(["setup", ...args], f.io), 2, f.output());
   }
