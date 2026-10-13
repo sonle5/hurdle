@@ -34,17 +34,18 @@ export async function AppShell({
       defaultRailCollapsed={layout.collapsed}
     >
       <div className="flex-1 min-w-0">
-        <div className="px-4 sm:px-6 lg:px-8">
-          <Suspense>
-            <ContextBar
-              versionLabel={versionLabel}
-              agentLabel={agentLabel}
-              taskLabel={taskLabel}
-              sessionLabel={sessionLabel}
-            />
-          </Suspense>
-          <main className="py-6 lg:pl-8">{children}</main>
-        </div>
+        <Suspense>
+          <ContextBar
+            versionLabel={versionLabel}
+            agentLabel={agentLabel}
+            taskLabel={taskLabel}
+            sessionLabel={sessionLabel}
+          />
+        </Suspense>
+        {/* Same gutter and 1280px container as the top bar, on every page. */}
+        <main className="px-4 py-8 sm:px-6 lg:px-8">
+          <div className="mx-auto w-full max-w-7xl">{children}</div>
+        </main>
       </div>
     </ResizableAppShell>
   );

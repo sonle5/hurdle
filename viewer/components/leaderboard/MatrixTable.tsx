@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowDown, ArrowUp } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatDuration } from "@/lib/utils";
 import { PassRateBar } from "@/components/ui/PassRateBar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ExportMenu, type ExportFormat } from "@/components/ui/ExportMenu";
@@ -89,9 +89,7 @@ function aggregateAll(d: MatrixData): MatrixCell {
 }
 
 function fmtTime(sec: number) {
-  if (sec <= 0) return "—";
-  if (sec < 60) return `${sec}s`;
-  return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  return sec > 0 ? formatDuration(sec) : "—";
 }
 
 function fmtCost(usd: number) {
@@ -198,16 +196,16 @@ export function MatrixTable({ data }: { data: MatrixData }) {
   return (
     <TooltipProvider delay={120}>
     <div className="rounded-lg border border-rule bg-background overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-rule">
-        <div className="min-w-0">
-          <h2 className="text-[13px] font-semibold text-foreground">Pass rate by task × config</h2>
-          <p className="text-[11px] text-fg-faint mt-0.5">
-            Click a cell to drill in · hover a colored cell to preview fail reasons · unscored runs excluded.
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-rule">
+        <div className="min-w-0 flex-1 basis-64">
+          <h2 className="text-sm font-semibold text-foreground">Pass rate by task × config</h2>
+          <p className="text-[12px] text-fg-muted mt-0.5">
+            Click a cell to open its runs; hover one to see why runs failed. Unscored runs are excluded.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <MatrixSearch value={search} onChange={setSearch} />
-          <span className="text-[10px] tabular-nums text-fg-faint whitespace-nowrap">{grand.total} scored run{grand.total === 1 ? "" : "s"}</span>
+          <span className="text-[12px] tabular-nums text-fg-faint whitespace-nowrap">{grand.total} scored run{grand.total === 1 ? "" : "s"}</span>
           <ExportMenu filenameBase="leaderboard-matrix" onExport={handleExport} />
         </div>
       </div>
@@ -215,12 +213,12 @@ export function MatrixTable({ data }: { data: MatrixData }) {
       <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="bg-surface/60">
+            <tr>
               <Th
                 onClick={() => toggleSort("name")}
                 sortActive={sortKey === "name"}
                 sortDesc={sortDesc}
-                className="text-left pl-5 sticky left-0 bg-surface/60 z-10"
+                className="text-left pl-5 sticky left-0 bg-background z-10"
                 style={{ minWidth: 200 }}
               >
                 Task
@@ -261,7 +259,7 @@ export function MatrixTable({ data }: { data: MatrixData }) {
               const taskLinkInner = (
                 <>
                   <div className="text-[13px] font-medium text-foreground truncate">{t.label}</div>
-                  <div className="text-[10px] text-fg-faint tabular-nums">
+                  <div className="text-[11px] text-fg-faint tabular-nums">
                     {rowTotal.total} run{rowTotal.total === 1 ? "" : "s"}
                   </div>
                 </>
@@ -285,7 +283,7 @@ export function MatrixTable({ data }: { data: MatrixData }) {
                         </TooltipTrigger>
                         <TooltipContent side="right" sideOffset={6} className="max-w-md">
                           <div className="text-left">
-                            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] mb-1.5 opacity-60">
+                            <div className="text-[12px] font-medium mb-1.5 opacity-60">
                               Findings · {t.label}
                             </div>
                             <p className="text-[11px] leading-snug whitespace-pre-wrap">{t.findings.trim()}</p>
@@ -328,7 +326,7 @@ export function MatrixTable({ data }: { data: MatrixData }) {
                             </TooltipTrigger>
                             <TooltipContent side="top" sideOffset={6} className="max-w-xs">
                               <div className="text-left">
-                                <div className="text-[10px] font-semibold uppercase tracking-[0.08em] mb-1.5 opacity-60">
+                                <div className="text-[12px] font-medium mb-1.5 opacity-60">
                                   {failedCount}/{cell.total} failed
                                 </div>
                                 {cell.topFails && cell.topFails.length > 0 ? (
@@ -423,7 +421,7 @@ function Th({
   return (
     <th
       className={cn(
-        "px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-muted select-none cursor-pointer hover:text-foreground",
+        "px-3 py-2.5 text-[12px] font-medium text-fg-muted select-none cursor-pointer hover:text-foreground",
         className,
       )}
       style={style}

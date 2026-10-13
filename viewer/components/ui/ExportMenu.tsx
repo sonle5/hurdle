@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Menu } from "@base-ui/react/menu";
 import { ChevronDown, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type ExportFormat = "csv" | "json";
+
+const ITEM =
+  "flex w-full cursor-default select-none rounded-md px-3 py-1.5 text-left text-[12px] text-foreground outline-none data-[highlighted]:bg-surface";
 
 export function ExportMenu({
   filenameBase,
@@ -15,19 +18,7 @@ export function ExportMenu({
   onExport: (fmt: ExportFormat) => { mime: string; content: string };
   className?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
-
-  const trigger = async (fmt: ExportFormat) => {
+  const download = (fmt: ExportFormat) => {
     const { mime, content } = onExport(fmt);
     const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
@@ -38,39 +29,30 @@ export function ExportMenu({
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    setOpen(false);
   };
 
   return (
-    <div ref={ref} className={cn("relative", className)}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="inline-flex items-center gap-1 rounded-md border border-rule bg-background px-2 py-1 text-[11px] text-fg-muted hover:text-foreground transition-colors"
+    <Menu.Root>
+      <Menu.Trigger
+        className={cn(
+          "inline-flex h-7 items-center gap-1 rounded-md border border-rule bg-background px-2 text-[12px] text-fg-muted transition-colors hover:text-foreground data-[popup-open]:text-foreground",
+          className,
+        )}
       >
         <Download className="h-3 w-3" aria-hidden />
         Export
         <ChevronDown className="h-3 w-3" aria-hidden />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full mt-1 z-30 min-w-[120px] rounded-md border border-rule bg-background shadow-xs py-1"
-        >
-          <button
-            role="menuitem"
-            onClick={() => trigger("csv")}
-            className="block w-full px-3 py-1.5 text-left text-[11px] text-foreground hover:bg-surface"
-          >Download CSV</button>
-          <button
-            role="menuitem"
-            onClick={() => trigger("json")}
-            className="block w-full px-3 py-1.5 text-left text-[11px] text-foreground hover:bg-surface"
-          >Download JSON</button>
-        </div>
-      )}
-    </div>
+      </Menu.Trigger>
+      {/* Portalled, so a short card's overflow can't clip it; it flips above
+          the button when there's no room below. */}
+      <Menu.Portal>
+        <Menu.Positioner sideOffset={4} align="end" className="z-50 outline-none">
+          <Menu.Popup className="min-w-[132px] rounded-xl border border-rule bg-background shadow-xs p-1 outline-none">
+            <Menu.Item className={ITEM} onClick={() => download("csv")}>Download CSV</Menu.Item>
+            <Menu.Item className={ITEM} onClick={() => download("json")}>Download JSON</Menu.Item>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }

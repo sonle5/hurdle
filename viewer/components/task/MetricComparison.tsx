@@ -1,6 +1,6 @@
 "use client";
 
-import { cn } from "@/lib/utils";
+import { cn, formatDuration } from "@/lib/utils";
 import { PassRateMini, DeltaChip } from "@/components/ui/PassRateBar";
 
 const BASELINE_ID = "C1";
@@ -20,9 +20,7 @@ export type ConfigSummary = {
 };
 
 function fmtTime(sec: number) {
-  if (sec <= 0) return "—";
-  if (sec < 60) return `${sec}s`;
-  return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  return sec > 0 ? formatDuration(sec) : "—";
 }
 
 function fmtTokens(n: number) {
@@ -68,8 +66,8 @@ function buildMetrics(configs: ConfigSummary[]): Metric[] {
         <div className="inline-flex items-center gap-2">
           <PassRateMini pct={pct} />
           <span className="tabular-nums text-[12px] font-medium text-foreground">{pct}%</span>
-          <span className="tabular-nums text-[10px] text-fg-faint">{c.pass}/{c.total}</span>
-          {delta !== null && <DeltaChip pts={delta} />}
+          <span className="tabular-nums text-[11px] text-fg-faint">{c.pass}/{c.total}</span>
+          {delta !== null && <span className="text-[12px]"><DeltaChip pts={delta} /></span>}
         </div>
       );
     },
@@ -135,18 +133,20 @@ function buildMetrics(configs: ConfigSummary[]): Metric[] {
   ];
 }
 
+// A row has a best value only when at least two configs differ on it; one
+// config, or a tie across all of them, marks nothing.
 function bestIndex(metric: Metric, configs: ConfigSummary[]): number | null {
   if (metric.betterDirection === "none") return null;
+  const values = configs.flatMap((c, i) => (metric.empty(c) ? [] : [{ i, v: metric.raw(c) }]));
+  if (values.length < 2 || values.every(({ v }) => v === values[0].v)) return null;
   let best: number | null = null;
   let bestVal: number = metric.betterDirection === "higher" ? -Infinity : Infinity;
-  configs.forEach((c, i) => {
-    if (metric.empty(c)) return;
-    const v = metric.raw(c);
+  for (const { i, v } of values) {
     if (metric.betterDirection === "higher" ? v > bestVal : v < bestVal) {
       bestVal = v;
       best = i;
     }
-  });
+  }
   return best;
 }
 
@@ -162,20 +162,24 @@ export function MetricComparison({ configs }: { configs: ConfigSummary[] }) {
   return (
     <div className="rounded-lg border border-rule bg-background overflow-hidden">
       <div className="px-5 py-3 border-b border-rule">
-        <h2 className="text-[13px] font-semibold text-foreground">Config comparison</h2>
-        <p className="text-[11px] text-fg-faint mt-0.5">Best value per row marked ↑ — lower is better for duration and agent cost.</p>
+        <h2 className="text-sm font-semibold text-foreground">Config comparison</h2>
+        <p className="text-[12px] text-fg-muted mt-0.5">
+          {configs.length > 1
+            ? "The best value in each row is marked ↑. Lower is better for duration and agent cost."
+            : "Only one config ran for this task, so there's nothing to rank yet."}
+        </p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="bg-surface/60">
-              <th className="text-left px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-muted sticky left-0 bg-surface/60 z-10" style={{ minWidth: 180 }}>
+            <tr>
+              <th className="text-left px-5 py-2.5 text-[12px] font-medium text-fg-muted sticky left-0 bg-background z-10" style={{ minWidth: 180 }}>
                 Metric
               </th>
               {configs.map((c) => (
-                <th key={c.id} className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-muted" style={{ minWidth: 160 }}>
+                <th key={c.id} className="text-left px-4 py-2.5 text-[12px] font-medium text-fg-muted" style={{ minWidth: 160 }}>
                   {c.label}
-                  <div className="text-[9px] font-normal tabular-nums text-fg-faint normal-case">{c.total} run{c.total === 1 ? "" : "s"}</div>
+                  <div className="text-[11px] font-normal tabular-nums text-fg-faint normal-case">{c.total} run{c.total === 1 ? "" : "s"}</div>
                 </th>
               ))}
             </tr>
@@ -196,7 +200,7 @@ export function MetricComparison({ configs }: { configs: ConfigSummary[] }) {
                       <div className="inline-flex items-center gap-1.5">
                         {m.render(c)}
                         {best === i && (
-                          <span aria-label="best in row" className="text-[10px] text-pass">↑</span>
+                          <span aria-label="best in row" className="text-[11px] text-pass">↑</span>
                         )}
                       </div>
                     </td>

@@ -66,12 +66,15 @@ export function VersionCombobox({
   options,
   onChange,
   ariaLabel = "Version",
+  prefix,
   className,
 }: {
   value: string;
   options: VersionComboboxOption[];
   onChange: (id: string) => void;
   ariaLabel?: string;
+  /** A quiet label inside the trigger, before the value (e.g. "Baseline"). */
+  prefix?: string;
   className?: string;
 }) {
   const groups = React.useMemo(() => buildGroups(options), [options]);
@@ -101,14 +104,17 @@ export function VersionCombobox({
           className,
         )}
       >
-        <span className="truncate tabular-nums">
-          <Combobox.Value placeholder="Select version…" />
+        <span className="flex min-w-0 items-center gap-1.5">
+          {prefix && <span className="shrink-0 text-fg-faint">{prefix}</span>}
+          <span className="truncate tabular-nums">
+            <Combobox.Value placeholder="Select version…" />
+          </span>
         </span>
         <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-fg-faint" aria-hidden />
       </Combobox.Trigger>
       <Combobox.Portal>
         <Combobox.Positioner sideOffset={4} align="start" className="z-50">
-          <Combobox.Popup className="w-[360px] overflow-hidden rounded-md border border-rule bg-background shadow-xs outline-none">
+          <Combobox.Popup className="w-[360px] overflow-hidden rounded-xl border border-rule bg-background shadow-xs outline-none">
             <div className="flex items-center gap-2 border-b border-rule px-2.5">
               <Search className="h-3.5 w-3.5 shrink-0 text-fg-faint" aria-hidden />
               <Combobox.Input
@@ -122,7 +128,7 @@ export function VersionCombobox({
             <Combobox.List className="max-h-72 overflow-y-auto p-1">
               {(group: ItemGroup) => (
                 <Combobox.Group key={group.value} items={group.items}>
-                  <Combobox.GroupLabel className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint">
+                  <Combobox.GroupLabel className="px-2 pb-1 pt-2 text-[12px] font-medium text-fg-faint">
                     {group.value}
                   </Combobox.GroupLabel>
                   <Combobox.Collection>
@@ -130,12 +136,12 @@ export function VersionCombobox({
                       <Combobox.Item
                         key={item.value}
                         value={item}
-                        className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-[12px] text-foreground data-[highlighted]:bg-surface"
+                        className="flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-foreground data-[highlighted]:bg-surface"
                       >
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium">{item.label}</span>
-                          {item.sub && <span className="block truncate text-[10px] tabular-nums text-fg-faint">{item.sub}</span>}
-                          {item.description && <span className="mt-0.5 block truncate text-[10px] text-fg-muted">{item.description}</span>}
+                          {item.sub && <span className="block truncate text-[11px] tabular-nums text-fg-faint">{item.sub}</span>}
+                          {item.description && <span className="mt-0.5 block truncate text-[11px] text-fg-muted">{item.description}</span>}
                         </span>
                         <Combobox.ItemIndicator className="shrink-0">
                           <Check className="h-3 w-3 text-foreground" aria-hidden />

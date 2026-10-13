@@ -150,10 +150,16 @@ test("the Viewer context bar omits the share-link control", () => {
 
 test("the top-left Hurdle brand has no hover tooltip", () => {
   const leftRail = source("../components/shell/LeftRail.tsx");
+  const sessionSidebar = source("../components/SessionSidebar.tsx");
+  const brand = source("../components/shell/Brand.tsx");
 
-  assert.doesNotMatch(leftRail, /Tooltip|TAGLINE/);
-  assert.match(leftRail, /<Link href="\/" className="font-mono text-sm font-semibold text-foreground">/);
-  assert.match(leftRail, /<Link href="\/" className="inline-flex items-center gap-1\.5 font-mono text-sm font-semibold text-foreground">/);
+  for (const rail of [leftRail, sessionSidebar]) {
+    assert.doesNotMatch(rail, /Tooltip|TAGLINE/);
+    assert.match(rail, /<Brand collapsed \/>/);
+    assert.match(rail, /<Brand \/>/);
+  }
+  assert.doesNotMatch(brand, /Tooltip|TAGLINE/);
+  assert.match(brand, /<Link\s+href="\/"/);
 });
 
 test("the app shell pins the rail footer while only the content pane scrolls", () => {
@@ -177,7 +183,7 @@ test("the app shell pins the rail footer while only the content pane scrolls", (
   assert.doesNotMatch(rail, /sticky top-0/);
   assert.match(
     footer,
-    /flex shrink-0 flex-wrap items-center justify-between/,
+    /flex shrink-0 flex-wrap items-center justify-between gap-2 px-5 py-4/,
   );
   assert.match(credit, /inline-flex items-center gap-2 text-\[11px\]/);
   assert.match(credit, /src="\/together-logo-light\.png"[\s\S]*dark:hidden/);
@@ -290,12 +296,16 @@ test("session tabs expose stable shareable URL hashes", () => {
 
 test("surface depth uses a quiet canvas, single borders, and restrained floating shadows", () => {
   const styles = source("../app/globals.css");
+  const sidebarShell = source("../components/shell/ResizableSidebarShell.tsx");
   const versionCombobox = source("../components/ui/VersionCombobox.tsx");
   const exportMenu = source("../components/ui/ExportMenu.tsx");
 
-  assert.match(styles, /--canvas:\s+var\(--background\)/);
-  assert.match(styles, /--canvas:\s+oklch\(0\.125 0\s+0\)/);
-  assert.match(styles, /--rule:\s+oklch\(1 0 0 \/ 10%\)/);
+  // The chrome is a quiet canvas; pages sit on one inset panel above it.
+  assert.match(styles, /--canvas:\s+oklch\(0\.972 0\.003 286\)/);
+  assert.match(styles, /--canvas:\s+oklch\(0\.135 0\.004 286\)/);
+  assert.match(styles, /--rule:\s+oklch\(1 0 0 \/ 0\.08\)/);
+  assert.match(styles, /@utility app-panel/);
+  assert.match(sidebarShell, /className=\{`app-panel /);
   assert.match(versionCombobox, /border border-rule bg-background shadow-xs/);
   assert.match(exportMenu, /border border-rule bg-background shadow-xs/);
 });
@@ -385,10 +395,10 @@ test("transcript message anchors share the role label's optical center", () => {
 
   assert.match(
     conversation,
-    /top-2 inline-flex -translate-y-1\/2 items-center text-\[10px\] leading-none/,
+    /top-2 inline-flex -translate-y-1\/2 items-center text-\[11px\] leading-none/,
   );
   assert.match(
     conversation,
-    /text-\[10px\] font-semibold uppercase leading-none tracking-\[0\.08em\]/,
+    /text-\[12px\] font-semibold leading-none \$\{roleLabelClass\}/,
   );
 });

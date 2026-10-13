@@ -9,7 +9,7 @@ import { RecentRuns } from "./RecentRuns";
 import { type RunRowData } from "./RunRow";
 import { TaskTable } from "@/components/TaskTable";
 import { useHotkeys, moveRowFocus } from "@/lib/hotkeys";
-import { formatModel } from "@/lib/utils";
+import { formatDuration, formatModel } from "@/lib/utils";
 
 type SessionData = {
   id: string;
@@ -60,15 +60,11 @@ function isCliTask(slug: string): boolean {
 }
 
 function fmtTimeShort(sec: number) {
-  if (sec <= 0) return "—";
-  if (sec < 60) return `${sec}s`;
-  return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  return sec > 0 ? formatDuration(sec) : "—";
 }
 
 function fmtDurationCompact(sec: number) {
-  const abs = Math.abs(sec);
-  if (abs < 60) return `${abs}s`;
-  return `${Math.floor(abs / 60)}m${abs % 60 ? ` ${abs % 60}s` : ""}`;
+  return formatDuration(sec);
 }
 
 function fmtDirectionalTime(sec: number) {
@@ -422,7 +418,7 @@ export function Leaderboard({
           return (
             <div key={model ?? "_single"} className="space-y-3">
               {model !== null && (
-                <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-fg-muted">
+                <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">
                   {formatModel(model, modelResolved) ?? "(legacy)"}
                 </h2>
               )}
@@ -442,7 +438,7 @@ export function Leaderboard({
 
       {/* Per-task tables — v1 layout: one table per task with all runs visible. */}
       <div className="flex flex-col gap-8">
-        <p className="text-[11px] text-fg-faint -mb-4">Sorted by fastest time, then lowest cost.</p>
+        <p className="text-[12px] text-fg-faint -mb-4">Sorted by fastest time, then lowest cost.</p>
         {filtered.map(({ task, prompt, sessions }) => {
           if (sessions.length === 0) return null;
           return (

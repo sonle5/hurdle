@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
-import { ChevronRight, X } from "lucide-react";
+import { X } from "lucide-react";
+import { TopBar } from "./TopBar";
 
 const KNOWN_PARAMS = ["agent", "harness", "config", "task", "run", "category"] as const;
 
@@ -40,7 +40,8 @@ export function ContextBar({
   };
 
   // Crumb derivation: /, /t/<slug>, /s/<id>
-  let crumbs: Breadcrumb[] = [{ label: "Leaderboard", href: "/" }];
+  // On the Leaderboard itself the crumb is the current page, not a link.
+  let crumbs: Breadcrumb[] = [{ label: "Leaderboard", href: pathname === "/" ? undefined : "/" }];
   if (pathname?.startsWith("/t/")) {
     const slug = decodeURIComponent(pathname.slice(3));
     crumbs.push({ label: taskLabel?.[slug] || slug });
@@ -66,58 +67,33 @@ export function ContextBar({
   const hasFilters = chips.length > 0;
 
   return (
-    <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 border-b border-rule bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex h-12 items-center gap-3 px-4 sm:px-6 lg:px-8">
-        {/* Breadcrumb */}
-        <nav className="flex items-center gap-1 min-w-0">
-          {crumbs.map((c, i) => (
-            <span key={i} className="inline-flex items-center gap-1 min-w-0">
-              {i > 0 && <ChevronRight className="h-3 w-3 text-fg-faint shrink-0" />}
-              {c.href ? (
-                <Link href={c.href} className="text-[12px] text-fg-muted hover:text-foreground transition-colors truncate">
-                  {c.label}
-                </Link>
-              ) : (
-                <span className="text-[12px] font-medium text-foreground truncate">{c.label}</span>
-              )}
-            </span>
+    <TopBar
+      crumbs={crumbs}
+      versionLabel={versionLabel}
+      right={hasFilters ? (
+        <button
+          onClick={resetAll}
+          className="shrink-0 rounded-sm text-[12px] text-fg-muted transition-colors duration-150 hover:text-foreground"
+        >
+          Clear
+        </button>
+      ) : null}
+    >
+      {hasFilters && (
+        <div className="flex items-center gap-1.5">
+          {chips.map((c) => (
+            <button
+              key={`${c.key}:${c.value}`}
+              onClick={() => removeParam(c.key)}
+              className="group inline-flex items-center gap-1 rounded-md border border-rule bg-background px-2 py-0.5 text-[12px] text-fg-muted transition-colors duration-150 hover:border-foreground/40 hover:text-foreground"
+            >
+              <span>{c.label}</span>
+              <X className="h-3 w-3 shrink-0 text-fg-faint group-hover:text-foreground" />
+            </button>
           ))}
-          {versionLabel && (
-            <span className="ml-2 inline-flex items-center gap-1 rounded-sm border border-rule px-1.5 py-0.5 text-[10px] font-mono text-fg-muted">
-              {versionLabel}
-            </span>
-          )}
-        </nav>
-
-        {/* Active filter chips */}
-        <div className="flex-1 min-w-0 overflow-x-auto">
-          {hasFilters && (
-            <div className="flex items-center gap-1.5">
-              {chips.map((c) => (
-                <button
-                  key={`${c.key}:${c.value}`}
-                  onClick={() => removeParam(c.key)}
-                  className="group inline-flex items-center gap-1 rounded-md border border-rule bg-background px-2 py-0.5 text-[11px] text-fg-muted hover:text-foreground hover:border-foreground/40 transition-colors"
-                >
-                  <span>{c.label}</span>
-                  <X className="h-3 w-3 shrink-0 text-fg-faint group-hover:text-foreground" />
-                </button>
-              ))}
-            </div>
-          )}
         </div>
-
-        {hasFilters && (
-          <button
-            onClick={resetAll}
-            className="shrink-0 text-[11px] text-fg-muted hover:text-foreground transition-colors"
-          >
-            Clear
-          </button>
-        )}
-
-      </div>
-    </div>
+      )}
+    </TopBar>
   );
 }
 

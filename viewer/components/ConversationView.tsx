@@ -50,7 +50,7 @@ export function ConversationView({ messages }: { messages: ParsedMessage[] }) {
         const isTaskNotif = isUser && allText.includes("<task-notification>");
 
         // Differentiated role labels: User = filled (most prominent — drives the
-        // conversation), Skill = outlined, Assistant = plain uppercase, System
+        // conversation), Skill = outlined, Assistant = plain text, System
         // = faint. Color stays monochrome; the *shape* of the label conveys
         // role.
         const kind: "user" | "assistant" | "skill" | "system" =
@@ -82,16 +82,16 @@ export function ConversationView({ messages }: { messages: ParsedMessage[] }) {
                 document.getElementById(id)?.scrollIntoView({ behavior: "instant", block: "start" });
               }}
               aria-label="Anchor to this message"
-              className="absolute -left-5 top-2 inline-flex -translate-y-1/2 items-center text-[10px] leading-none text-fg-faint/0 group-hover/msg:text-fg-faint hover:!text-fg-muted select-none transition-colors"
+              className="absolute -left-5 top-2 inline-flex -translate-y-1/2 items-center text-[11px] leading-none text-fg-faint/0 group-hover/msg:text-fg-faint hover:!text-fg-muted select-none transition-colors"
             >
               #
             </a>
 
             <div className="mb-3 flex min-h-4 items-center gap-2">
-              <span className={`text-[10px] font-semibold uppercase leading-none tracking-[0.08em] ${roleLabelClass}`}>
+              <span className={`text-[12px] font-semibold leading-none ${roleLabelClass}`}>
                 {roleLabel}
               </span>
-              <span className="text-[10px] leading-none text-fg-faint tabular-nums">{ts}</span>
+              <span className="text-[11px] leading-none text-fg-faint tabular-nums">{ts}</span>
             </div>
 
             {/* Thinking */}
@@ -114,7 +114,7 @@ export function ConversationView({ messages }: { messages: ParsedMessage[] }) {
                   );
                 }
                 return (
-                  <div key={`txt-${j}`} className="text-sm text-foreground/85 leading-7 mb-4">
+                  <div key={`txt-${j}`} className="mb-4 max-w-[75ch] text-sm leading-7 text-foreground/85">
                     <Markdown content={t} />
                   </div>
                 );
@@ -172,8 +172,8 @@ function TruncatedBlock({ content, label, className }: { content: string; label:
   const display = !expanded && needsTruncation ? content.slice(0, TRUNCATE_CHARS) : content;
 
   return (
-    <div className="mb-2">
-      <div className="text-[10px] uppercase tracking-[0.08em] text-fg-faint mb-1">{label}</div>
+    <div className="mb-2 max-w-[75ch]">
+      <div className="text-[12px] text-fg-faint mb-1">{label}</div>
       <pre className={`text-[12px] whitespace-pre-wrap leading-relaxed text-fg-muted ${className ?? ""}`}>{display}{!expanded && needsTruncation && "…"}</pre>
       {needsTruncation && (
         <button
@@ -321,23 +321,23 @@ function ToolBlock({
     <div className={`mb-3 border-l-2 pl-3 ml-1 ${isError ? "border-fail" : "border-rule"}`}>
       {/* Header */}
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-[10px] font-mono font-semibold uppercase tracking-[0.08em] text-foreground border border-rule rounded-sm px-1 py-0.5">
+        <span className="text-[11px] font-mono font-medium text-foreground rounded-sm bg-foreground/[0.06] px-1.5 py-0.5">
           {name}
         </span>
         <span className="text-[11px] text-fg-muted font-mono truncate">{summaryText}</span>
-        {isError && <span className="text-[10px] text-fail uppercase tracking-[0.08em]">error</span>}
+        {isError && <span className="text-[12px] font-medium text-fail">Error</span>}
       </div>
 
       {/* Input */}
       <div className="mb-1.5">
-        <div className="text-[10px] uppercase tracking-[0.08em] text-fg-faint mb-0.5">Input</div>
+        <div className="text-[12px] text-fg-faint mb-0.5">Input</div>
         <CodeBlock code={inputJson} lang="json" />
       </div>
 
       {/* Output */}
       {displayOutput !== null && (
         <div>
-          <div className="text-[10px] uppercase tracking-[0.08em] text-fg-faint mb-0.5">Output</div>
+          <div className="text-[12px] text-fg-faint mb-0.5">Output</div>
           <CodeBlock code={displayOutput + (!expandedOutput && outputTruncated ? "…" : "")} />
           {outputTruncated && (
             <button

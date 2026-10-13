@@ -58,17 +58,19 @@ export function CanonicalSessionReview({
   return (
     <div className="space-y-6">
       <section className="overflow-hidden rounded-lg border border-rule bg-background">
-        <div className="border-b border-rule bg-surface/60 px-5 py-3">
-          <h2 className="text-xs font-semibold text-foreground">Task</h2>
+        <div className="border-b border-rule px-5 py-3.5">
+          <h2 className="text-sm font-semibold text-foreground">Task</h2>
         </div>
         <div className="px-5 py-4">
-          <Markdown content={prompt} />
+          <div className="max-w-[75ch]">
+            <Markdown content={prompt} />
+          </div>
         </div>
       </section>
 
       <section className="overflow-hidden rounded-lg border border-rule bg-background">
-        <div className="flex items-center justify-between border-b border-rule bg-surface/60 px-5 py-3">
-          <h2 className="text-xs font-semibold text-foreground">Evaluation checks</h2>
+        <div className="flex items-center justify-between border-b border-rule px-5 py-3.5">
+          <h2 className="text-sm font-semibold text-foreground">Evaluation checks</h2>
           <div className="flex items-center gap-3">
             {sourceAvailable && runId && (
               <EvaluatorSourceDrawer
@@ -77,7 +79,7 @@ export function CanonicalSessionReview({
                 sources={evaluatorSources}
               />
             )}
-            <span className="text-[10px] tabular-nums text-fg-faint">
+            <span className="text-[11px] tabular-nums text-fg-faint">
               {checks.length} {checks.length === 1 ? "check" : "checks"}
             </span>
           </div>
@@ -96,7 +98,7 @@ export function CanonicalSessionReview({
                 <>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={cn(
-                      "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                      "inline-flex h-5 items-center gap-1 rounded-full border px-1.5 text-[11px] font-medium leading-none",
                       style.className,
                     )}>
                       <Icon className="h-3 w-3" aria-hidden />
@@ -104,12 +106,12 @@ export function CanonicalSessionReview({
                     </span>
                     <code className="text-xs text-fg-muted">{check.id}</code>
                     {check.effectiveAuthority && (
-                      <span className="text-[10px] capitalize text-fg-faint">
+                      <span className="text-[11px] capitalize text-fg-faint">
                         {check.effectiveAuthority}
                       </span>
                     )}
                   </div>
-                  <p className="mt-2 text-pretty text-sm leading-6 text-foreground/85">
+                  <p className="mt-2 max-w-[75ch] text-pretty text-sm leading-6 text-foreground/85">
                     {check.summary}
                   </p>
                 </>
@@ -128,17 +130,17 @@ export function CanonicalSessionReview({
 
       {judge && (
         <section className="overflow-hidden rounded-lg border border-rule bg-background">
-          <div className="flex items-center justify-between border-b border-rule bg-surface/60 px-5 py-3">
+          <div className="flex items-center justify-between border-b border-rule px-5 py-3.5">
             <div className="flex items-center gap-2">
               <Bot className="h-3.5 w-3.5 text-fg-muted" aria-hidden />
-              <h2 className="text-xs font-semibold text-foreground">Judge review</h2>
+              <h2 className="text-sm font-semibold text-foreground">Judge review</h2>
             </div>
-            <span className="text-[10px] capitalize text-fg-muted">{judge.verdict}</span>
+            <span className="text-[11px] capitalize text-fg-muted">{judge.verdict}</span>
           </div>
           <div className="space-y-2 px-5 py-4">
-            {judge.summary && <p className="text-pretty text-sm leading-6 text-foreground/85">{judge.summary}</p>}
+            {judge.summary && <p className="max-w-[75ch] text-pretty text-sm leading-6 text-foreground/85">{judge.summary}</p>}
             {(judge.judgeId || judge.model) && (
-              <p className="font-mono text-[10px] text-fg-faint">
+              <p className="font-mono text-[11px] text-fg-faint">
                 {[judge.judgeId, judge.model].filter(Boolean).join(" · ")}
               </p>
             )}

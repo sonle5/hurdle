@@ -1,5 +1,6 @@
 import { readSessionTokenUsage, summarizeSessionTokens } from "./session-usage.mjs";
 import { withTaskPromptMessage } from "./session-prompt.mjs";
+import { formatDuration } from "./format-duration.mjs";
 
 export type ToolUse = {
   id: string;
@@ -298,11 +299,7 @@ export function computeStats(messages: ParsedMessage[], reportedUsage: unknown =
   };
 }
 
-export function formatDuration(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
+export { formatDuration };
 
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;

@@ -97,17 +97,23 @@ export function ResizableSidebarShell({
       >
         {sidebar(collapsed, toggle)}
       </Panel>
+      {/* The panel's own edge is the divider; the handle appears on hover or focus. */}
       <Separator
         id={`${id}-resizer`}
         aria-label={resizeLabel}
-        className="group/resize relative z-40 hidden w-px bg-rule outline-none lg:block hover:bg-foreground/30 focus-visible:bg-foreground/40"
+        className="group/resize relative z-40 hidden w-px bg-transparent outline-none lg:block hover:bg-foreground/20 focus-visible:bg-foreground/30"
       >
-        <span className="pointer-events-none absolute left-1/2 top-1/2 inline-flex h-8 w-3 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-md border border-rule bg-background text-fg-faint opacity-40 shadow-sm transition-opacity group-hover/resize:opacity-100 group-focus-visible/resize:opacity-100">
+        <span className="pointer-events-none absolute left-1/2 top-1/2 inline-flex h-8 w-3 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-md border border-rule bg-background text-fg-faint opacity-0 shadow-sm transition-opacity group-hover/resize:opacity-100 group-focus-visible/resize:opacity-100">
           <GripVertical className="h-3.5 w-3.5" aria-hidden />
         </span>
       </Separator>
-      <Panel id={`${id}-content`} elementRef={contentElementRef} minSize="50%" className={`min-w-0 ${contentClassName}`}>
-        {children}
+      {/* The panel's wrapper scrolls (overflow: auto), so it needs padding on
+          every side or it clips the panel's edge ring; the left gutter also
+          lets the panel float clear of the rail. */}
+      <Panel id={`${id}-content`} elementRef={contentElementRef} minSize="50%" className="min-w-0 lg:p-2">
+        <div className={`app-panel h-full min-w-0 overflow-hidden ${contentClassName}`}>
+          {children}
+        </div>
       </Panel>
     </Group>
   );

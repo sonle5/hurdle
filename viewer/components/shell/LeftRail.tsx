@@ -3,11 +3,12 @@
 import { useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
-import { Activity, FileText, GitCompareArrows } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { GitCompareArrows } from "lucide-react";
+import { cn, formatModel } from "@/lib/utils";
 import { VersionCombobox } from "@/components/ui/VersionCombobox";
 import { SidebarFooter } from "./SidebarFooter";
 import { SidebarToggle } from "./ResizableSidebarShell";
+import { Brand } from "./Brand";
 
 export type RailFilters = {
   versions: { id: string; name: string; description: string | null; kind?: "weekly" | "experiment" | "smoke" | null; runAt?: string | null; createdAt?: string | null; model?: string | null; ccVersion?: string | null }[];
@@ -127,36 +128,27 @@ export function LeftRail({
   if (collapsed) {
     return (
       <aside className="z-30 hidden h-full w-full shrink-0 flex-col items-center gap-1 bg-sidebar lg:flex">
-        {/* Brand frame — border-b on outer wrap so its baseline matches the
-            ContextBar's border (both end at y=49 with h-12 inside + 1px border). */}
-        <div className="w-full border-b border-rule">
-          <div className="flex h-12 w-full items-center justify-center">
-            <Link href="/" className="font-mono text-sm font-semibold text-foreground">
-              hurdle
-            </Link>
-          </div>
+        {/* The brand row spans y=8–56, the same band as the inset panel's top bar. */}
+        <div className="flex h-12 w-full mt-2 items-center justify-center">
+          <Brand collapsed />
         </div>
-        <div className="mt-2"><SidebarToggle collapsed={collapsed} onCollapsedChange={onCollapsedChange} /></div>
+        <SidebarToggle collapsed={collapsed} onCollapsedChange={onCollapsedChange} />
       </aside>
     );
   }
 
   return (
     <aside className="z-30 hidden h-full w-full shrink-0 flex-col bg-sidebar lg:flex">
-      {/* Brand frame — border-b on outer wrap, matches ContextBar pattern.
-          px-3 (not px-4) so the collapse button's right edge lines up with
-          the Leaderboard nav item + Version dropdown below it. */}
-      <div className="border-b border-rule">
-        <div className="flex h-12 items-center justify-between px-3">
-          <Link href="/" className="inline-flex items-center gap-1.5 font-mono text-sm font-semibold text-foreground">
-            <Activity className="h-3.5 w-3.5 text-fg-muted" strokeWidth={2.25} />
-            hurdle
-          </Link>
-          <SidebarToggle collapsed={collapsed} onCollapsedChange={onCollapsedChange} />
-        </div>
+      {/* The brand row spans y=8–56, the same band as the inset panel's top
+          bar, so the wordmark and the breadcrumbs share one centre line. The
+          rail sits on the app chrome, so it needs no dividing borders. */}
+      <div className="mt-2 flex h-12 shrink-0 items-center justify-between pl-5 pr-3">
+        <Brand />
+        <SidebarToggle collapsed={collapsed} onCollapsedChange={onCollapsedChange} />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-5">
+      {/* Groups fade under the brand row and the footer instead of being cut off. */}
+      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-4 space-y-5 [mask-image:linear-gradient(to_bottom,transparent,#000_12px,#000_calc(100%_-_16px),transparent)]">
         <RailGroup label="Review">
           <RailNavLink href={compareHref} active={compareActive} icon={<GitCompareArrows className="h-3.5 w-3.5" aria-hidden />}>
             Compare
@@ -173,12 +165,13 @@ export function LeftRail({
           />
           {(() => {
             const v = filters.versions.find((x) => x.id === filters.current.version);
-            const model = v?.model?.replace("claude-", "").replace(/-/g, " ");
+            // Same model label the filters use ("Opus 5.5", "GPT-6.1-SOL").
+            const model = formatModel(v?.model);
             const cc = v?.ccVersion;
             if (!model && !cc) return null;
             return (
-              <div className="mt-1.5 text-[10px] text-fg-faint">
-                {model ? `Claude ${model}` : ""}{cc ? ` · CC ${cc}` : ""}
+              <div className="mt-1.5 px-2 text-[12px] text-fg-faint">
+                {[model, cc ? `CC ${cc}` : null].filter(Boolean).join(" · ")}
               </div>
             );
           })()}
@@ -265,7 +258,7 @@ export function LeftRail({
             label={isTaskScoped ? "Task ↗" : "Task"}
             adornment={
               showCategory ? (
-                <div className="flex items-center gap-1 text-[10px]">
+                <div className="flex items-center gap-1 text-[11px]">
                   <CategoryChip current={filters.current.category} value="general" onClick={(v) => setParam("category", v)}>General</CategoryChip>
                   <CategoryChip current={filters.current.category} value="cli" onClick={(v) => setParam("category", v)}>CLI</CategoryChip>
                   <CategoryChip current={filters.current.category} value="all" onClick={(v) => setParam("category", v)}>All</CategoryChip>
@@ -337,8 +330,8 @@ function compareNavHref(filters: RailFilters): string {
 function RailGroup({ label, adornment, children }: { label: string; adornment?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section>
-      <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint">{label}</span>
+      <div className="mb-1 flex h-6 items-center justify-between px-2">
+        <span className="meta-label">{label}</span>
         {adornment}
       </div>
       <div className="flex flex-col gap-px">{children}</div>
@@ -362,13 +355,13 @@ function RailNavLink({
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group flex items-center gap-2 rounded-md border px-2 py-1 text-[12px] transition-colors",
+        "group flex h-7 items-center gap-2 rounded-md px-2 text-[13px] transition-colors",
         active
-          ? "bg-background border-foreground/40 text-foreground font-medium"
-          : "border-transparent text-foreground hover:bg-foreground/5",
+          ? "bg-sidebar-accent text-foreground font-medium"
+          : "text-fg-muted hover:bg-sidebar-accent hover:text-foreground",
       )}
     >
-      <span className={cn("shrink-0", active ? "text-foreground" : "text-fg-muted group-hover:text-foreground")}>
+      <span className={cn("shrink-0", active ? "text-foreground" : "text-fg-faint group-hover:text-foreground")}>
         {icon}
       </span>
       <span className="truncate">{children}</span>
@@ -395,27 +388,17 @@ function RailRadio({
       aria-pressed={active}
       data-active={active}
       className={cn(
-        // Selected state uses a dark stroke instead of inverted black — reads
-        // as "selected" not "primary action". `border` is reserved on every
-        // row so layout doesn't shift on toggle.
-        "group flex items-center justify-between gap-2 rounded-md px-2 py-1 text-[12px] border transition-colors text-left",
+        // Selection is a filled row, as in the nav above: one quiet fill for
+        // "you are here", a lighter one under the pointer.
+        "group flex h-7 items-center justify-between gap-2 rounded-md px-2 text-[13px] transition-colors text-left",
         active
-          ? "bg-background border-foreground/40 text-foreground font-medium"
-          : "border-transparent text-foreground hover:bg-foreground/5",
+          ? "bg-sidebar-accent text-foreground font-medium"
+          : "text-fg-muted hover:bg-sidebar-accent/60 hover:text-foreground",
       )}
     >
-      <span className="flex items-center gap-2 min-w-0">
-        <span
-          aria-hidden
-          className={cn(
-            "inline-block h-2 w-2 shrink-0 rounded-full border",
-            active ? "bg-foreground border-foreground" : "border-fg-faint group-hover:border-fg-muted",
-          )}
-        />
-        <span className="truncate">{children}</span>
-      </span>
+      <span className="truncate">{children}</span>
       {typeof count === "number" && (
-        <span className={cn("text-[10px] tabular-nums shrink-0", active ? "text-fg-muted" : "text-fg-faint")}>
+        <span className={cn("text-[12px] font-normal tabular-nums shrink-0", active ? "text-fg-muted" : "text-fg-faint")}>
           {count}
         </span>
       )}
@@ -438,10 +421,10 @@ function CategoryChip({
       onClick={() => onClick(value)}
       data-active={active}
       className={cn(
-        "rounded-sm px-1 py-0.5 border transition-colors",
+        "rounded-[5px] px-1.5 py-0.5 transition-colors",
         active
-          ? "bg-background border-foreground/40 text-foreground font-medium"
-          : "border-transparent text-fg-faint hover:text-foreground",
+          ? "bg-sidebar-accent text-foreground font-medium"
+          : "text-fg-faint hover:text-foreground",
       )}
     >{children}</button>
   );

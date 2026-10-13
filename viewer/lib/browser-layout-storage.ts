@@ -3,7 +3,9 @@ import { readStoredPreference } from "./browser-preference-storage.mjs";
 export const DEFAULT_SIDEBAR_WIDTH = 256;
 export const MIN_SIDEBAR_WIDTH = 224;
 export const MAX_SIDEBAR_WIDTH = 480;
-export const COLLAPSED_SIDEBAR_WIDTH = 56;
+// Wide enough that the brand tile sits 20px from the edge, exactly where it
+// sits in the expanded rail.
+export const COLLAPSED_SIDEBAR_WIDTH = 60;
 export const SIDEBAR_WIDTH_STORAGE_KEY = "hurdle-sidebar-width";
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = "hurdle-sidebar-collapsed";
 

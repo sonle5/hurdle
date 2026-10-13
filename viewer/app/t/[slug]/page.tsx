@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/shell/AppShell";
@@ -9,7 +10,7 @@ import { TaskFindings } from "@/components/task/TaskFindings";
 import { TaskKeyboard } from "@/components/task/TaskKeyboard";
 import { type RunRowData } from "@/components/leaderboard/RunRow";
 import { getAllSessions, getDefaultEvalVersionId, getTaskFindings, getVersions } from "@/lib/queries";
-import { formatModel } from "@/lib/utils";
+import { formatDuration, formatModel } from "@/lib/utils";
 import { evalVersionDisplayNameById } from "@/lib/version-display";
 
 export const dynamic = "force-dynamic";
@@ -96,6 +97,11 @@ function buildHeroKpi(list: Awaited<ReturnType<typeof getAllSessions>>) {
     if (s.costUsd !== null && s.costUsd >= 0) { costSum += s.costUsd; costN++; }
   }
   return { runs, total, pass, pendingAudit, unknown, running, avgDuration: durN ? Math.round(durSum / durN) : 0, avgCost: costN ? costSum / costN : 0 };
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  return { title: decodeURIComponent(slug) };
 }
 
 export default async function TaskPage({
@@ -268,7 +274,7 @@ export default async function TaskPage({
           {metricSections.map(({ model, modelResolved, configs, kpi }) => (
             <div key={model ?? "_single"} className="space-y-3">
               {model !== null && (
-                <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-fg-muted">
+                <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">
                   {formatModel(model, modelResolved) ?? "(legacy)"}
                 </h2>
               )}
@@ -277,7 +283,7 @@ export default async function TaskPage({
                   items={[
                     { label: "Runs", value: kpi.runs.toString(), sub: excludedSub(kpi) },
                     { label: "Pass rate", value: `${kpi.total > 0 ? Math.round((kpi.pass / kpi.total) * 100) : 0}%`, sub: `${kpi.pass} of ${kpi.total} scored`, tone: tonePassRate(kpi.total > 0 ? Math.round((kpi.pass / kpi.total) * 100) : 0) },
-                    { label: "Avg duration", value: kpi.avgDuration > 0 ? `${Math.floor(kpi.avgDuration / 60)}m ${kpi.avgDuration % 60}s` : "—" },
+                    { label: "Avg duration", value: kpi.avgDuration > 0 ? formatDuration(kpi.avgDuration) : "—" },
                     { label: "Avg agent cost", value: kpi.avgCost > 0 ? `$${kpi.avgCost.toFixed(2)}` : "—" },
                   ]}
                 />

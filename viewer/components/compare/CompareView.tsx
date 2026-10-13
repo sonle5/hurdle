@@ -4,12 +4,14 @@ import { RunCost } from "@/components/RunCost";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, ArrowLeftRight, ExternalLink, GitCompareArrows } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, ArrowRight, ExternalLink, X } from "lucide-react";
+import { MetaDot, PageHeader } from "@/components/shell/PageHeader";
+import { evalVersionDisplayNameById } from "@/lib/version-display";
 import { KpiStrip, tonePassRate, type Kpi } from "@/components/leaderboard/KpiStrip";
 import { StatusBadge, statusFromResult } from "@/components/ui/StatusBadge";
 import { VersionCombobox } from "@/components/ui/VersionCombobox";
 import { sameRecordedDefinition } from "@/lib/comparison-identity.mjs";
-import { cn, formatModel } from "@/lib/utils";
+import { cn, formatDuration, formatModel } from "@/lib/utils";
 
 export type CompareVersionOption = {
   id: string;
@@ -156,7 +158,9 @@ function docsCapturedAt(session: CompareSession): string | null {
   return parsed.toISOString().slice(0, 10);
 }
 
-function docsSummary(sessions: CompareSession[]): { label: string; captured: string } {
+type DocsSummary = { label: string | null; captured: string | null };
+
+function docsSummary(sessions: CompareSession[]): DocsSummary {
   const labels = new Set<string>();
   const captured = new Set<string>();
   for (const session of sessions) {
@@ -166,9 +170,24 @@ function docsSummary(sessions: CompareSession[]): { label: string; captured: str
     if (capturedAt) captured.add(capturedAt);
   }
   return {
-    label: labels.size === 0 ? "unlabeled" : [...labels].slice(0, 2).join(", ") + (labels.size > 2 ? ` +${labels.size - 2}` : ""),
-    captured: captured.size === 0 ? "no capture timestamp" : [...captured].sort().slice(0, 2).join(", ") + (captured.size > 2 ? ` +${captured.size - 2}` : ""),
+    label: labels.size === 0 ? null : [...labels].slice(0, 2).join(", ") + (labels.size > 2 ? ` +${labels.size - 2}` : ""),
+    captured: captured.size === 0 ? null : [...captured].sort().slice(0, 2).join(", ") + (captured.size > 2 ? ` +${captured.size - 2}` : ""),
   };
+}
+
+function docsText(docs: DocsSummary): string | null {
+  if (!docs.label && !docs.captured) return null;
+  return [docs.label ?? "unlabeled", docs.captured].filter(Boolean).join(", ");
+}
+
+function plural(count: number, word: string): string {
+  return `${count} ${count === 1 ? word : `${word}s`}`;
+}
+
+/** "2 regressed, 1 improved", or null when nothing moved. */
+function changeSummary(regressed: number, improved: number): string | null {
+  const parts = [regressed > 0 ? `${regressed} regressed` : null, improved > 0 ? `${improved} improved` : null].filter(Boolean);
+  return parts.length > 0 ? parts.join(", ") : null;
 }
 
 function modelKey(session: CompareSession): string {
@@ -249,13 +268,11 @@ function avgCost(stats: SideStats): number {
 }
 
 function fmtDuration(sec: number): string {
-  if (sec <= 0) return "-";
-  if (sec < 60) return `${sec}s`;
-  return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  return sec > 0 ? formatDuration(sec) : "—";
 }
 
 function fmtCost(value: number): string {
-  if (value <= 0) return "-";
+  if (value <= 0) return "—";
   if (value < 0.01) return "<$0.01";
   return `$${value.toFixed(2)}`;
 }
@@ -409,7 +426,7 @@ function buildCompareModel(
 
       return {
         key,
-        label: `${agentName} / ${modelLabel} / ${runner || "runner not recorded"}`,
+        label: `${agentName} · ${modelLabel} · ${runner ? `Runner ${runner}` : "Runner not recorded"}`,
         agentName,
         modelLabel,
         runner,
@@ -469,7 +486,7 @@ function deltaChip(
   direction: "up-good" | "down-good",
   title: string,
 ): Kpi["delta"] {
-  if (delta === 0) return { label: "flat", tone: "neutral" };
+  if (delta === 0) return undefined;
   const good = direction === "up-good" ? delta > 0 : delta < 0;
   const arrow = delta > 0 ? "▲" : "▼";
   return {
@@ -509,11 +526,11 @@ function buildKpis(metrics: KpiMetrics): Kpi[] {
   const cur = aggregatePairs(metrics.scoredPairs, "cur");
   const base = aggregatePairs(metrics.scoredPairs, "base");
   const passDelta = pct(cur) - pct(base);
-  const netPassing = cur.pass - base.pass;
   const durationDelta = avgDuration(cur) - avgDuration(base);
   const costDelta = Math.round((avgCost(cur) - avgCost(base)) * 100) / 100;
   const regressed = metrics.changes.filter((change) => change.row.change === "regressed").length;
   const improved = metrics.changes.length - regressed;
+  const moved = changeSummary(regressed, improved);
   const deltaTitle = metrics.promptChanged > 0
     ? "Current minus baseline, including scored pairs with different prompts"
     : "Current minus baseline, over prompt-identical scored pairs";
@@ -521,30 +538,30 @@ function buildKpis(metrics: KpiMetrics): Kpi[] {
   return [
     {
       label: "Pass rate",
-      value: cur.total > 0 ? `${pct(cur)}%` : "-",
-      sub: cur.total > 0 ? `was ${pct(base)}% · ${cur.pass} of ${cur.total} pairs passing` : "no scored pairs",
+      value: cur.total > 0 ? `${pct(cur)}%` : "—",
+      sub: cur.total > 0 ? `was ${pct(base)}%` : "No scored pairs",
       tone: cur.total > 0 ? tonePassRate(pct(cur)) : "neutral",
       delta: cur.total > 0 ? deltaChip(passDelta, (v) => `${v}pp`, "up-good", deltaTitle) : undefined,
     },
     {
-      label: "Scored cells",
-      value: String(metrics.scoredCells),
-      sub: `${metrics.scoredPairs.length} pairs · ${regressed} regressed · ${improved} improved`,
-      delta: netPassing !== 0 ? deltaChip(netPassing, (v) => `${v} net passing`, "up-good", deltaTitle) : undefined,
+      label: "Changed cells",
+      value: String(metrics.changes.length),
+      sub: `of ${plural(metrics.scoredCells, "scored cell")}`,
+      delta: moved ? { label: moved, tone: regressed > 0 ? "fail" : "pass", title: deltaTitle } : undefined,
     },
     {
       label: "Avg duration",
       value: fmtDuration(avgDuration(cur)),
       sub: avgDuration(base) > 0 ? `was ${fmtDuration(avgDuration(base))}` : undefined,
-      delta: avgDuration(cur) > 0 && avgDuration(base) > 0 && durationDelta !== 0
+      delta: avgDuration(cur) > 0 && avgDuration(base) > 0
         ? deltaChip(durationDelta, (v) => fmtDuration(v), "down-good", deltaTitle)
         : undefined,
     },
     {
-      label: "Avg agent cost / run",
+      label: "Avg agent cost",
       value: fmtCost(avgCost(cur)),
       sub: avgCost(base) > 0 ? `was ${fmtCost(avgCost(base))}` : undefined,
-      delta: avgCost(cur) > 0 && avgCost(base) > 0 && costDelta !== 0
+      delta: avgCost(cur) > 0 && avgCost(base) > 0
         ? deltaChip(costDelta, (v) => `$${v.toFixed(2)}`, "down-good", deltaTitle)
         : undefined,
     },
@@ -554,33 +571,35 @@ function buildKpis(metrics: KpiMetrics): Kpi[] {
 function buildMultiSegmentKpis(model: CompareModel): Kpi[] {
   const regressed = model.changes.filter((change) => change.row.change === "regressed").length;
   const improved = model.changes.length - regressed;
-  const guarded = (model.includePromptChanges ? 0 : model.promptChanged) + model.definitionChangedPairs;
+  const promptOut = model.includePromptChanges ? 0 : model.promptChanged;
+  const excluded = promptOut + model.definitionChangedPairs;
+  const excludedWhy = [
+    promptOut > 0 ? `${promptOut} prompt changed` : null,
+    model.definitionChangedPairs > 0 ? `${model.definitionChangedPairs} rubric changed` : null,
+  ].filter(Boolean).join(", ");
 
   return [
     {
-      label: "Compare scope",
-      value: `${model.segments.length} segments`,
-      sub: "agent/model/runner metrics are split below",
-      tone: "warn",
+      label: "Segments",
+      value: String(model.segments.length),
+      sub: "Compared separately below",
     },
     {
       label: "Scored pairs",
       value: String(model.scoredPairs.length),
-      sub: model.scoredPairs.some((pair) => pair.promptChanged)
-        ? "different-prompt pairs included"
-        : "not aggregated into pass-rate deltas",
+      sub: model.scoredPairs.some((pair) => pair.promptChanged) ? "Includes different prompts" : undefined,
     },
     {
       label: "Changed cells",
       value: String(model.changes.length),
-      sub: `${regressed} regressed · ${improved} improved`,
+      sub: changeSummary(regressed, improved) ?? "None regressed or improved",
       tone: regressed > 0 ? "fail" : improved > 0 ? "pass" : "neutral",
     },
     {
-      label: "Guarded out",
-      value: String(guarded),
-      sub: `${model.includePromptChanges ? 0 : model.promptChanged} prompt · ${model.definitionChangedPairs} definition`,
-      tone: guarded > 0 ? "warn" : "neutral",
+      label: "Excluded pairs",
+      value: String(excluded),
+      sub: excluded > 0 ? excludedWhy : "Prompts and rubrics match",
+      tone: excluded > 0 ? "warn" : "neutral",
     },
   ];
 }
@@ -675,63 +694,67 @@ export function CompareView({
     router.replace(`/compare?${params.toString()}`, { scroll: false });
   };
 
+  // Show version names, not internal ids, in sentences and drill-downs.
+  const baselineName = evalVersionDisplayNameById(versions, versionBaseline);
+  const currentName = evalVersionDisplayNameById(versions, versionCurrent);
   const regressed = model.changes.filter((change) => change.row.change === "regressed").length;
   const improved = model.changes.length - regressed;
   const singleSegment = model.segments.length === 1 ? model.segments[0] : null;
+  const sameVersion = versionBaseline === versionCurrent;
+  const baseDocs = docsText(docsBase);
+  const curDocs = docsText(docsCur);
+  const docsLine = baseDocs || curDocs ? `Docs ${baseDocs ?? "unlabeled"} → ${curDocs ?? "unlabeled"}` : null;
+  // When no pair has a deep audit, say so once instead of tagging every cell.
+  const allUnaudited = model.pairs.length > 0 && model.unauditedPairs === model.pairs.length;
+  const legend = {
+    changes: model.changes.length > 0,
+    unscored: model.segments.some((segment) => segment.rows.some((row) => row.change === "unscored")),
+    promptMismatch: includePromptChanges && model.promptChanged > 0,
+    excluded: model.definitionChangedPairs > 0,
+    unaudited: model.unauditedPairs > 0 && !allUnaudited,
+  };
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-fg-faint">
-            <GitCompareArrows className="h-3.5 w-3.5" aria-hidden />
-            Compare
-          </div>
-          <h1 className="mt-1 text-xl font-semibold tracking-tight text-foreground">Version comparison</h1>
-          <p className="mt-1 text-sm text-fg-muted">
-            Reads left to right: baseline → current. Deltas are current minus baseline
-            {includePromptChanges ? ", including marked different-prompt cells." : ", over prompt-identical cells."}
-          </p>
-        </div>
-
-        <div className="shrink-0">
-          <div className="flex items-end gap-2">
-            <VersionPicker
-              label="Baseline (older)"
-              value={versionBaseline}
-              versions={versions}
-              docs={docsBase}
-              onChange={(value) => setVersion("b", value)}
-            />
-            <span className="pb-6 text-sm text-fg-muted" aria-hidden>→</span>
-            <VersionPicker
-              label="Current (newer)"
-              value={versionCurrent}
-              versions={versions}
-              docs={docsCur}
-              onChange={(value) => setVersion("a", value)}
-            />
-            <button
-              type="button"
-              onClick={swap}
-              className="mb-5 inline-flex h-8 w-8 items-center justify-center rounded-md border border-rule text-fg-muted hover:bg-surface hover:text-foreground"
-              aria-label="Swap baseline and current"
-              title="Swap baseline and current"
-            >
-              <ArrowLeftRight className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-          {singleSegment && (
-            <div className="mt-1 flex flex-wrap justify-end gap-1.5">
-              <ConstantChip label="Agent" value={singleSegment.agentName} />
-              <ConstantChip label="Model" value={singleSegment.modelLabel} />
-              {singleSegment.runner
-                ? <ConstantChip label="Runner" value={singleSegment.runner} />
-                : <ConstantChip label="Runner" value="not recorded" warn />}
+    <div className="space-y-6">
+      <PageHeader
+        title="Compare versions"
+        meta={singleSegment ? <SegmentMeta segment={singleSegment} /> : undefined}
+        actions={(
+          <div className="flex w-full flex-col items-stretch gap-1.5 sm:w-auto sm:items-end">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="w-full sm:w-56">
+                <VersionCombobox
+                  prefix="Baseline"
+                  value={versionBaseline}
+                  options={versions}
+                  onChange={(value) => setVersion("b", value)}
+                  ariaLabel="Baseline version"
+                />
+              </div>
+              <ArrowRight className="hidden h-3.5 w-3.5 shrink-0 text-fg-faint sm:block" aria-hidden />
+              <div className="min-w-0 flex-1 sm:w-56 sm:flex-none">
+                <VersionCombobox
+                  prefix="Current"
+                  value={versionCurrent}
+                  options={versions}
+                  onChange={(value) => setVersion("a", value)}
+                  ariaLabel="Current version"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={swap}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-rule text-fg-muted hover:bg-surface hover:text-foreground"
+                aria-label="Swap baseline and current"
+                title="Swap baseline and current"
+              >
+                <ArrowLeftRight className="h-3.5 w-3.5" aria-hidden />
+              </button>
             </div>
-          )}
-        </div>
-      </div>
+            {docsLine && <p className="text-[12px] text-fg-faint">{docsLine}</p>}
+          </div>
+        )}
+      />
 
       {model.promptChanged > 0 && (
         <PromptDifferenceNotice
@@ -743,19 +766,20 @@ export function CompareView({
 
       {model.pairs.length > 0 && (
         <p className="text-[15px] text-foreground">
-          {model.changes.length === 0 ? (
-            <>
-              <span className="font-semibold">No changes</span>
-              {" "}since {versionBaseline} — all {model.scoredCells} scored cell{model.scoredCells === 1 ? "" : "s"} held.
-            </>
+          {sameVersion ? (
+            versions.length < 2
+              ? <>There&apos;s only one version so far, so both sides show <span className="font-semibold">{currentName}</span>.</>
+              : <>Both sides show <span className="font-semibold">{currentName}</span>. Pick a different baseline to see changes.</>
+          ) : model.changes.length === 0 ? (
+            <><span className="font-semibold">No changes</span> since {baselineName}.</>
           ) : (
             <>
               <span className="font-semibold">
-                {regressed > 0 && `${regressed} cell${regressed === 1 ? "" : "s"} regressed`}
+                {regressed > 0 && `${plural(regressed, "cell")} regressed`}
                 {regressed > 0 && improved > 0 && ", "}
-                {improved > 0 && `${improved} improved`}
+                {improved > 0 && `${regressed > 0 ? improved : plural(improved, "cell")} improved`}
               </span>
-              {" "}since {versionBaseline} — the other {model.heldCells} scored cell{model.heldCells === 1 ? "" : "s"} held.
+              {" "}since {baselineName}.
             </>
           )}
         </p>
@@ -765,7 +789,7 @@ export function CompareView({
 
       {model.changes.length > 0 && (
         <section className="space-y-2">
-          <SectionHead title="What changed" count={`${model.changes.length} cell${model.changes.length === 1 ? "" : "s"}`} />
+          <SectionHead title="What changed" count={plural(model.changes.length, "cell")} />
           <div className="space-y-2">
             {model.changes.map(({ segment, row }) => (
               <ChangeCard
@@ -783,33 +807,34 @@ export function CompareView({
       {model.segments.length === 0 ? (
         <div className="rounded-lg border border-rule bg-background p-8 text-center text-sm text-fg-muted">
           {model.matchedPairs > 0 && model.promptChanged > 0 && !includePromptChanges
-            ? "No prompt-identical comparable cells. Turn on “Compare different prompts” above to inspect these versions anyway."
-            : "No comparable cells for these versions."}
+            ? "No cells share a prompt. Turn on “Compare different prompts” above to compare them anyway."
+            : "No cells to compare for these versions."}
         </div>
       ) : (
-        <section className="space-y-6">
+        <section className="space-y-8">
           {model.segments.map((segment) => (
-            <div key={segment.key} className="space-y-2">
-              <div className="flex items-baseline justify-between gap-3">
+            <div key={segment.key} className="space-y-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                 <SectionHead
-                  title="All cells"
-                  count={`${segment.tasks.length} task${segment.tasks.length === 1 ? "" : "s"} × ${segment.configs.length} config${segment.configs.length === 1 ? "" : "s"} · current shown, arrow marks movement`}
+                  title={singleSegment ? "Cells" : `${segment.agentName} · ${segment.modelLabel}`}
+                  count={`${plural(segment.tasks.length, "task")} × ${plural(segment.configs.length, "config")}`}
                 />
                 {!singleSegment && (
-                  <div className="flex flex-wrap justify-end gap-1.5">
-                    <ConstantChip label="Agent" value={segment.agentName} />
-                    <ConstantChip label="Model" value={segment.modelLabel} />
-                    {segment.runner
-                      ? <ConstantChip label="Runner" value={segment.runner} />
-                      : <ConstantChip label="Runner" value="not recorded" warn />}
-                  </div>
+                  <span className={cn("text-[12px]", segment.runner ? "text-fg-faint" : "text-warn")}>
+                    {segment.runner ? `Runner ${segment.runner}` : "Runner not recorded"}
+                  </span>
                 )}
               </div>
               {!singleSegment && <KpiStrip items={buildKpis(metricsFromRows(segment.rows))} />}
-              <CompareGrid segment={segment} activeRowKey={activeRowKey} onSelectRow={setActiveRowKey} />
+              <CompareGrid
+                segment={segment}
+                activeRowKey={activeRowKey}
+                onSelectRow={setActiveRowKey}
+                showUnaudited={!allUnaudited}
+              />
             </div>
           ))}
-          <GridLegend showPromptMismatch={includePromptChanges && model.promptChanged > 0} />
+          <GridLegend {...legend} />
         </section>
       )}
 
@@ -819,15 +844,37 @@ export function CompareView({
             key={activeRow.row.key}
             segmentLabel={activeRow.segment.label}
             row={activeRow.row}
-            versionCurrent={versionCurrent}
-            versionBaseline={versionBaseline}
+            versionCurrent={currentName}
+            versionBaseline={baselineName}
+            showAudit={!allUnaudited}
             onClose={() => setActiveRowKey(null)}
           />
         </div>
       )}
 
-      <GuardsFootnote model={model} versionCurrent={versionCurrent} versionBaseline={versionBaseline} />
+      <CompareFootnote
+        model={model}
+        versionCurrent={currentName}
+        versionBaseline={baselineName}
+        allUnaudited={allUnaudited}
+        showDeltaNote={!sameVersion}
+      />
     </div>
+  );
+}
+
+// What every cell on the page shares when there is a single segment.
+function SegmentMeta({ segment }: { segment: Segment }) {
+  return (
+    <>
+      <span>{segment.agentName}</span>
+      <MetaDot />
+      <span>{segment.modelLabel}</span>
+      <MetaDot />
+      {segment.runner
+        ? <span>Runner {segment.runner}</span>
+        : <span className="text-warn">Runner not recorded</span>}
+    </>
   );
 }
 
@@ -883,47 +930,8 @@ function PromptDifferenceNotice({
 function SectionHead({ title, count }: { title: string; count?: string }) {
   return (
     <div className="flex items-baseline gap-2.5">
-      <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">{title}</h2>
-      {count && <span className="text-[11px] text-fg-faint">{count}</span>}
-    </div>
-  );
-}
-
-function ConstantChip({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px]",
-        warn ? "border-warn/40 bg-warn-faint text-warn" : "border-rule bg-surface text-fg-muted",
-      )}
-    >
-      {label} <b className={cn("font-medium", warn ? "text-warn" : "text-foreground")}>{value}</b>
-    </span>
-  );
-}
-
-function VersionPicker({
-  label,
-  value,
-  versions,
-  docs,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  versions: CompareVersionOption[];
-  docs: { label: string; captured: string };
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="min-w-0">
-      <span className="block text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint">{label}</span>
-      <div className="mt-1">
-        <VersionCombobox value={value} options={versions} onChange={onChange} ariaLabel={label} />
-      </div>
-      <span className="mt-1 block max-w-44 truncate text-[10px] text-fg-faint" title={`${docs.label} · ${docs.captured}`}>
-        docs: {docs.label} · {docs.captured}
-      </span>
+      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+      {count && <span className="text-[12px] text-fg-faint">{count}</span>}
     </div>
   );
 }
@@ -968,15 +976,15 @@ function ChangeCard({
         regressed ? "border-l-fail" : "border-l-pass",
       )}
     >
-      <span className={cn("w-[86px] shrink-0 text-[10px] font-bold uppercase tracking-[0.08em]", regressed ? "text-fail" : "text-pass")}>
+      <span className={cn("w-[86px] shrink-0 text-[12px] font-semibold", regressed ? "text-fail" : "text-pass")}>
         {regressed ? "Regressed" : "Improved"}
       </span>
       <span className="min-w-52 text-[13px]">
         <b className="font-semibold text-foreground">{row.taskName}</b>
         <span className="text-fg-muted"> · {row.configLabel}</span>
         {row.promptChanged > 0 && (
-          <span className="ml-2 rounded-[3px] border border-warn/40 bg-warn-faint px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.05em] text-warn">
-            prompt Δ
+          <span className="ml-2 rounded-sm bg-warn-faint px-1.5 py-0.5 text-[11px] font-medium text-warn">
+            Prompt Δ
           </span>
         )}
         {showSegment && <span className="ml-2 text-[11px] text-fg-faint">{segment.agentName} · {segment.modelLabel}</span>}
@@ -987,7 +995,7 @@ function ChangeCard({
         <span className="font-semibold text-foreground">{frac(row.cur)}</span>
         <span className="ml-1 flex items-center gap-1" aria-hidden>
           {scoredPairs.map((pair) => <RunDot key={`b-${pair.key}`} passed={!!pair.base.passed} title={`${pair.base.run} baseline: ${pair.base.passed ? "pass" : "fail"}`} />)}
-          <span className="mx-0.5 text-[10px] text-fg-faint">→</span>
+          <span className="mx-0.5 text-[11px] text-fg-faint">→</span>
           {scoredPairs.map((pair) => <RunDot key={`c-${pair.key}`} passed={!!pair.cur.passed} title={`${pair.cur.run} current: ${pair.cur.passed ? "pass" : "fail"}`} />)}
         </span>
       </span>
@@ -1001,7 +1009,7 @@ function ChangeCard({
           onClick={onSelect}
           className="border-b border-rule text-fg-muted hover:border-fg-faint hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/40"
         >
-          sessions →
+          View runs
         </button>
       </span>
     </div>
@@ -1012,20 +1020,22 @@ function CompareGrid({
   segment,
   activeRowKey,
   onSelectRow,
+  showUnaudited,
 }: {
   segment: Segment;
   activeRowKey: string | null;
   onSelectRow: (key: string) => void;
+  showUnaudited: boolean;
 }) {
   return (
     <div className="overflow-hidden rounded-lg border border-rule bg-background">
       <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="bg-surface/60">
-              <th className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint">Task</th>
+            <tr>
+              <th className="px-4 py-2 text-left text-[12px] font-medium text-fg-faint">Task</th>
               {segment.configs.map((config) => (
-                <th key={config.id} className="px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint" style={{ minWidth: 150 }}>
+                <th key={config.id} className="px-2 py-2 text-center text-[12px] font-medium text-fg-faint" style={{ minWidth: 150 }}>
                   {config.label}
                 </th>
               ))}
@@ -1036,8 +1046,8 @@ function CompareGrid({
               <tr key={taskRow.task} className="border-t border-rule">
                 <td className="whitespace-nowrap px-4 py-2.5">
                   <span className="text-[13px] font-medium text-foreground">{taskRow.taskName}</span>
-                  <span className="ml-2 text-[10px] tabular-nums text-fg-faint">
-                    {[...taskRow.byConfig.values()].reduce((sum, row) => sum + row.pairs.length, 0)} pairs
+                  <span className="ml-2 text-[12px] tabular-nums text-fg-faint">
+                    {plural([...taskRow.byConfig.values()].reduce((sum, row) => sum + row.pairs.length, 0), "pair")}
                   </span>
                 </td>
                 {segment.configs.map((config) => {
@@ -1045,7 +1055,7 @@ function CompareGrid({
                   return (
                     <td key={config.id} className="p-0 align-middle">
                       {row ? (
-                        <GridCell row={row} active={activeRowKey === row.key} onSelect={() => onSelectRow(row.key)} />
+                        <GridCell row={row} active={activeRowKey === row.key} onSelect={() => onSelectRow(row.key)} showUnaudited={showUnaudited} />
                       ) : (
                         <div className="py-2.5 text-center text-[12px] text-fg-faint">–</div>
                       )}
@@ -1061,7 +1071,7 @@ function CompareGrid({
   );
 }
 
-function GridCell({ row, active, onSelect }: { row: RowStats; active: boolean; onSelect: () => void }) {
+function GridCell({ row, active, onSelect, showUnaudited }: { row: RowStats; active: boolean; onSelect: () => void; showUnaudited: boolean }) {
   const changed = row.change === "regressed" || row.change === "improved";
 
   if (row.change === "excluded") {
@@ -1071,7 +1081,7 @@ function GridCell({ row, active, onSelect }: { row: RowStats; active: boolean; o
         title="Grading criteria changed between versions — excluded from comparison"
       >
         excluded
-        <span className="absolute right-1.5 top-1 rounded-[3px] border border-warn/40 bg-warn-faint px-1 text-[9px] font-semibold text-warn">rubric Δ</span>
+        <span className="absolute right-1.5 top-1 rounded-sm bg-warn-faint px-1 text-[11px] font-medium text-warn">Rubric Δ</span>
       </div>
     );
   }
@@ -1111,22 +1121,19 @@ function GridCell({ row, active, onSelect }: { row: RowStats; active: boolean; o
           <span className="text-[11px] text-fg-muted">was {frac(row.base)}</span>
         </>
       ) : (
-        <>
-          <span className="text-[13px] text-fg-muted">{row.cur.total > 0 ? frac(row.cur) : frac(row.base)}</span>
-          <span className="text-[11px] text-fg-faint" aria-hidden>·</span>
-        </>
+        <span className="text-[13px] text-fg-muted">{row.cur.total > 0 ? frac(row.cur) : frac(row.base)}</span>
       )}
       {row.promptChanged > 0 && (
         <span
-          className="absolute left-1.5 top-1 rounded-[3px] border border-warn/40 bg-warn-faint px-1 text-[9px] font-semibold text-warn"
+          className="absolute left-1.5 top-1 rounded-sm bg-warn-faint px-1 text-[11px] font-medium text-warn"
           title={promptTitle}
         >
-          prompt Δ{row.promptChanged < row.pairs.length ? ` ${row.promptChanged}` : ""}
+          Prompt Δ{row.promptChanged < row.pairs.length ? ` ${row.promptChanged}` : ""}
         </span>
       )}
-      {row.unaudited > 0 && (
+      {showUnaudited && row.unaudited > 0 && (
         <span
-          className="absolute right-1.5 top-1 rounded-[3px] border border-rule bg-background px-1 text-[9px] font-semibold text-fg-faint"
+          className="absolute right-1.5 top-1 rounded-sm bg-foreground/[0.05] px-1 text-[11px] font-medium text-fg-muted"
           title={`${row.unaudited} pair${row.unaudited === 1 ? "" : "s"} without a deep audit — exit-code result only`}
         >
           {row.unaudited} unaudited
@@ -1136,54 +1143,84 @@ function GridCell({ row, active, onSelect }: { row: RowStats; active: boolean; o
   );
 }
 
-function GridLegend({ showPromptMismatch }: { showPromptMismatch: boolean }) {
+function GridLegend({
+  changes,
+  unscored,
+  promptMismatch,
+  excluded,
+  unaudited,
+}: {
+  changes: boolean;
+  unscored: boolean;
+  promptMismatch: boolean;
+  excluded: boolean;
+  unaudited: boolean;
+}) {
+  if (!changes && !unscored && !promptMismatch && !excluded && !unaudited) return null;
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-fg-muted">
-      <span className="inline-flex items-center gap-1.5"><span className="font-bold text-fail" aria-hidden>▼</span> regressed</span>
-      <span className="inline-flex items-center gap-1.5"><span className="font-bold text-pass" aria-hidden>▲</span> improved</span>
-      <span className="inline-flex items-center gap-1.5"><span aria-hidden>·</span> unchanged</span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="inline-block h-2 w-2 rounded-full border border-dashed border-fg-faint" aria-hidden /> unscored
-      </span>
-      {showPromptMismatch && (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-fg-muted">
+      {changes && (
+        <>
+          <span className="inline-flex items-center gap-1.5"><span className="font-bold text-fail" aria-hidden>▼</span> Regressed</span>
+          <span className="inline-flex items-center gap-1.5"><span className="font-bold text-pass" aria-hidden>▲</span> Improved</span>
+        </>
+      )}
+      {unscored && (
         <span className="inline-flex items-center gap-1.5">
-          <span className="rounded-[3px] border border-warn/40 bg-warn-faint px-1 text-[9px] font-semibold text-warn">prompt Δ</span>
-          different prompts — included with caution
+          <span className="inline-block h-2 w-2 rounded-full border border-dashed border-fg-faint" aria-hidden /> Unscored
         </span>
       )}
-      <span className="inline-flex items-center gap-1.5">
-        <span className="rounded-[3px] border border-warn/40 bg-warn-faint px-1 text-[9px] font-semibold text-warn">rubric Δ</span>
-        grading criteria differ — excluded
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="rounded-[3px] border border-rule bg-background px-1 text-[9px] font-semibold text-fg-faint">unaudited</span>
-        exit-code result only
-      </span>
+      {promptMismatch && (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="rounded-sm bg-warn-faint px-1 text-[11px] font-medium text-warn">Prompt Δ</span>
+          Different prompt, included
+        </span>
+      )}
+      {excluded && (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="rounded-sm bg-warn-faint px-1 text-[11px] font-medium text-warn">Rubric Δ</span>
+          Rubric changed, left out
+        </span>
+      )}
+      {unaudited && (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="rounded-sm bg-foreground/[0.05] px-1 text-[11px] font-medium text-fg-muted">Unaudited</span>
+          Exit code only
+        </span>
+      )}
     </div>
   );
 }
 
-function GuardsFootnote({ model, versionCurrent, versionBaseline }: { model: CompareModel; versionCurrent: string; versionBaseline: string }) {
-  const items: string[] = [
-    `${model.matchedPairs} pairs matched`,
-    `${model.scoredPairs.length} scored & compared`,
-  ];
+// One quiet paragraph for the bookkeeping: what matched, what was left out.
+function CompareFootnote({
+  model,
+  versionCurrent,
+  versionBaseline,
+  allUnaudited,
+  showDeltaNote,
+}: {
+  model: CompareModel;
+  versionCurrent: string;
+  versionBaseline: string;
+  allUnaudited: boolean;
+  showDeltaNote: boolean;
+}) {
+  const sentences: string[] = [`${plural(model.matchedPairs, "pair")} matched, ${model.scoredPairs.length} scored.`];
   if (model.promptChanged > 0) {
-    items.push(model.includePromptChanges
-      ? `${model.promptChanged} prompt-changed — included with caution`
-      : `${model.promptChanged} excluded — prompt changed`);
+    sentences.push(model.includePromptChanges
+      ? `${model.promptChanged} with a different prompt ${model.promptChanged === 1 ? "is" : "are"} included.`
+      : `${model.promptChanged} with a different prompt ${model.promptChanged === 1 ? "is" : "are"} left out.`);
   }
-  if (model.definitionChangedPairs > 0) items.push(`${model.definitionChangedPairs} excluded — definition changed or unavailable`);
-  if (model.unpairedCur > 0) items.push(`${model.unpairedCur} unpaired (only in ${versionCurrent})`);
-  if (model.unpairedBase > 0) items.push(`${model.unpairedBase} unpaired (only in ${versionBaseline})`);
-  if (model.duplicateKeys > 0) items.push(`${model.duplicateKeys} duplicate keys skipped`);
-  if (model.unauditedPairs > 0) items.push(`${model.unauditedPairs} unaudited`);
+  if (model.definitionChangedPairs > 0) sentences.push(`${model.definitionChangedPairs} left out because the rubric changed.`);
+  if (model.unpairedCur > 0) sentences.push(`${model.unpairedCur} only in ${versionCurrent}.`);
+  if (model.unpairedBase > 0) sentences.push(`${model.unpairedBase} only in ${versionBaseline}.`);
+  if (model.duplicateKeys > 0) sentences.push(`${plural(model.duplicateKeys, "duplicate")} skipped.`);
+  if (allUnaudited) sentences.push("No pair has a deep audit, so results come from exit codes.");
+  else if (model.unauditedPairs > 0) sentences.push(`${model.unauditedPairs} without a deep audit use the exit code only.`);
+  if (showDeltaNote) sentences.push("Deltas are current minus baseline.");
 
-  return (
-    <div className="flex flex-wrap gap-x-6 gap-y-1.5 rounded-md border border-rule bg-surface px-4 py-3 text-[12px] text-fg-muted">
-      {items.map((item) => <span key={item} className="whitespace-nowrap">{item}</span>)}
-    </div>
-  );
+  return <p className="max-w-[75ch] text-[12px] leading-5 text-fg-muted">{sentences.join(" ")}</p>;
 }
 
 function DrilldownPanel({
@@ -1191,35 +1228,37 @@ function DrilldownPanel({
   row,
   versionCurrent,
   versionBaseline,
+  showAudit,
   onClose,
 }: {
   segmentLabel: string;
   row: RowStats;
   versionCurrent: string;
   versionBaseline: string;
+  showAudit: boolean;
   onClose: () => void;
 }) {
   const docsRelevant = isDocsRelevant(row);
   return (
     <section className="rounded-lg border border-rule bg-background">
-      <div className="flex items-start justify-between border-b border-rule px-5 py-3">
-        <div>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint">Sessions</div>
-          <h2 className="mt-1 text-sm font-semibold text-foreground">{row.taskName} / {row.configLabel}</h2>
-          <p className="mt-1 text-[12px] text-fg-muted">{segmentLabel}</p>
+      <div className="flex items-start justify-between gap-4 border-b border-rule px-5 py-3.5">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-foreground">{row.taskName} · {row.configLabel}</h2>
+          <p className="mt-0.5 text-[12px] text-fg-muted">{segmentLabel}</p>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md border border-rule px-2 py-1 text-[11px] text-fg-muted hover:bg-surface hover:text-foreground"
+          aria-label="Close runs"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface hover:text-foreground"
         >
-          close
+          <X className="h-3.5 w-3.5" aria-hidden />
         </button>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="bg-surface/60">
+            <tr>
               <DrillTh className="pl-5 text-left" minWidth={140}>Run</DrillTh>
               <DrillTh className="text-left" minWidth={210}>{versionBaseline} (baseline)</DrillTh>
               <DrillTh className="text-left" minWidth={210}>{versionCurrent} (current)</DrillTh>
@@ -1235,28 +1274,20 @@ function DrilldownPanel({
                   <td className="py-3 pl-5 pr-3 align-top">
                     <div className="text-[12px] font-medium text-foreground">{pair.cur.run}</div>
                     {pair.promptChanged && (
-                      <div className="mt-0.5 text-[10px] text-warn">prompt Δ — included with caution</div>
+                      <div className="mt-0.5 text-[11px] text-warn">Prompt Δ — included with caution</div>
                     )}
                     {pair.definitionChanged && (
-                      <div className="mt-0.5 text-[10px] text-warn">rubric Δ — excluded</div>
+                      <div className="mt-0.5 text-[11px] text-warn">Rubric Δ — excluded</div>
                     )}
                   </td>
-                  <SessionLinkCell session={pair.base} />
-                  <SessionLinkCell session={pair.cur} />
-                  <td className="px-3 py-3 text-right align-top text-[11px] tabular-nums text-fg-muted">
-                    <div>{fmtSignedDuration(pair.cur.durationSec - pair.base.durationSec)}</div>
-                    <div>{pair.cur.costUsd !== null && pair.base.costUsd !== null ? fmtSignedCost(pair.cur.costUsd - pair.base.costUsd) : "—"}</div>
-                    {pair.bothScored && (
-                      <div className={cn("font-medium", !resultChanged ? "text-fg-faint" : pair.cur.passed ? "text-pass" : "text-fail")}>
-                        {!resultChanged ? "same result" : pair.cur.passed ? "improved" : "regressed"}
-                      </div>
-                    )}
-                  </td>
+                  <SessionLinkCell session={pair.base} showAudit={showAudit} />
+                  <SessionLinkCell session={pair.cur} showAudit={showAudit} />
+                  <PairDeltaCell pair={pair} resultChanged={resultChanged} />
                   {docsRelevant && (
                     <td className="py-3 pr-5 align-top">
                       <div className="text-[11px] text-fg-muted">{docsUsageLabel(pair.base)} → {docsUsageLabel(pair.cur)}</div>
                       {(docsLabel(pair.base) || docsLabel(pair.cur)) && (
-                        <div className="mt-1 text-[10px] text-fg-faint">
+                        <div className="mt-1 text-[11px] text-fg-faint">
                           docs: {docsLabel(pair.base) || "unlabeled"} → {docsLabel(pair.cur) || "unlabeled"}
                         </div>
                       )}
@@ -1283,7 +1314,7 @@ function DrillTh({
 }) {
   return (
     <th
-      className={cn("px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint", className)}
+      className={cn("px-3 py-2 text-[12px] font-medium text-fg-faint", className)}
       style={minWidth ? { minWidth } : undefined}
     >
       {children}
@@ -1291,23 +1322,44 @@ function DrillTh({
   );
 }
 
-function SessionLinkCell({ session }: { session: CompareSession }) {
+function SessionLinkCell({ session, showAudit }: { session: CompareSession; showAudit: boolean }) {
   return (
     <td className="px-3 py-3 align-top">
       <Link
         href={`/s/${encodeURIComponent(session.id)}`}
-        className="group inline-flex items-center gap-1 text-[12px] font-medium text-foreground hover:text-info"
+        className="group inline-flex items-center gap-1.5 text-[12px] font-medium text-foreground"
+        aria-label={`Open ${session.run} (${session.result || "unknown"})`}
       >
         <StatusBadge kind={statusFromResult(session.result, session.passed)} size="sm" />
-        <span>{session.result || "unknown"}</span>
-        <ExternalLink className="h-3 w-3 text-fg-faint group-hover:text-info" aria-hidden />
+        <ExternalLink className="h-3 w-3 text-fg-faint group-hover:text-foreground" aria-hidden />
       </Link>
-      <div className="mt-1 text-[10px] tabular-nums text-fg-faint">
+      <div className="mt-1 text-[12px] tabular-nums text-fg-muted">
         {fmtDuration(session.durationSec)} · <RunCost value={session.costUsd} source={session.costSource} />
       </div>
-      {!session.auditVerdict && (
-        <div className="mt-1 text-[10px] text-warn">no deep audit</div>
+      {showAudit && !session.auditVerdict && (
+        <div className="mt-1 text-[12px] text-warn">No deep audit</div>
       )}
+    </td>
+  );
+}
+
+// What moved for one pair; a pair where nothing moved says so once.
+function PairDeltaCell({ pair, resultChanged }: { pair: ComparePair; resultChanged: boolean }) {
+  const durationDelta = pair.cur.durationSec - pair.base.durationSec;
+  const costDelta = pair.cur.costUsd !== null && pair.base.costUsd !== null ? pair.cur.costUsd - pair.base.costUsd : null;
+  const lines = [
+    durationDelta !== 0 ? { text: fmtSignedDuration(durationDelta), tone: "text-fg-muted" } : null,
+    costDelta !== null && Math.abs(costDelta) >= 0.005 ? { text: fmtSignedCost(costDelta), tone: "text-fg-muted" } : null,
+    pair.bothScored && resultChanged
+      ? { text: pair.cur.passed ? "Improved" : "Regressed", tone: cn("font-medium", pair.cur.passed ? "text-pass" : "text-fail") }
+      : null,
+  ].filter((line): line is { text: string; tone: string } => line !== null);
+
+  return (
+    <td className="px-3 py-3 text-right align-top text-[12px] tabular-nums">
+      {lines.length === 0
+        ? <span className="text-fg-faint">No change</span>
+        : lines.map((line) => <div key={line.text} className={line.tone}>{line.text}</div>)}
     </td>
   );
 }

@@ -226,7 +226,7 @@ export function EvaluatorSourceDrawer({
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 text-fg-muted">
                     <FileCode2 className="h-4 w-4" aria-hidden />
-                    <span className="text-[11px] font-medium uppercase tracking-[0.12em]">
+                    <span className="text-[12px] font-medium">
                       Check code
                     </span>
                   </div>

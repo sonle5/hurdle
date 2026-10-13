@@ -5,7 +5,8 @@ import "./globals.css";
 
 // Replace app/icon.svg to change the favicon; Next generates its metadata and URL.
 export const metadata: Metadata = {
-  title: "Hurdle",
+  // Pages set their own title (a task, a run, Compare); the Leaderboard keeps the default.
+  title: { default: "Hurdle", template: "%s · Hurdle" },
   description: "Inspect canonical Run Records from an agent evaluation Result Store",
 };
 

@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import type { ParsedMessage } from "@/lib/sessions";
-import Link from "next/link";
-import { Activity, User, Bot, Terminal, FileText, Pencil, Search, Globe, Zap, ListChecks, CheckCircle, Sparkles } from "lucide-react";
+import { User, Bot, Terminal, FileText, Pencil, Search, Globe, Zap, ListChecks, CheckCircle, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SidebarFooter } from "@/components/shell/SidebarFooter";
 import { SidebarToggle } from "@/components/shell/ResizableSidebarShell";
+import { Brand } from "@/components/shell/Brand";
 
 const toolIcons: Record<string, typeof Terminal> = {
   Bash: Terminal,
@@ -48,46 +48,45 @@ export function SessionSidebar({ messages, collapsed, onCollapsedChange }: {
 
   if (collapsed) {
     return (
-      <div className="hidden h-full w-full flex-col items-center bg-sidebar lg:flex">
-        <div className="flex h-12 w-full shrink-0 items-center justify-center border-b border-rule">
-          <Link href="/" className="font-mono text-sm font-semibold text-foreground">hurdle</Link>
+      <div className="hidden h-full w-full flex-col items-center gap-1 bg-sidebar lg:flex">
+        <div className="mt-2 flex h-12 w-full shrink-0 items-center justify-center">
+          <Brand collapsed />
         </div>
-        <div className="mt-2"><SidebarToggle collapsed={collapsed} onCollapsedChange={onCollapsedChange} /></div>
+        <SidebarToggle collapsed={collapsed} onCollapsedChange={onCollapsedChange} />
       </div>
     );
   }
 
   return (
     <div className="hidden h-full w-full min-w-0 flex-col bg-sidebar lg:flex">
-      {/* Brand */}
-      <div className="px-3 h-12 border-b border-rule flex items-center justify-between flex-shrink-0">
-        <Link href="/" className="inline-flex items-center gap-1.5 font-mono text-sm font-semibold text-foreground">
-          <Activity className="h-3.5 w-3.5 text-fg-muted" strokeWidth={2.25} />
-          hurdle
-        </Link>
+      {/* Brand — same row and alignment as the app rail. */}
+      <div className="mt-2 flex h-12 flex-shrink-0 items-center justify-between pl-5 pr-3">
+        <Brand />
         <SidebarToggle collapsed={collapsed} onCollapsedChange={onCollapsedChange} />
       </div>
-      {/* Filters */}
-      <div className="px-3 py-2.5 border-b border-rule flex flex-wrap gap-1 flex-shrink-0">
-        {(["default", "no-tools", "user", "all"] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            aria-pressed={filter === f}
-            className={cn(
-              "px-2.5 py-1.5 text-xs rounded-md border transition-colors",
-              filter === f
-                ? "bg-background border-foreground/40 text-foreground font-medium"
-                : "border-transparent text-fg-muted hover:text-foreground hover:bg-foreground/5",
-            )}
-          >
-            {f === "default" ? "Default" : f === "no-tools" ? "No-tools" : f === "user" ? "User" : "All"}
-          </button>
-        ))}
+      {/* Filters — one segmented control; the chosen view is a raised segment. */}
+      <div className="flex-shrink-0 px-3 pb-2 pt-1">
+        <div className="flex rounded-lg bg-sidebar-accent p-0.5">
+          {(["default", "no-tools", "user", "all"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              aria-pressed={filter === f}
+              className={cn(
+                "h-6 flex-auto whitespace-nowrap rounded-md px-2 text-xs transition-colors",
+                filter === f
+                  ? "bg-background font-medium text-foreground shadow-xs ring-1 ring-rule"
+                  : "text-fg-muted hover:text-foreground",
+              )}
+            >
+              {f === "default" ? "Default" : f === "no-tools" ? "No-tools" : f === "user" ? "User" : "All"}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Entries */}
-      <div className="flex-1 overflow-y-auto py-1.5">
+      <div className="flex-1 overflow-y-auto pt-1.5 pb-4 [mask-image:linear-gradient(to_bottom,transparent,#000_12px,#000_calc(100%_-_16px),transparent)]">
         {filtered.map((m, i) => (
           <SidebarEntry key={m.uuid ?? i} message={m} index={i} />
         ))}
@@ -136,10 +135,10 @@ function SidebarEntry({ message, index }: { message: ParsedMessage; index: numbe
   const RoleIcon = isTaskNotif ? CheckCircle : isSkill ? Sparkles : isUser ? User : Bot;
 
   return (
-    <div className="px-1.5" onClick={scrollTo}>
+    <div className="px-3" onClick={scrollTo}>
       {/* User/Assistant label + text */}
       {(isUser || firstText) && (
-        <div className="flex items-center gap-1.5 px-2 py-1 min-h-[40px] rounded-md cursor-pointer hover:bg-foreground/5">
+        <div className="flex items-center gap-1.5 px-2 py-1 min-h-[40px] rounded-md cursor-pointer hover:bg-sidebar-accent">
           <RoleIcon className={cn("h-3.5 w-3.5 flex-shrink-0",
             isTaskNotif ? "text-fg-faint" :
             isSkill    ? "text-warn" :
@@ -190,7 +189,7 @@ function SidebarEntry({ message, index }: { message: ParsedMessage; index: numbe
           <div
             key={block.id}
             className={cn(
-              "flex items-center gap-1.5 pl-7 pr-2 py-0.5 rounded-md cursor-pointer hover:bg-foreground/5 text-xs",
+              "flex items-center gap-1.5 pl-7 pr-2 py-0.5 rounded-md cursor-pointer hover:bg-sidebar-accent text-xs",
               isSkillRead ? "text-warn" : "text-fg-muted",
             )}
           >

@@ -86,11 +86,12 @@ export function SessionDetailTabs({
 
   return (
     <div className="space-y-8">
-      <div className="sticky top-0 z-20 -mx-4 bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:-mx-8 sm:px-8">
+      {/* Underline tabs, stuck under the 48px top bar on the panel surface. */}
+      <div className="sticky top-12 z-20 bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/80">
         <div
           role="tablist"
           aria-label="Session sections"
-          className="flex h-11 gap-5 border-b border-rule sm:gap-7"
+          className="flex gap-6 border-b border-rule"
         >
           {tabs.map((tab) => {
             const selected = active === tab.key;
@@ -104,18 +105,18 @@ export function SessionDetailTabs({
                 id={`session-${tab.key}-tab`}
                 onClick={() => selectTab(tab.key)}
                 className={cn(
-                  "-mb-px inline-flex min-w-0 items-center justify-center gap-1.5 border-b-2 px-0.5 text-xs font-medium transition-colors duration-150",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30",
+                  "-mb-px inline-flex h-11 min-w-0 items-center gap-2 border-b-2 text-[13px] font-medium transition-colors duration-150",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:rounded-sm",
                   selected
                     ? "border-foreground text-foreground"
-                    : "border-transparent text-fg-muted hover:text-foreground",
+                    : "border-transparent text-fg-muted hover:border-foreground/15 hover:text-foreground",
                 )}
               >
                 <span className="truncate">{tab.label}</span>
                 <span
                   className={cn(
-                    "min-w-4 shrink-0 rounded-full px-1 text-[10px] tabular-nums",
-                    selected ? "bg-surface text-fg-muted" : "bg-background/70 text-fg-faint",
+                    "min-w-5 shrink-0 rounded-full px-1.5 text-center text-[11px] font-medium leading-[18px] tabular-nums",
+                    selected ? "bg-foreground/[0.08] text-foreground" : "bg-foreground/[0.05] text-fg-muted",
                   )}
                 >
                   {tab.count}

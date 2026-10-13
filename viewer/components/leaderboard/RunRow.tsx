@@ -4,7 +4,7 @@ import { RunCost } from "@/components/RunCost";
 import { AgentTokens } from "@/components/TokensDisplay";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { cn, formatModel } from "@/lib/utils";
+import { cn, formatDuration, formatModel } from "@/lib/utils";
 import { AgentLogo } from "@/components/AgentLogo";
 import { StatusDot, statusFromResult, StatusBadge } from "@/components/ui/StatusBadge";
 
@@ -34,9 +34,7 @@ export type RunRowData = {
 };
 
 function fmtDuration(sec: number) {
-  if (sec <= 0) return "—";
-  if (sec < 60) return `${sec}s`;
-  return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  return sec > 0 ? formatDuration(sec) : "—";
 }
 
 function ElapsedTimer({ startedAt }: { startedAt: string }) {
@@ -68,9 +66,9 @@ export function RunRow({ s, showTask = true, density = "comfortable", className 
       data-row-focus
       href={`/s/${s.id}`}
       className={cn(
-        "group flex items-center gap-3 border-b border-rule last:border-b-0 hover:bg-foreground/[0.02] transition-colors",
+        "group flex items-center gap-3 border-b border-rule last:border-b-0 hover:bg-foreground/[0.03] transition-colors",
         "focus-visible:outline-none focus-visible:bg-foreground/[0.04]",
-        density === "compact" ? "px-3 py-1.5" : "px-4 py-2.5",
+        density === "compact" ? "px-3 py-1.5" : "px-5 py-2.5",
         className,
       )}
     >
@@ -78,15 +76,15 @@ export function RunRow({ s, showTask = true, density = "comfortable", className 
 
       <div className="min-w-0 flex-1 flex items-baseline gap-2">
         {showTask && (
-          <span className="text-[12px] font-medium text-foreground truncate">{s.task}</span>
+          <span className="text-[13px] font-medium text-foreground truncate">{s.task}</span>
         )}
-        <span className="text-[11px] text-fg-faint truncate">
+        <span className={cn("truncate", showTask ? "text-[12px] text-fg-faint" : "text-[13px] text-foreground")}>
           {s.configLabel}
           {s.run ? ` · ${s.run.replace("run", "run ")}` : ""}
         </span>
       </div>
 
-      <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-fg-muted">
+      <span className="hidden sm:inline-flex items-center gap-1.5 text-[12px] text-fg-muted">
         <AgentLogo agent={s.agent} className="h-3 w-3" />
         <span className="hidden md:inline">{s.agentLabel ?? s.agent}</span>
         {formatModel(s.model, s.modelResolved) && (
@@ -94,7 +92,7 @@ export function RunRow({ s, showTask = true, density = "comfortable", className 
         )}
       </span>
 
-      <div className="flex items-center gap-3 text-[11px] tabular-nums text-fg-muted">
+      <div className="flex items-center gap-3 text-[12px] tabular-nums text-fg-muted">
         <span className="w-14 text-right">
           {isRunning && s.createdAt ? <ElapsedTimer startedAt={s.createdAt} /> : fmtDuration(s.durationSec)}
         </span>

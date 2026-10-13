@@ -38,13 +38,13 @@ export function CodeBlock({
 
   if (!html) {
     return (
-      <pre className={cn("text-xs text-fg-muted overflow-x-auto bg-surface p-2 rounded whitespace-pre-wrap", className)}>{code}</pre>
+      <pre className={cn("text-xs text-fg-muted overflow-x-auto bg-surface p-2 rounded-md whitespace-pre-wrap", className)}>{code}</pre>
     );
   }
 
   return (
     <div
-      className={cn("text-xs overflow-x-auto rounded [&_pre]:p-2 [&_pre]:bg-surface [&_pre]:rounded [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap", className)}
+      className={cn("text-xs overflow-x-auto rounded-md [&_pre]:p-2 [&_pre]:bg-surface [&_pre]:rounded-md [&_pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap", className)}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

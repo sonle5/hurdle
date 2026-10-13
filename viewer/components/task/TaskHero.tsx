@@ -1,9 +1,9 @@
 import { KpiStrip, tonePassRate } from "@/components/leaderboard/KpiStrip";
+import { PageHeader } from "@/components/shell/PageHeader";
+import { formatDuration } from "@/lib/utils";
 
 function fmtTime(sec: number) {
-  if (sec <= 0) return "—";
-  if (sec < 60) return `${sec}s`;
-  return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  return sec > 0 ? formatDuration(sec) : "—";
 }
 
 export function TaskHero({
@@ -31,14 +31,8 @@ export function TaskHero({
 }) {
   const passPct = total > 0 ? Math.round((pass / total) * 100) : 0;
   return (
-    <header className="space-y-4">
-      <div>
-        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint">Task</div>
-        <h1 className="mt-1 font-mono text-xl font-semibold tracking-tight text-foreground">{slug}</h1>
-        {prompt && (
-          <p className="mt-2 max-w-3xl text-[13px] text-fg-muted leading-relaxed">{prompt}</p>
-        )}
-      </div>
+    <div className="space-y-6">
+      <PageHeader title={slug} description={prompt} />
       {showKpis && (
         <KpiStrip
           items={[
@@ -49,6 +43,6 @@ export function TaskHero({
           ]}
         />
       )}
-    </header>
+    </div>
   );
 }

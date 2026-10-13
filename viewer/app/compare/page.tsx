@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import { CompareView, type CompareSession } from "@/components/compare/CompareView";
@@ -14,6 +15,8 @@ import { formatModel } from "@/lib/utils";
 import { evalVersionDisplayNameById } from "@/lib/version-display";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = { title: "Compare" };
 
 const AGENT_LABEL: Record<string, string> = {
   CC: "Claude Code",

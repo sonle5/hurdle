@@ -5,6 +5,8 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export { formatDuration } from "./format-duration.mjs";
+
 // Human-readable model label. Prefers the resolved version, falls back to the
 // alias. Examples: claude-opus-4-7 → "Opus 4.7", claude-sonnet-4-6 → "Sonnet 4.6",
 // gpt-5.5 → "GPT-5.5", opus → "Opus", "" → null.

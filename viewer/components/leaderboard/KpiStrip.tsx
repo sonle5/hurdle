@@ -40,16 +40,16 @@ export function KpiStrip({ items, className }: { items: Kpi[]; className?: strin
     >
       <div className={cn("grid gap-px", cols)}>
         {items.map((k) => (
-          <div key={k.label} className="bg-background px-5 py-4 flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint">{k.label}</span>
-            <span className={cn("text-[22px] font-semibold tracking-tight tabular-nums leading-none", TONE_TEXT[k.tone ?? "neutral"])}>
+          <div key={k.label} className="bg-background px-5 py-4 flex flex-col gap-1.5">
+            <span className="meta-label">{k.label}</span>
+            <span className={cn("text-2xl font-semibold tracking-[-0.025em] tabular-nums leading-7", TONE_TEXT[k.tone ?? "neutral"])}>
               {k.value}
             </span>
-            {k.sub && <span className="text-[11px] text-fg-faint tabular-nums">{k.sub}</span>}
+            {k.sub && <span className="-mt-0.5 text-[12px] text-fg-faint tabular-nums">{k.sub}</span>}
             {k.delta && (
               <span
                 title={k.delta.title}
-                className={cn("text-[11px] font-medium tabular-nums", TONE_TEXT[k.delta.tone ?? "neutral"])}
+                className={cn("-mt-0.5 text-[12px] font-medium tabular-nums", TONE_TEXT[k.delta.tone ?? "neutral"])}
               >
                 {k.delta.label}
               </span>

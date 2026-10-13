@@ -22,8 +22,8 @@ export function RecentRuns({
   return (
     <div className={`rounded-lg border border-rule bg-background overflow-hidden ${className ?? ""}`}>
       <div className="flex items-baseline justify-between px-5 py-3 border-b border-rule">
-        <h2 className="text-[13px] font-semibold text-foreground">Recent runs</h2>
-        <span className="text-[10px] tabular-nums text-fg-faint">{Math.min(limit, sessions.length)} of {sessions.length}</span>
+        <h2 className="text-sm font-semibold text-foreground">Recent runs</h2>
+        <span className="text-[12px] tabular-nums text-fg-faint">{Math.min(limit, sessions.length)} of {sessions.length}</span>
       </div>
       <div>
         {sorted.map((s) => <RunRow key={s.id} s={s} />)}

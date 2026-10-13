@@ -66,8 +66,8 @@ export function RunsByConfig({
     <section className="rounded-lg border border-rule bg-background overflow-hidden">
       <header className="px-5 py-3 border-b border-rule flex items-center justify-between">
         <div>
-          <h2 className="text-[13px] font-semibold text-foreground">Runs</h2>
-          <p className="text-[11px] text-fg-faint mt-0.5">Click any row to open the session and audit detail.</p>
+          <h2 className="text-sm font-semibold text-foreground">Runs</h2>
+          <p className="text-[12px] text-fg-muted mt-0.5">Click a row to open the run and its review.</p>
         </div>
         <ExportMenu filenameBase={taskSlug ? `${taskSlug}-runs` : "task-runs"} onExport={handleExport} />
       </header>

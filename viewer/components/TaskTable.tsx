@@ -8,13 +8,8 @@ import { ChevronRight, ArrowUp, ArrowDown } from "lucide-react";
 import { AgentLogo } from "@/components/AgentLogo";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge, statusFromResult } from "@/components/ui/StatusBadge";
-import { cn, formatModel } from "@/lib/utils";
+import { cn, formatDuration, formatModel } from "@/lib/utils";
 
-const formatDuration = (sec: number) => {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-};
 
 const agentLabel = (a: string) =>
   a === "Pi" ? "Pi" : a === "CDX" ? "Codex" : a === "OC" ? "OpenCode" : "Claude Code";
@@ -54,7 +49,7 @@ const columns: { key: SortKey; label: string; thClassName?: string; cellClassNam
   { key: "agent",          label: "Harness",     thClassName: "w-40",      cellClassName: "w-40" },
   { key: "passed",         label: "Result",      thClassName: "w-28",      cellClassName: "w-28" },
   { key: "durationSec",    label: "Time",        align: "right",           thClassName: "w-24", cellClassName: "w-24" },
-  { key: "toolCalls",      label: "Tool Calls",  hideOnMobile: true, align: "right", thClassName: "w-24", cellClassName: "w-24" },
+  { key: "toolCalls",      label: "Tool calls",  hideOnMobile: true, align: "right", thClassName: "w-24", cellClassName: "w-24" },
   { key: "totalTokens",    label: "Agent tokens", hideOnMobile: true, align: "right", thClassName: "w-28", cellClassName: "w-28" },
   { key: "costUsd",        label: "Agent cost",  align: "right",           thClassName: "w-24", cellClassName: "w-24" },
 ];
@@ -90,12 +85,12 @@ export function TaskTable({ sessions }: { sessions: SessionRow[] }) {
     <div className="rounded-lg overflow-hidden border border-rule bg-background">
       <Table className="table-fixed">
         <TableHeader>
-          <TableRow className="bg-surface/60 hover:bg-surface/60">
+          <TableRow className="hover:bg-transparent">
             {columns.map((col) => (
               <TableHead
                 key={col.key}
                 className={cn(
-                  "cursor-pointer select-none text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-muted hover:text-foreground",
+                  "cursor-pointer select-none text-[12px] font-medium text-fg-muted hover:text-foreground",
                   col.align === "right" && "text-right",
                   col.thClassName,
                   col.hideOnMobile && hide,
@@ -121,7 +116,7 @@ export function TaskTable({ sessions }: { sessions: SessionRow[] }) {
             >
               <TableCell className="pl-5 py-3 w-44">
                 <div className="font-medium text-foreground">{s.configId}</div>
-                <div className="text-[10px] text-fg-muted mt-0.5">{s.configLabel}</div>
+                <div className="text-[11px] text-fg-muted mt-0.5">{s.configLabel}</div>
               </TableCell>
               <TableCell className="text-xs text-fg-muted py-3 w-40">
                 <span className="inline-flex items-center gap-1.5">
@@ -129,7 +124,7 @@ export function TaskTable({ sessions }: { sessions: SessionRow[] }) {
                   {agentLabel(s.agent)}
                 </span>
                 {formatModel(s.model, s.modelResolved) && (
-                  <div className="text-[10px] text-fg-faint mt-0.5">{formatModel(s.model, s.modelResolved)}</div>
+                  <div className="text-[11px] text-fg-faint mt-0.5">{formatModel(s.model, s.modelResolved)}</div>
                 )}
               </TableCell>
               <TableCell className="py-3 w-28">
@@ -138,7 +133,7 @@ export function TaskTable({ sessions }: { sessions: SessionRow[] }) {
                   {s.needsFollowup && (
                     <span
                       title={s.followupReason || "needs followup"}
-                      className="text-[10px] px-1.5 py-0.5 rounded-sm border border-warn/30 bg-warn-faint text-warn"
+                      className="text-[11px] px-1.5 py-0.5 rounded-sm border border-warn/30 bg-warn-faint text-warn"
                     >
                       ↻ followup
                     </span>
@@ -170,7 +165,7 @@ export function TaskTable({ sessions }: { sessions: SessionRow[] }) {
       {sorted.length > INITIAL_ROWS && (
         <button
           onClick={() => setShowAll(!showAll)}
-          className="w-full py-2.5 text-[11px] text-fg-muted hover:text-foreground hover:bg-surface border-t border-rule transition-colors"
+          className="w-full py-2.5 text-[12px] text-fg-muted hover:text-foreground hover:bg-surface border-t border-rule transition-colors"
         >
           {showAll ? "Show less" : `Show all ${sorted.length} runs`}
         </button>

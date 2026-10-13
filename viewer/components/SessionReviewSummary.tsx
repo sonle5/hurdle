@@ -1,5 +1,4 @@
 import { RunCost } from "@/components/RunCost";
-import { Clock3, Database, Gauge, ShieldCheck } from "lucide-react";
 import { StatusBadge, type StatusKind } from "@/components/ui/StatusBadge";
 type DeterministicOverall = "consistent" | "violated" | "insufficient_evidence" | "not_applicable";
 import { cn } from "@/lib/utils";
@@ -125,11 +124,11 @@ export function SessionReviewSummary({
   const runStart = formatRunStart(startedAt);
 
   return (
-    <section className="mb-8 overflow-hidden rounded-lg border border-rule bg-surface/30">
-      <div className="grid sm:grid-cols-6">
-        <div className="min-w-0 border-b border-rule px-5 py-5 sm:col-span-3 sm:border-r sm:px-6">
-          <div className="mb-2 flex items-center gap-1.5 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint">
-            <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+    <section className="mb-8 overflow-hidden rounded-lg border border-rule bg-background">
+      {/* 2×2 on narrow columns; one row of four, like the Leaderboard KPIs, once the page is wide. */}
+      <div className="grid sm:grid-cols-6 @4xl:grid-cols-4">
+        <div className="min-w-0 border-b border-rule px-5 py-5 sm:col-span-3 sm:border-r sm:px-6 @4xl:col-span-1 @4xl:border-b-0">
+          <div className="meta-label mb-2 whitespace-nowrap">
             Decision
           </div>
           <div className="flex min-h-6 items-center gap-2">
@@ -137,18 +136,16 @@ export function SessionReviewSummary({
           </div>
         </div>
 
-        <div className="min-w-0 border-b border-rule px-5 py-5 sm:col-span-3 sm:px-6">
-          <div className="mb-2 flex items-center gap-1.5 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint">
-            <Gauge className="h-3.5 w-3.5" aria-hidden />
+        <div className="min-w-0 border-b border-rule px-5 py-5 sm:col-span-3 sm:px-6 @4xl:col-span-1 @4xl:border-b-0 @4xl:border-r">
+          <div className="meta-label mb-2 whitespace-nowrap">
             Judge
           </div>
           <div className="truncate text-base font-medium leading-6 text-foreground">{auditVerdict ? labelize(auditVerdict) : judgeStatusLabel ?? "Missing"}</div>
           {auditConfidence && <div className="mt-0.5 text-xs text-fg-muted">{auditConfidence} confidence</div>}
         </div>
 
-        <div className="min-w-0 border-b border-rule px-5 py-5 sm:col-span-3 sm:border-b-0 sm:border-r sm:px-6">
-          <div className="mb-2 flex items-center gap-1.5 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint">
-            <Database className="h-3.5 w-3.5" aria-hidden />
+        <div className="min-w-0 border-b border-rule px-5 py-5 sm:col-span-3 sm:border-b-0 sm:border-r sm:px-6 @4xl:col-span-1">
+          <div className="meta-label mb-2 whitespace-nowrap">
             Deterministic
           </div>
           <div className="text-base font-medium leading-6">
@@ -163,9 +160,8 @@ export function SessionReviewSummary({
           )}
         </div>
 
-        <div className="min-w-0 px-5 py-5 sm:col-span-3 sm:px-6">
-          <div className="mb-2 flex items-center gap-1.5 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-faint">
-            <Clock3 className="h-3.5 w-3.5" aria-hidden />
+        <div className="min-w-0 px-5 py-5 sm:col-span-3 sm:px-6 @4xl:col-span-1">
+          <div className="meta-label mb-2 whitespace-nowrap">
             Run
           </div>
           <div className="text-base font-medium leading-6 tabular-nums text-foreground" title={runStart.title}>

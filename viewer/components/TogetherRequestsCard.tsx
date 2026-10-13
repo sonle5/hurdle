@@ -57,10 +57,8 @@ export function TogetherRequestsCard({
 
   return (
     <div className="rounded-lg border border-rule overflow-hidden bg-background">
-      <div className="flex items-center justify-between px-5 py-3 border-b border-rule bg-surface/40">
-        <h2 className="text-xs font-semibold text-fg-muted uppercase tracking-[0.08em]">
-          API calls — captured
-        </h2>
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-rule">
+        <h2 className="text-sm font-semibold text-foreground">Captured API calls</h2>
         <span className="text-xs text-fg-muted tabular-nums">
           {requests.length}{truncated ? "+" : ""} call{requests.length !== 1 || truncated ? "s" : ""}
           {blocked > 0 && <span className="text-warn"> · {blocked} blocked</span>}
@@ -117,7 +115,7 @@ export function TogetherRequestsCard({
                   {showModel && <TableCell className="font-mono text-[11px] text-fg-muted">{r.model || "—"}</TableCell>}
                   {showTokens && <TableCell className="text-right font-mono text-[11px] text-fg-muted tabular-nums">{isWs ? "—" : tokens}</TableCell>}
                   <TableCell className="text-right font-mono text-[11px] text-fg-muted tabular-nums">{r.duration_ms ?? "—"}</TableCell>
-                  {showResponseId && <TableCell className="font-mono text-[10px] text-fg-faint truncate">{r.response_id || "—"}</TableCell>}
+                  {showResponseId && <TableCell className="font-mono text-[11px] text-fg-faint truncate">{r.response_id || "—"}</TableCell>}
                 </TableRow>
               );
             })}

@@ -16,7 +16,7 @@ const components: Components = {
     <tr className="border-b border-rule last:border-b-0">{children}</tr>
   ),
   th: ({ children }) => (
-    <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-muted">
+    <th className="px-3 py-2 text-left text-[12px] font-medium text-fg-muted">
       {children}
     </th>
   ),

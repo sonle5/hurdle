@@ -25,7 +25,7 @@ export function GettingStarted({ steps = FIRST_RUN_STEPS, needsRunOptions = fals
           Run this command in your project terminal.
         </p>
       </div>
-      <div className="overflow-hidden rounded-xl border border-rule bg-surface px-4 py-4 sm:px-5">
+      <div className="overflow-hidden rounded-lg border border-rule bg-background px-4 py-4 shadow-xs sm:px-5">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="text-sm font-medium">{step.title}</h2>
           <CopyButton value={step.command} label="Copy" ariaLabel={`Copy ${step.title.toLowerCase()} command`} size="xs" />

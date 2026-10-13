@@ -1,8 +1,11 @@
 import { RunCost } from "@/components/RunCost";
 import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
+import type { Metadata } from "next";
 import Link from "next/link";
-import { ChevronLeft, Package, Terminal } from "lucide-react";
+import { ChevronLeft, ChevronRight, Package, Terminal } from "lucide-react";
+import { TopBar, type Crumb } from "@/components/shell/TopBar";
+import { MetaDot, PageHeader } from "@/components/shell/PageHeader";
 import { AgentLogo, type AgentCode } from "@/components/AgentLogo";
 import { TogetherRequestsCard } from "@/components/TogetherRequestsCard";
 import { SessionDetailTabs } from "@/components/SessionDetailTabs";
@@ -17,7 +20,9 @@ import { readSidebarLayout } from "@/lib/browser-layout-storage";
 import { ScrollToTop } from "@/components/ScrollToTop";
 import { ScrollToHash } from "@/components/ScrollToHash";
 import { CopyButton } from "@/components/ui/CopyButton";
-import { getSessionById, getAllSessions, type SessionSummary } from "@/lib/queries";
+import { getSessionById, getAllSessions, getVersions, type SessionSummary } from "@/lib/queries";
+import { formatModel } from "@/lib/utils";
+import { evalVersionDisplayNameById } from "@/lib/version-display";
 import { StatusBadge, statusFromResult } from "@/components/ui/StatusBadge";
 import {
   CanonicalSessionReview,
@@ -126,7 +131,7 @@ function ModelDetails({ requested, observed }: { requested: string | null; obser
   if (!model) return <span className="text-fg-muted">Not recorded</span>;
   return (
     <span className="inline-flex flex-wrap items-baseline gap-x-2 gap-y-1">
-      <span className="font-mono text-sm break-all">{model}</span>
+      <span className="font-mono break-all">{model}</span>
       {!observedModel ? (
         <span className="text-xs text-fg-muted">requested</span>
       ) : requestedModel && requestedModel !== observedModel ? (
@@ -210,6 +215,58 @@ function ExecutionDetails({ runtime }: { runtime: SessionSummary["runtime"] }) {
     </span>
   );
 }
+
+const AGENT_NAME: Record<string, string> = { CC: "Claude Code", CDX: "Codex", OC: "OpenCode", Pi: "Pi" };
+
+function agentCode(agent: string): AgentCode {
+  return (["CC", "CDX", "OC", "Pi"].includes(agent) ? agent : "CC") as AgentCode;
+}
+
+function runLabel(run: string | null | undefined): string | null {
+  return run ? `Run ${run.replace(/^run/i, "")}` : null;
+}
+
+function PagerButton({ href, label, direction }: { href?: string; label: string; direction: "prev" | "next" }) {
+  const Icon = direction === "prev" ? ChevronLeft : ChevronRight;
+  const className = "inline-flex h-7 w-7 items-center justify-center rounded-md border border-rule text-fg-muted";
+  if (!href) {
+    return <span aria-hidden className={`${className} opacity-40`}><Icon className="h-3.5 w-3.5" /></span>;
+  }
+  return (
+    <Link
+      href={href}
+      title={label}
+      aria-label={label}
+      className={`${className} bg-background transition-colors duration-150 hover:border-foreground/25 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2`}
+    >
+      <Icon className="h-3.5 w-3.5" aria-hidden />
+    </Link>
+  );
+}
+
+// Previous and next runs of the same task, in the order the task's tables use.
+function RunPager({ index, total, prev, next }: {
+  index: number;
+  total: number;
+  prev: { href: string; label: string } | null;
+  next: { href: string; label: string } | null;
+}) {
+  if (total <= 1 || index < 0) return null;
+  return (
+    <div className="flex shrink-0 items-center gap-1.5">
+      <span className="mr-1 text-[12px] tabular-nums text-fg-muted">{index + 1} / {total}</span>
+      <PagerButton direction="prev" href={prev?.href} label={prev ? `Previous run: ${prev.label}` : "No previous run"} />
+      <PagerButton direction="next" href={next?.href} label={next ? `Next run: ${next.label}` : "No next run"} />
+    </div>
+  );
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const run = await getSessionById(decodeURIComponent(id)).catch(() => null);
+  if (!run) return { title: "Run" };
+  return { title: [run.configFull, runLabel(run.run), run.task].filter(Boolean).join(" · ") };
+}
 export default async function SessionPage({
   params,
 }: {
@@ -230,37 +287,98 @@ export default async function SessionPage({
     ? (rawTogetherRequests.filter((row) => row && typeof row === "object") as Array<Record<string, unknown>>)
     : [];
   const togetherRequestsTruncated = dbSessionRecord.togetherRequestsTruncated === true;
+  // Shared frame: breadcrumbs, version chip, pager and page header.
+  const [versions, allSessions] = await Promise.all([
+    getVersions().catch(() => []),
+    getAllSessions(dbSession.version),
+  ]);
+  const versionLabel = evalVersionDisplayNameById(versions, dbSession.version) || undefined;
+  const versionQuery = `?v=${encodeURIComponent(dbSession.version)}`;
+  const agent = agentCode(dbSession.agent);
+  const agentName = AGENT_NAME[dbSession.agent] ?? dbSession.agent;
+  const thisRun = runLabel(dbSession.run);
+  const modelLabel = formatModel(dbSession.model, dbSession.modelResolved);
+  const crumbs: Crumb[] = [
+    { label: "Leaderboard", href: `/${versionQuery}` },
+    { label: dbSession.task, href: `/t/${encodeURIComponent(dbSession.task)}${versionQuery}` },
+    { label: [dbSession.configFull, thisRun].filter(Boolean).join(" · ") },
+  ];
+
+  // Prev / next within the same task.
+  const sameTask = allSessions
+    .filter((s) => s.task === dbSession.task)
+    .sort((a, b) => {
+      const configCmp = a.configId.localeCompare(b.configId);
+      if (configCmp !== 0) return configCmp;
+      return (a.run || "").localeCompare(b.run || "");
+    });
+  const currentIdx = sameTask.findIndex((s) => s.id === id);
+  const prevSession = currentIdx > 0 ? sameTask[currentIdx - 1] : null;
+  const nextSession = currentIdx >= 0 && currentIdx < sameTask.length - 1 ? sameTask[currentIdx + 1] : null;
+  const prevSessionAction = prevSession
+    ? {
+      href: `/s/${prevSession.id}`,
+      label: prevSession.configDir + (prevSession.run ? ` / ${prevSession.run}` : ""),
+    }
+    : null;
+  const nextSessionAction = nextSession
+    ? {
+      href: `/s/${nextSession.id}`,
+      label: nextSession.configDir + (nextSession.run ? ` / ${nextSession.run}` : ""),
+    }
+    : null;
+
+  const topBar = (
+    <TopBar
+      crumbs={crumbs}
+      versionLabel={versionLabel}
+      right={<RunPager index={currentIdx} total={sameTask.length} prev={prevSessionAction} next={nextSessionAction} />}
+    />
+  );
+  const pageHeader = (
+    <PageHeader
+      className="mb-8"
+      title={dbSession.configFull}
+      meta={(
+        <>
+          <span>{dbSession.task}</span>
+          {thisRun && <><MetaDot /><span>{thisRun}</span></>}
+          <MetaDot />
+          <span className="inline-flex items-center gap-1.5"><AgentLogo agent={agent} className="h-3.5 w-3.5" />{agentName}</span>
+          {modelLabel && <><MetaDot /><span>{modelLabel}</span></>}
+        </>
+      )}
+    />
+  );
+
   // Completed sessions without JSONL — minimal placeholder.
   if (!dbSession.sessionJsonl) {
     return (
-      <div className="min-h-screen bg-background text-foreground">
-        <div className="max-w-3xl mx-auto px-4 py-6 sm:px-8 sm:py-8">
-          <Link href={`/?v=${dbSession.version}`} className="inline-flex items-center gap-1 text-sm text-fg-muted hover:text-foreground mb-6">
-            <ChevronLeft className="h-3.5 w-3.5" /> Back
-          </Link>
-          <div className="mb-4">
-            <span className="text-sm text-fg-muted">{dbSession.task} / {dbSession.configDir} / {dbSession.run}</span>
-            <h1 className="text-xl font-semibold mt-1">{dbSession.configFull}</h1>
-          </div>
-          <div className="rounded-lg border border-rule p-5 space-y-3 bg-background">
-            <div className="flex items-center gap-2">
-              <StatusBadge kind={statusKind} size="md" />
+      <div className="h-full overflow-y-auto bg-background text-foreground">
+        {topBar}
+        <div className="px-4 pb-16 pt-8 sm:px-6 lg:px-8">
+          <div className="mx-auto w-full max-w-7xl">
+            {pageHeader}
+            <div className="rounded-lg border border-rule p-5 space-y-3 bg-background">
+              <div className="flex items-center gap-2">
+                <StatusBadge kind={statusKind} size="md" />
+              </div>
+              <div className="text-sm"><span className="text-fg-muted mr-2">Execution:</span><ExecutionDetails runtime={dbSession.runtime} /></div>
+              <div className="text-sm"><span className="text-fg-muted mr-2">Model:</span><ModelDetails requested={dbSession.model} observed={dbSession.modelResolved} /></div>
+              {dbSession.durationSec > 0 && <p className="text-sm text-fg-muted">Duration: {formatDuration(dbSession.durationSec)}</p>}
+              {dbSession.toolCalls != null && <p className="text-sm text-fg-muted">Tool calls: {dbSession.toolCalls}</p>}
+              <p className="text-sm text-fg-muted">Agent cost: <RunCost value={dbSession.costUsd} source={dbSession.costSource} /></p>
+              <ToolVersionBadges items={toolVersions} agent={dbSession.agent} />
+              {dbSession.note && <p className="max-w-[75ch] text-sm text-fg-muted">{dbSession.note}</p>}
+              <CanonicalSessionReview prompt={dbSession.prompt} checks={canonicalStoredChecks(dbSessionRecord.storedChecks)} judge={canonicalJudgeReview(dbSessionRecord.deepAudit)} runId={readString(dbSessionRecord.canonicalRunId)} evaluatorSources={canonicalEvaluatorSources(dbSessionRecord.evaluatorSources)} />
+              {togetherRequests.length > 0 && (
+                <TogetherRequestsCard
+                  requests={togetherRequests as Parameters<typeof TogetherRequestsCard>[0]["requests"]}
+                  truncated={togetherRequestsTruncated}
+                />
+              )}
+              <p className="text-xs text-fg-faint pt-2">Session JSONL not available — conversation view requires the full session log.</p>
             </div>
-            <div className="text-sm"><span className="text-fg-muted mr-2">Execution:</span><ExecutionDetails runtime={dbSession.runtime} /></div>
-            <div className="text-sm"><span className="text-fg-muted mr-2">Model:</span><ModelDetails requested={dbSession.model} observed={dbSession.modelResolved} /></div>
-            {dbSession.durationSec > 0 && <p className="text-sm text-fg-muted">Duration: {Math.floor(dbSession.durationSec / 60)}m {dbSession.durationSec % 60}s</p>}
-            {dbSession.toolCalls != null && <p className="text-sm text-fg-muted">Tool calls: {dbSession.toolCalls}</p>}
-            <p className="text-sm text-fg-muted">Agent cost: <RunCost value={dbSession.costUsd} source={dbSession.costSource} /></p>
-            <ToolVersionBadges items={toolVersions} agent={dbSession.agent} />
-            {dbSession.note && <p className="text-sm text-fg-muted">{dbSession.note}</p>}
-            <CanonicalSessionReview prompt={dbSession.prompt} checks={canonicalStoredChecks(dbSessionRecord.storedChecks)} judge={canonicalJudgeReview(dbSessionRecord.deepAudit)} runId={readString(dbSessionRecord.canonicalRunId)} evaluatorSources={canonicalEvaluatorSources(dbSessionRecord.evaluatorSources)} />
-            {togetherRequests.length > 0 && (
-              <TogetherRequestsCard
-                requests={togetherRequests as Parameters<typeof TogetherRequestsCard>[0]["requests"]}
-                truncated={togetherRequestsTruncated}
-              />
-            )}
-            <p className="text-xs text-fg-faint pt-2">Session JSONL not available — conversation view requires the full session log.</p>
           </div>
         </div>
       </div>
@@ -413,67 +531,19 @@ export default async function SessionPage({
   const reviewCount = storedChecks.length + (canonicalJudge ? 1 : 0);
   const evidenceCount = 1 + (togetherRequests.length > 0 ? 1 : 0) + (toolsUsed.length > 0 ? 1 : 0);
 
-  // Prev / next within the same task.
-  const allSessions = await getAllSessions(dbSession.version);
-  const sameTask = allSessions
-    .filter((s) => s.task === session.task)
-    .sort((a, b) => {
-      const configCmp = a.configId.localeCompare(b.configId);
-      if (configCmp !== 0) return configCmp;
-      return (a.run || "").localeCompare(b.run || "");
-    });
-  const currentIdx = sameTask.findIndex((s) => s.id === id);
-  const prevSession = currentIdx > 0 ? sameTask[currentIdx - 1] : null;
-  const nextSession = currentIdx < sameTask.length - 1 ? sameTask[currentIdx + 1] : null;
-  const prevSessionAction = prevSession
-    ? {
-      href: `/s/${prevSession.id}`,
-      label: prevSession.configDir + (prevSession.run ? ` / ${prevSession.run}` : ""),
-    }
-    : null;
-  const nextSessionAction = nextSession
-    ? {
-      href: `/s/${nextSession.id}`,
-      label: nextSession.configDir + (nextSession.run ? ` / ${nextSession.run}` : ""),
-    }
-    : null;
-
   return (
     <ResizableSessionShell messages={session.messages} initialRailWidth={sidebarLayout.width} initialRailCollapsed={sidebarLayout.collapsed}>
       <div id="main-scroll" className="relative h-full overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-4 py-8 sm:px-8 sm:py-10">
-          {/* Breadcrumb + nav */}
-          <div className="mb-8 flex items-center justify-between">
-            <Link
-              href={`/?v=${dbSession.version}`}
-              className="inline-flex items-center gap-1 text-sm text-fg-muted hover:text-foreground transition-colors"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-              Back
-            </Link>
-          </div>
-
-          {/* Header */}
-          <div className="mb-8">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm text-fg-muted">
-                  {session.task} / {session.dirName}
-                </span>
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded bg-surface border border-rule text-fg-muted">
-                  <img src={session.agent === "Pi" ? "/pi-logo.svg" : session.agent === "CDX" ? "/codex-logo.svg" : session.agent === "OC" ? "/opencode-logo.svg" : "/claude-logo.svg"} alt={session.agent} className="h-3 w-3" />
-                  {session.agent === "Pi" ? "Pi" : session.agent === "CDX" ? "Codex" : session.agent === "OC" ? "OpenCode" : "Claude Code"}
-                </span>
-              </div>
-              <h1 className="text-xl font-semibold tracking-tight text-balance">{session.configFull}</h1>
-            </div>
-          </div>
+        {topBar}
+        <div className="px-4 pb-16 pt-8 sm:px-6 lg:px-8">
+        <div className="@container mx-auto w-full max-w-7xl">
+          {pageHeader}
 
           {/* Results path — with copy button */}
           {dbSession.resultsPath && (
-            <div className="mb-8 rounded-lg border border-rule bg-surface/40 px-4 py-3 space-y-2">
+            <div className="mb-8 rounded-lg border border-rule bg-background px-4 py-3">
               <div className="flex items-center gap-2">
-                <code className="flex-1 font-mono text-[11px] text-fg-muted break-all">
+                <code className="flex-1 font-mono text-[12px] text-fg-muted break-all">
                   open: code {dbSession.resultsPath}
                 </code>
                 <CopyButton value={`code ${dbSession.resultsPath}`} size="xs" />
@@ -482,9 +552,9 @@ export default async function SessionPage({
           )}
 
           {dbSession.note && dbSession.result !== "pass" && (
-            <section className="mb-8 rounded-lg border border-rule bg-surface/30 p-5" aria-label="Run limitations">
-              <h2 className="mb-2 text-sm font-semibold">Why this run did not pass</h2>
-              <p className="whitespace-pre-wrap text-sm text-fg-muted">{dbSession.note}</p>
+            <section className="mb-8 rounded-lg border border-rule bg-background p-5" aria-label="Run limitations">
+              <h2 className="mb-1.5 text-sm font-semibold">Why this run did not pass</h2>
+              <p className="max-w-[75ch] whitespace-pre-wrap text-[13px] leading-5 text-fg-muted">{dbSession.note}</p>
             </section>
           )}
           <SessionReviewSummary
@@ -517,15 +587,19 @@ export default async function SessionPage({
             )}
             evidence={(
               <div id="evidence" className="space-y-8 scroll-mt-20">
-                <div className="rounded-lg border border-rule overflow-hidden bg-background">
-                  <Table>
+                <section className="rounded-lg border border-rule overflow-hidden bg-background">
+                  <div className="border-b border-rule px-5 py-3.5">
+                    <h2 className="text-sm font-semibold text-foreground">Run details</h2>
+                  </div>
+                  {/* Label column in muted text; both columns share the cards' 20px inset. */}
+                  <Table className="text-[13px] [&_td]:py-2.5 [&_td:first-child]:w-40 [&_td:first-child]:pl-5 [&_td:first-child]:font-normal [&_td:first-child]:text-fg-muted [&_td:last-child]:pr-5">
                     <TableBody>
                       <TableRow>
-                        <TableCell className="text-fg-muted w-36 font-medium">Harness</TableCell>
-                        <TableCell className="text-sm">
+                        <TableCell>Harness</TableCell>
+                        <TableCell>
                           <span className="inline-flex items-center gap-1.5">
-                            <img src={session.agent === "Pi" ? "/pi-logo.svg" : session.agent === "CDX" ? "/codex-logo.svg" : session.agent === "OC" ? "/opencode-logo.svg" : "/claude-logo.svg"} alt={session.agent} className="h-3.5 w-3.5" />
-                            {session.agent === "Pi" ? "Pi" : session.agent === "CDX" ? "Codex" : session.agent === "OC" ? "OpenCode" : "Claude Code"}
+                            <AgentLogo agent={agent} className="h-3.5 w-3.5" />
+                            {agentName}
                             {(dbSession.agentVersion || stats.harnessVersion) && (
                               <span className="text-xs text-fg-faint font-mono">{dbSession.agentVersion || stats.harnessVersion}</span>
                             )}
@@ -533,27 +607,27 @@ export default async function SessionPage({
                         </TableCell>
                       </TableRow>
                       <TableRow>
-                        <TableCell className="text-fg-muted w-36 font-medium">Execution</TableCell>
-                        <TableCell className="text-sm"><ExecutionDetails runtime={dbSession.runtime} /></TableCell>
+                        <TableCell>Execution</TableCell>
+                        <TableCell><ExecutionDetails runtime={dbSession.runtime} /></TableCell>
                       </TableRow>
                       <TableRow>
-                        <TableCell className="text-fg-muted w-36 font-medium">Model</TableCell>
+                        <TableCell>Model</TableCell>
                         <TableCell><ModelDetails requested={dbSession.model} observed={dbSession.modelResolved} /></TableCell>
                       </TableRow>
                       {toolVersions.length > 0 && (
                         <TableRow>
-                          <TableCell className="text-fg-muted w-36 font-medium">Tool Versions</TableCell>
+                          <TableCell>Tool versions</TableCell>
                           <TableCell>
                             <ToolVersionBadges items={toolVersions} agent={dbSession.agent} />
                           </TableCell>
                         </TableRow>
                       )}
                       <TableRow>
-                        <TableCell className="text-fg-muted w-36 font-medium">Date</TableCell>
+                        <TableCell>Date</TableCell>
                         <TableCell>{new Date(stats.firstTimestamp).toLocaleString()}</TableCell>
                       </TableRow>
                       <TableRow>
-                        <TableCell className="text-fg-muted font-medium">Result</TableCell>
+                        <TableCell>Result</TableCell>
                         <TableCell>
                           <span className="inline-flex items-center gap-2">
                             <StatusBadge kind={statusKind} />
@@ -562,7 +636,7 @@ export default async function SessionPage({
                       </TableRow>
                       {stats.interactions > 0 && (
                         <TableRow>
-                          <TableCell className="text-fg-muted font-medium">Interactions</TableCell>
+                          <TableCell>Interactions</TableCell>
                           <TableCell className="tabular-nums">
                             {stats.interactions}
                             <span className="text-fg-muted ml-1 text-xs">(AskUserQuestion)</span>
@@ -571,18 +645,18 @@ export default async function SessionPage({
                       )}
                       {(stats.injectedSkills.length > 0 || ((session.outcome?.skills?.length ?? 0) > 0 && stats.injectedSkills.length === 0)) && (
                         <TableRow>
-                          <TableCell className="text-fg-muted font-medium">Skills Used</TableCell>
+                          <TableCell>Skills used</TableCell>
                           <TableCell>
                             {stats.injectedSkills.length > 0 ? (
                               <div className="flex flex-wrap gap-1">
                                 {stats.injectedSkills.map((s) => (
-                                  <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-sm bg-warn-faint border border-warn/30 text-warn">
+                                  <span key={s} className="text-[11px] px-1.5 py-0.5 rounded-sm bg-warn-faint border border-warn/30 text-warn">
                                     {s.replace("together-", "")}
                                   </span>
                                 ))}
                               </div>
                             ) : (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-fail-faint border border-fail/30 text-fail">
+                              <span className="text-[11px] px-1.5 py-0.5 rounded-sm bg-fail-faint border border-fail/30 text-fail">
                                 None injected — skills were available but agent never read them
                               </span>
                             )}
@@ -591,20 +665,20 @@ export default async function SessionPage({
                       )}
                       {dbSession.mcpEnabled && (
                         <TableRow>
-                          <TableCell className="text-fg-muted font-medium">MCP</TableCell>
+                          <TableCell>MCP</TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-1 items-center">
                               {stats.mcpCalls > 0 ? (
                                 <>
-                                  <span className="text-[10px] tabular-nums text-fg-muted">{stats.mcpCalls} calls</span>
+                                  <span className="text-[11px] tabular-nums text-fg-muted">{stats.mcpCalls} calls</span>
                                   {stats.mcpMethods.map((m) => (
-                                    <span key={m} className="text-[10px] px-1.5 py-0.5 rounded-sm bg-info-faint border border-info/30 text-info">
+                                    <span key={m} className="text-[11px] px-1.5 py-0.5 rounded-sm bg-info-faint border border-info/30 text-info">
                                       {m.replace("mcp__TogetherAIDocs__", "")}
                                     </span>
                                   ))}
                                 </>
                               ) : (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-surface border border-rule text-fg-muted">
+                                <span className="text-[11px] px-1.5 py-0.5 rounded-sm bg-surface border border-rule text-fg-muted">
                                   Enabled — 0 calls made
                                 </span>
                               )}
@@ -613,11 +687,11 @@ export default async function SessionPage({
                         </TableRow>
                       )}
                       <TableRow>
-                        <TableCell className="text-fg-muted font-medium">Duration</TableCell>
+                        <TableCell>Duration</TableCell>
                         <TableCell className="tabular-nums">{formatDuration(stats.durationSec)}</TableCell>
                       </TableRow>
                       <TableRow>
-                        <TableCell className="text-fg-muted font-medium">Messages</TableCell>
+                        <TableCell>Messages</TableCell>
                         <TableCell className="tabular-nums">
                           {stats.effectiveUserMessages} user, {stats.assistantMessages} assistant
                           {stats.skillInjections > 0 && (
@@ -626,11 +700,11 @@ export default async function SessionPage({
                         </TableCell>
                       </TableRow>
                       <TableRow>
-                        <TableCell className="text-fg-muted font-medium">Tool Calls</TableCell>
+                        <TableCell>Tool calls</TableCell>
                         <TableCell className="tabular-nums">{dbSession.toolCalls ?? "—"}</TableCell>
                       </TableRow>
                       <TableRow>
-                        <TableCell className="text-fg-muted font-medium">Agent tokens</TableCell>
+                        <TableCell>Agent tokens</TableCell>
                         <TableCell>
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                             <span className="shrink-0 tabular-nums"><AgentTokens total={dbSession.totalTokens} usage={dbSession.tokenUsage} showTooltip={false} />{dbSession.totalTokens !== null && " total"}</span>
@@ -639,13 +713,12 @@ export default async function SessionPage({
                         </TableCell>
                       </TableRow>
                       <TableRow>
-                        <TableCell className="text-fg-muted font-medium">Agent cost</TableCell>
+                        <TableCell>Agent cost</TableCell>
                         <TableCell className="tabular-nums"><RunCost value={stats.costUsd} source={dbSession.costSource} /></TableCell>
                       </TableRow>
                     </TableBody>
                   </Table>
-                </div>
-
+                </section>
 
                 {togetherRequests.length > 0 && (
                   <TogetherRequestsCard
@@ -656,13 +729,13 @@ export default async function SessionPage({
 
                 {toolsUsed.length > 0 && (
                   <details open className="group">
-                    <summary className="flex min-h-8 items-center justify-between cursor-pointer select-none">
-                      <h2 className="text-sm font-medium">Tool Breakdown</h2>
-                      <span className="text-xs text-fg-muted tabular-nums">{toolsUsed.length} {toolsUsed.length === 1 ? "tool" : "tools"}</span>
+                    <summary className="flex items-center justify-between py-3 cursor-pointer select-none border-b border-rule">
+                      <h2 className="text-sm font-semibold">Tool breakdown</h2>
+                      <span className="text-xs text-fg-muted tabular-nums">{toolsUsed.length} tool{toolsUsed.length === 1 ? "" : "s"}</span>
                     </summary>
                     <div className="pt-3">
-                      <div className="rounded-lg border border-rule overflow-hidden">
-                        <Table>
+                      <div className="rounded-lg border border-rule overflow-hidden bg-background">
+                        <Table className="text-[13px] [&_td]:py-2.5 [&_td:first-child]:pl-5 [&_td:last-child]:pr-5">
                           <TableBody>
                             {toolsUsed.map(([name, count]) => (
                               <TableRow key={name}>
@@ -681,13 +754,14 @@ export default async function SessionPage({
             transcript={(
               <div id="conversation" className="scroll-mt-20">
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-medium">Conversation</h2>
+                  <h2 className="text-sm font-semibold">Conversation</h2>
                 </div>
                 <Separator className="mb-3" />
                 <ConversationView messages={session.messages} />
               </div>
             )}
           />
+        </div>
         </div>
 
         <ScrollToTop scrollContainerId="main-scroll" />

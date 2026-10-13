@@ -4,15 +4,17 @@ import { cn } from "@/lib/utils";
 //   >= 90  → green (pass)
 //   50–89  → orange (warn)
 //   <  50  → red    (fail)
-// Trough tints to match its band so even low cells read clearly.
+// The track is one neutral tone for every band, so colour carries only the
+// result: the filled length and the number.
+const TRACK = "bg-foreground/[0.07]";
 function bandFor(pct: number): {
   bar: string;
   text: string;
   trough: string;
 } {
-  if (pct >= 90) return { bar: "bg-pass", text: "text-pass", trough: "bg-pass/10" };
-  if (pct >= 50) return { bar: "bg-warn", text: "text-warn", trough: "bg-warn/10" };
-  return            { bar: "bg-fail", text: "text-fail", trough: "bg-fail/10" };
+  if (pct >= 90) return { bar: "bg-pass", text: "text-pass", trough: TRACK };
+  if (pct >= 50) return { bar: "bg-warn", text: "text-warn", trough: TRACK };
+  return            { bar: "bg-fail", text: "text-fail", trough: TRACK };
 }
 
 export function PassRateBar({
@@ -42,9 +44,9 @@ export function PassRateBar({
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       <div className="flex items-center gap-2">
-        <div className={cn("relative w-full overflow-hidden rounded-sm", band.trough, compact ? "h-1" : "h-1.5")}>
+        <div className={cn("relative w-full overflow-hidden rounded-full", band.trough, compact ? "h-1" : "h-1.5")}>
           <div
-            className={cn("h-full rounded-sm", band.bar)}
+            className={cn("h-full rounded-full", band.bar)}
             style={{ width: `${safePct}%` }}
             aria-hidden
           />
@@ -86,8 +88,8 @@ export function PassRateMini({ pct, className }: { pct: number; className?: stri
   const safePct = Math.max(0, Math.min(100, pct));
   const band = bandFor(safePct);
   return (
-    <div className={cn("relative h-1 w-12 overflow-hidden rounded-sm", band.trough, className)}>
-      <div className={cn("h-full rounded-sm", band.bar)} style={{ width: `${safePct}%` }} aria-hidden />
+    <div className={cn("relative h-1 w-12 overflow-hidden rounded-full", band.trough, className)}>
+      <div className={cn("h-full rounded-full", band.bar)} style={{ width: `${safePct}%` }} aria-hidden />
     </div>
   );
 }

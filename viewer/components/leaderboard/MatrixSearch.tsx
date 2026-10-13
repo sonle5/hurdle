@@ -22,7 +22,7 @@ export function MatrixSearch({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="pl-7 pr-7 py-1 w-52 rounded-md border border-rule bg-background text-[11px] text-foreground placeholder:text-fg-faint focus:outline-none focus:border-foreground/40"
+        className="h-7 w-52 rounded-md border border-rule bg-background pl-7 pr-7 text-[12px] text-foreground placeholder:text-fg-faint focus:outline-none focus:border-foreground/40"
       />
       {value && (
         <button
