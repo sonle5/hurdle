@@ -47,7 +47,7 @@ import { selectSuiteAgents } from "../lib/suite-agent-selection.mjs";
 import { discoverModels, selectCatalogModels, ModelDiscoveryError } from "../lib/model-discovery.mjs";
 import {
   terminalUsesColor, paintTerminal as paintRunOutput, terminalFact as runFact,
-  terminalHeader, terminalStatus, terminalNote, terminalNext, suiteCommand, quoteCommandArgument, cliExecutable,
+  terminalHeader, terminalMark, terminalStatus, terminalNote, terminalNext, suiteCommand, quoteCommandArgument, cliExecutable,
   runtimeSummaryRows,
 } from "../lib/terminal-output.mjs";
 
@@ -183,7 +183,7 @@ const HELP_TEXT = Object.freeze({
   ].join("\n"),
   init: [
     "Usage:",
-    "  hurdle init [directory] [--agent claude-code|codex] [--example copy-message|together-api|concurrency-smoke] [--model MODEL] [--effort LEVEL]",
+    "  hurdle init [directory] [--agent claude-code|codex] [--example copy-message|together-api|concurrency-smoke|kitchen-sink] [--model MODEL] [--effort LEVEL]",
     "",
     "Create a starter evaluation. The default directory is `evals`.",
     "The destination must not already exist; its parent directory must exist.",
@@ -197,7 +197,7 @@ const HELP_TEXT = Object.freeze({
     "",
     "Options:",
     "  --agent ID         Choose Claude Code (default) or Codex",
-    "  --example NAME     Choose copy-message (default), together-api or concurrency-smoke",
+    "  --example NAME     Choose copy-message (default), together-api, concurrency-smoke or kitchen-sink",
     "  --model MODEL      Override the starter Agent model",
     "  --effort LEVEL     low, medium (default), high, xhigh, or max",
     "  -h, --help         Show this help",
@@ -1048,7 +1048,7 @@ async function runCliMain(argv, io, dependencies) {
       } else if (args[index] === "--example" && !exampleSeen) {
         example = args[++index];
         exampleSeen = true;
-        if (!["copy-message", "together-api", "concurrency-smoke"].includes(example)) return argumentError("--example must be copy-message, together-api or concurrency-smoke.", io).exitCode;
+        if (!["copy-message", "together-api", "concurrency-smoke", "kitchen-sink"].includes(example)) return argumentError("--example must be copy-message, together-api, concurrency-smoke or kitchen-sink.", io).exitCode;
       } else if (["--model", "--effort"].includes(args[index]) && !seenOptions.has(args[index])) {
         const option = args[index];
         const value = args[++index];
@@ -1063,7 +1063,7 @@ async function runCliMain(argv, io, dependencies) {
         directory = args[index];
         directorySeen = true;
       } else {
-        return argumentError("Use init [directory] [--agent claude-code|codex] [--example copy-message|together-api|concurrency-smoke] [--model MODEL] [--effort LEVEL].", io).exitCode;
+        return argumentError("Use init [directory] [--agent claude-code|codex] [--example copy-message|together-api|concurrency-smoke|kitchen-sink] [--model MODEL] [--effort LEVEL].", io).exitCode;
       }
     }
     const destination = resolve(io.cwd, directory);
@@ -1440,8 +1440,9 @@ async function runCliMain(argv, io, dependencies) {
       }
       io.stdout.write("\n");
     }
+    const progressStream = io.stderr?.isTTY === true ? io.stderr : io.stdout;
     const progress = createTerminalProgress({
-      stream: io.stderr?.isTTY === true ? io.stderr : io.stdout,
+      stream: progressStream,
       showElapsed: true,
     });
     progress.start("Opening result store");
@@ -1467,10 +1468,20 @@ async function runCliMain(argv, io, dependencies) {
     let completedCells = 0;
     let totalCells = 0;
     const reportedReasonRunIds = new Set();
+    const checkCounts = { pass: 0, fail: 0, skip: 0 };
+    const progressColor = terminalUsesColor(progressStream);
+    const dim = (text) => paintRunOutput(text, "dim", progressColor);
     const cellLabel = (cell) => {
       const agent = { "claude-code": "Claude Code", codex: "Codex" }[cell.adapterId] ?? cell.adapterId;
       const repeat = cell.repeatTotal > 1 ? ` · repeat ${cell.repeatOrdinal}/${cell.repeatTotal}` : "";
       return `[${cell.ordinal}/${cell.total}] ${cell.taskId} · ${cell.conditionId} · ${agent}${repeat}`;
+    };
+    // Like a test list: name every check, and explain only the ones that did not pass.
+    const checkLine = (check) => {
+      if (check.outcome === "pass") return `${terminalMark("pass", progressColor)} ${check.id}`;
+      const authority = check.effectiveAuthority === "required" ? "" : ` ${dim(`(${check.effectiveAuthority})`)}`;
+      const summary = check.summary ? `  ${dim(check.summary)}` : "";
+      return `${terminalMark(check.outcome, progressColor)} ${check.id}${authority}${summary}`;
     };
     const renderActiveProgress = ({ start = false } = {}) => {
       if (activeCells.size === 0) return;
@@ -1523,12 +1534,21 @@ async function runCliMain(argv, io, dependencies) {
           `${cellLabel(event.cell)} · ${verdict}`,
           `${Math.max(0, Math.floor((Date.now() - (active?.startedAt ?? Date.now())) / 1000))}s`,
         );
+        const checks = event.terminal.checks ?? [];
+        for (const check of checks) {
+          checkCounts[check.outcome] += 1;
+          progress.detail(checkLine(check));
+        }
+        const omittedChecks = event.terminal.omittedCheckCount ?? 0;
+        if (omittedChecks > 0) progress.detail(dim(`… ${omittedChecks} more ${plural(omittedChecks, "check")}`));
+        // Listed checks already explain themselves; keep only the other reasons.
+        const listedChecks = new Set(checks.map(({ id }) => `check.${id}`));
         const reasons = projectVerdictReasons([
           ...(event.terminal.runTrustReasons ?? []),
           ...event.terminal.verdictReasons,
-        ]);
-        for (const reason of reasons) progress.detail(`${reason.code}: ${reason.summary}`);
-        if (reasons.length > 0) reportedReasonRunIds.add(event.terminal.id);
+        ].filter(({ code }) => !listedChecks.has(code)));
+        for (const reason of reasons) progress.detail(dim(`${reason.code}: ${reason.summary}`));
+        if (reasons.length > 0 || checks.length > 0) reportedReasonRunIds.add(event.terminal.id);
         renderActiveProgress({ start: true });
       }
     } };
@@ -1645,6 +1665,12 @@ async function runCliMain(argv, io, dependencies) {
       { color: issueCount === 0 ? "green" : "yellow", useColor },
     ));
     io.stdout.write(runFact("Runs", runCounts, { useColor }));
+    const checkTotals = [
+      checkCounts.pass > 0 ? `${checkCounts.pass} passed` : null,
+      checkCounts.fail > 0 ? `${checkCounts.fail} failed` : null,
+      checkCounts.skip > 0 ? `${checkCounts.skip} skipped` : null,
+    ].filter(Boolean).join(" · ");
+    if (checkTotals) io.stdout.write(runFact("Checks", checkTotals, { useColor }));
     if (summary.retriesPerformed > 0) {
       io.stdout.write(runFact(
         "Retries",

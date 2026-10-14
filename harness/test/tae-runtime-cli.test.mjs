@@ -85,7 +85,7 @@ test("hurdle run displays live cell progress in terminals and stable lines in lo
   writeJudgePack(root, "unused", "code");
   for (const isTTY of [true, false]) {
     const streams = isTTY ? ttyIo(root) : io(root);
-    const output = () => stripVTControlCharacters(streams.read().stderr + streams.read().stdout);
+    const output = () => stripVTControlCharacters(streams.read().stderr + streams.read().stdout).replaceAll("\r", "");
     const events = [];
     const cli = createFrameworkCli({
     async checkAgentReadiness() { return { ok: true, checks: [] }; },
@@ -168,7 +168,7 @@ test("hurdle run displays live cell progress in terminals and stable lines in lo
     assert.match(output(), /✓ \[1\/2\] sample · baseline · Claude Code · pass/);
     assert.match(output(), /! \[2\/2\] sample · baseline · Codex · incomplete/);
     assert.equal(output().match(/environment\.nonzero-exit/g)?.length, 1, "passing cells omit reasons and the summary does not duplicate live reasons");
-    assert.doesNotMatch(output(), /must-not-display|Observer failure/);
+    assert.doesNotMatch(output(), /must-not-display|Observer failure|run-failed/);
     assert.equal(events.length, 29, "the existing observer still receives every event");
     if (!isTTY) {
       assert.equal(streams.read().stderr, "");
@@ -177,6 +177,79 @@ test("hurdle run displays live cell progress in terminals and stable lines in lo
     const stopped = streams.read();
     t.mock.timers.tick(1000);
     assert.deepEqual(streams.read(), stopped, "no spinner survives completion");
+  }
+});
+
+test("hurdle run lists each run's checks as it completes, like a test report", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const root = mkdtempSync(join(tmpdir(), "tae-cli-checks-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeJudgePack(root, "unused", "code");
+  const check = (id, outcome = "pass", effectiveAuthority = "required", summary = "Fine.") => ({
+    id, authoredAuthority: "required", effectiveAuthority, outcome, summary, evidenceRefs: [],
+  });
+  const runs = [
+    { verdict: "pass", checks: [check("completed"), check("answer"), check("exact-copy")] },
+    {
+      verdict: "fail",
+      checks: [
+        check("completed"),
+        check("exact-copy", "fail", "required", "answer.txt must match the fixture exactly."),
+        check("tone", "fail", "advisory", "The reply should be friendly."),
+      ],
+      verdictReasons: [{ code: "check.exact-copy", summary: "answer.txt must match the fixture exactly." }],
+    },
+    {
+      verdict: "incomplete",
+      checks: [check("completed"), check("answer", "skip", "required", "The captured artifact was unavailable.")],
+      omittedCheckCount: 2,
+      runTrustReasons: [{ code: "environment.cleanup-unconfirmed", summary: "Sandbox cleanup could not be confirmed." }],
+      verdictReasons: [{ code: "check.answer", summary: "The captured artifact was unavailable." }],
+    },
+  ];
+  for (const isTTY of [true, false]) {
+    const streams = isTTY ? ttyIo(root) : io(root);
+    const output = () => stripVTControlCharacters(streams.read().stderr + streams.read().stdout).replaceAll("\r", "");
+    const live = [];
+    const cli = createFrameworkCli({
+      async checkAgentReadiness() { return { ok: true, checks: [] }; },
+      env: {},
+      processTarget: new EventEmitter(),
+      async openLocalResultStore() { return {}; },
+      createAgentAdapter() { return {}; },
+      createLocalExecutionEnvironment() { return {}; },
+      createRunEngine({ progressObserver }) {
+        return { async run() {
+          reportExecutionProgress(progressObserver, { kind: "matrix-ready", total: runs.length });
+          for (const [index, run] of runs.entries()) {
+            const cell = { ordinal: index + 1, total: runs.length, taskId: "sample", conditionId: "baseline", adapterId: "claude-code", repeatOrdinal: 1, repeatTotal: 1 };
+            reportExecutionProgress(progressObserver, { kind: "cell-started", cell });
+            reportExecutionProgress(progressObserver, { kind: "cell-completed", cell, terminal: { id: `run_${index}`, verdictReasons: [], ...run } });
+            live.push(output());
+          }
+          const result = completedResult();
+          result.summary.plannedCells = result.summary.plannedRepeats = result.summary.attempts = runs.length;
+          result.summary.terminalVerdicts = { pass: 1, fail: 1, incomplete: 1, unknown: 0 };
+          result.summary.authorityCoverage.judgeRequiredRuns = 0;
+          result.summary.nonPasses = [1, 2].map((index) => ({
+            id: `run_${index}`, verdict: runs[index].verdict, verdictReasons: runs[index].verdictReasons,
+          }));
+          return result;
+        } };
+      },
+    });
+    assert.equal(await cli.main(["run", "example.suite.mjs"], streams), 1);
+    assert.doesNotMatch(output(), /run-failed/);
+    assert.match(live[0], /✓ \[1\/3\] sample · baseline · Claude Code · pass {2}\d+s\n {2}✓ completed\n {2}✓ answer\n {2}✓ exact-copy\n/,
+      "a run's checks appear as soon as it completes");
+    assert.match(live[1], /✗ \[2\/3\] [^\n]* · fail {2}\d+s\n {2}✓ completed\n {2}✗ exact-copy {2}answer\.txt must match the fixture exactly\.\n {2}✗ tone \(advisory\) {2}The reply should be friendly\.\n/);
+    assert.match(live[2], /! \[3\/3\] [^\n]* · incomplete {2}\d+s\n {2}✓ completed\n {2}– answer {2}The captured artifact was unavailable\.\n {2}… 2 more checks\n {2}environment\.cleanup-unconfirmed: Sandbox cleanup could not be confirmed\.\n/,
+      "reasons that are not checks follow the check list");
+    assert.equal(output().match(/answer\.txt must match the fixture exactly/g)?.length, 1,
+      "a failed check is explained once, not repeated as a reason or summary row");
+    assert.doesNotMatch(output(), /check\.exact-copy|check\.answer|Reason/);
+    assert.match(output(), /\n {2}Runs {6}1 passed · 1 failed · 1 incomplete\n {2}Checks {4}5 passed · 2 failed · 1 skipped\n/);
+    if (!isTTY) assert.doesNotMatch(streams.read().stdout, /\u001b|\r/);
   }
 });
 

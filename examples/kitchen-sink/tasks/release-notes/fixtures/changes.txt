@@ -1,0 +1,3 @@
+added: hurdle run lists every check under each completed run
+fixed: the progress spinner no longer leaves fragments in narrow terminals
+changed: reasons under a run are dimmed so check results stand out

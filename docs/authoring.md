@@ -275,11 +275,22 @@ Results stay distinct:
 - `incomplete`: required execution, evidence, or Judge data was unavailable.
 - `unknown`: there was not enough scoring authority to decide.
 
+To see all four in one run, create the kitchen-sink example. Its Tasks are
+built to reach each result and show skills, workspace files and advisory checks:
+
+```sh
+npx hurdle init kitchen-sink --example kitchen-sink
+```
+
 ## 5. Run, inspect, and compare
 
 ```sh
 npx hurdle run --view
 ```
+
+As each run finishes, its checks are listed beneath it: `✓` passed, `✗` failed,
+`–` skipped. Checks that did not pass show their summary; advisory checks are
+labelled `(advisory)` because they do not decide the result.
 
 Use `--task`, `--condition`, or `--agent` to narrow the Suite matrix.
 Use `--model MODEL` to override the selected runner’s model without editing

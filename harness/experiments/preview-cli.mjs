@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-import { mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFrameworkCli } from "../bin/hurdle.mjs";
 import { checkAgentReadiness } from "../lib/agent-readiness.mjs";
 import { initializeSuite } from "../lib/starter-suite.mjs";
+import { createKitchenSinkAgent } from "./kitchen-sink-agent.mjs";
 
 const block = [
   " _   _  _   _  ____   ____   _      _____ ",
@@ -47,6 +48,27 @@ if (command === "brand") {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+} else if (command === "run") {
+  console.log("Preview only: a scripted agent stands in for Claude Code, so nothing is billed.");
+  console.log("Results are temporary; add --view to browse them before they are removed.");
+  const root = await mkdtemp(join(tmpdir(), "hurdle-kitchen-sink-"));
+  try {
+    await cp(new URL("../../examples/kitchen-sink/", import.meta.url), join(root, "kitchen-sink"), { recursive: true });
+    const cli = createFrameworkCli({
+      env: {},
+      environmentSource: "preview",
+      checkAgentReadiness: async () => ({
+        ok: true,
+        checks: [{ status: "pass", message: "Scripted agent stands in for Claude Code." }],
+      }),
+      createAgentAdapter: () => createKitchenSinkAgent({ delayMs: 700 }),
+    });
+    process.exitCode = await cli.main(["run", "kitchen-sink/example.suite.mjs", ...(selected === "--view" ? ["--view"] : [])], {
+      cwd: root, stdout: process.stdout, stderr: process.stderr,
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 } else {
-  throw new Error("Usage: node harness/experiments/preview-cli.mjs <brand [1|2|3]|readiness [fail]|view>");
+  throw new Error("Usage: node harness/experiments/preview-cli.mjs <brand [1|2|3]|readiness [fail]|view|run [--view]>");
 }

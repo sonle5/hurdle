@@ -190,6 +190,33 @@ test("terminal progress updates a cell and preserves E2B details around the spin
   );
 });
 
+test("terminal progress keeps the live line on one row so clearing it leaves no fragments", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let output = "";
+  const stream = { columns: 68, write(value) { output += value; } };
+  const progress = createTerminalProgress({ stream, isTTY: true, useColor: false, showElapsed: true, now: () => 1000 });
+  t.after(() => progress.stop());
+
+  progress.start("[1/2] copy-message · baseline · Claude Code · repeat 1/2 · Evaluating");
+  t.mock.timers.tick(80);
+  progress.update("[1/2] copy-message · baseline · Claude Code · repeat 1/2 · Finalizing results");
+  const frames = output.split("\r\u001b[2K").filter(Boolean);
+  assert.deepEqual(frames, [
+    "⠋ [1/2] copy-message · baseline …Code · repeat 1/2 · Evaluating  0s",
+    "⠙ [1/2] copy-message · baseline …Code · repeat 1/2 · Evaluating  0s",
+    "⠹ [1/2] copy-message · baseline …epeat 1/2 · Finalizing results  0s",
+  ], "the cell and its current phase both stay visible");
+  assert.ok(frames.every((frame) => frame.length < stream.columns), "a wrapped row could not be cleared");
+
+  progress.succeed("[1/2] copy-message · baseline · Claude Code · repeat 1/2 · pass", "8s");
+  assert.ok(output.endsWith("\r\u001b[2K✓ [1/2] copy-message · baseline · Claude Code · repeat 1/2 · pass  8s\n"),
+    "settled lines keep their full text");
+  stream.columns = 120;
+  progress.start("[2/2] copy-message · baseline · Claude Code · repeat 2/2 · Evaluating");
+  assert.ok(output.endsWith("⠋ [2/2] copy-message · baseline · Claude Code · repeat 2/2 · Evaluating  0s"),
+    "a wider terminal shows the whole line");
+});
+
 test("terminal progress emits stable incremental lines outside a TTY", () => {
   let output = "";
   const progress = createTerminalProgress({

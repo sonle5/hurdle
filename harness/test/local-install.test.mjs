@@ -142,6 +142,9 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
       `examples/concurrency-smoke/tasks/${task}/checks.mjs`,
       `examples/concurrency-smoke/tasks/${task}/fixtures/message.txt`,
     ]),
+    "examples/kitchen-sink/example.suite.mjs",
+    "examples/kitchen-sink/skills/house-style/SKILL.md",
+    "examples/kitchen-sink/tasks/fix-the-bug/workspace/test/slugify.test.js",
     "harness/bin/hurdle.mjs",
     "harness/bin/tae.mjs",
     "harness/lib/hurdle-environment.mjs",
@@ -320,6 +323,14 @@ test("the npm tarball installs a working CLI and Viewer", { timeout: 120_000 }, 
   for (const task of ["copy-alpha", "copy-beta", "copy-gamma"]) {
     assert.ok(existsSync(join(consumerRoot, "concurrent-tasks/tasks", task, "fixtures/message.txt")));
   }
+
+  const kitchenSinkInitialized = cli("init", "kitchen-sink", "--example", "kitchen-sink");
+  assert.equal(kitchenSinkInitialized.status, 0, kitchenSinkInitialized.stderr);
+  const kitchenSinkValidated = cli("validate", "kitchen-sink/example.suite.mjs", "--offline");
+  assert.equal(kitchenSinkValidated.status, 0, kitchenSinkValidated.stderr);
+  assert.match(kitchenSinkValidated.stdout, /5 tasks · 2 conditions/);
+  assert.ok(existsSync(join(consumerRoot, "kitchen-sink/skills/house-style/SKILL.md")));
+  assert.ok(existsSync(join(consumerRoot, "kitchen-sink/tasks/fix-the-bug/workspace/src/slugify.js")));
 
   const customInitialized = cli("init", "custom-evals", "--agent", "codex", "--model", "gpt-6.1-sol", "--effort", "high");
   assert.equal(customInitialized.status, 0, customInitialized.stderr);

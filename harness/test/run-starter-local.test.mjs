@@ -249,13 +249,14 @@ test("Run Engine reports accepted cell progress from the stored terminal referen
   ]);
   const events = [];
 
-  const { run } = await runStarter({
+  const { run, record } = await runStarter({
     root,
     runPlan,
     agentScript,
     progressObserver: { observe(event) { events.push(event); } },
   });
 
+  assert.deepEqual(record.checks.map(({ id, outcome }) => [id, outcome]), [["exact-copy", "pass"]]);
   assert.deepEqual(events, [
     { kind: "matrix-ready", total: 1 },
     {
@@ -283,7 +284,14 @@ test("Run Engine reports accepted cell progress from the stored terminal referen
         repeatOrdinal: 1,
         repeatTotal: 1,
       },
-      terminal: { id: run.id, verdict: run.verdict, verdictReasons: [] },
+      terminal: {
+        id: run.id,
+        verdict: run.verdict,
+        verdictReasons: [],
+        checks: record.checks.map(({ id, outcome, effectiveAuthority, summary }) => ({
+          id, outcome, effectiveAuthority, summary,
+        })),
+      },
     },
   ]);
 });

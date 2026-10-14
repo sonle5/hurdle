@@ -1,0 +1,9 @@
+{
+  "order": "A-1042",
+  "currency": "USD",
+  "items": [
+    { "sku": "TENT-2P", "price": 149.5, "quantity": 1 },
+    { "sku": "STOVE-MINI", "price": 39.25, "quantity": 2 },
+    { "sku": "FUEL-230G", "price": 6.75, "quantity": 3 }
+  ]
+}

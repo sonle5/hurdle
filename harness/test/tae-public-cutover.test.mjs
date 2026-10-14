@@ -5,7 +5,7 @@ import test from "node:test";
 const root = new URL("../../", import.meta.url);
 const pkg = JSON.parse(readFileSync(new URL("package.json", root), "utf8"));
 test("all public setup and evaluation commands use the one source Suite path", () => {
-  assert.deepEqual(readdirSync(new URL("examples/", root)).sort(), ["concurrency-smoke", "copy-message", "together-api"]);
+  assert.deepEqual(readdirSync(new URL("examples/", root)).sort(), ["concurrency-smoke", "copy-message", "kitchen-sink", "together-api"]);
   assert.equal(pkg.scripts.quickstart, "node harness/bin/source-quickstart.mjs");
   assert.equal(pkg.scripts.showcase, "npm run legacy --");
   assert.match(pkg.scripts.legacy, /legacy\.suite\.mjs/);

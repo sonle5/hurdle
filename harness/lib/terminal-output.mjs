@@ -30,9 +30,13 @@ export function terminalHeader(stream) {
   return `\n${paintTerminal("Hurdle", "bold", terminalUsesColor(stream))}\n\n`;
 }
 
-export function terminalStatus(status, text, stream) {
+export function terminalMark(status, useColor) {
   const [symbol, color] = { pass: ["✓", "green"], fail: ["✗", "red"], warning: ["!", "yellow"], skip: ["–", "dim"] }[status];
-  return `${paintTerminal(symbol, color, terminalUsesColor(stream))} ${text}\n`;
+  return paintTerminal(symbol, color, useColor);
+}
+
+export function terminalStatus(status, text, stream) {
+  return `${terminalMark(status, terminalUsesColor(stream))} ${text}\n`;
 }
 
 export function terminalNote(text, stream) {

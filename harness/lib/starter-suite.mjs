@@ -23,6 +23,17 @@ const STARTERS = Object.freeze({ "copy-message": [
   ...["copy-alpha", "copy-beta", "copy-gamma"].flatMap(task => [
     `tasks/${task}/prompt.md`, `tasks/${task}/checks.mjs`, `tasks/${task}/fixtures/message.txt`,
   ]),
+], "kitchen-sink": [
+  "README.md", "example.suite.mjs", "skills/house-style/SKILL.md",
+  ...["order-total", "release-notes", "fix-the-bug", "oversized-report", "summarize-notes"].flatMap(task => [
+    `tasks/${task}/prompt.md`, `tasks/${task}/checks.mjs`,
+  ]),
+  "tasks/order-total/fixtures/order.json",
+  "tasks/release-notes/fixtures/changes.txt",
+  "tasks/fix-the-bug/workspace/package.json",
+  "tasks/fix-the-bug/workspace/src/slugify.js",
+  "tasks/fix-the-bug/workspace/test/slugify.test.js",
+  "tasks/summarize-notes/fixtures/meeting-notes.md",
 ] });
 
 async function pathExists(path) {
@@ -57,7 +68,7 @@ export async function initializeSuite({ destination, agent = "claude-code", exam
   if (!["claude-code", "codex"].includes(agent)) {
     return initDiagnostic("init.agent-invalid", destination, "Choose claude-code or codex for the starter Agent.");
   }
-  if (!Object.hasOwn(STARTERS, example)) return initDiagnostic("init.example-invalid", destination, "Choose copy-message, together-api or concurrency-smoke.");
+  if (!Object.hasOwn(STARTERS, example)) return initDiagnostic("init.example-invalid", destination, "Choose copy-message, together-api, concurrency-smoke or kitchen-sink.");
   model ??= STARTER_AGENT_MODELS[agent];
   if (typeof model !== "string" || !model.trim()) return initDiagnostic("init.model-invalid", destination, "Choose a nonblank Agent model.");
   if (!isAgentEffort(effort)) return initDiagnostic("init.effort-invalid", destination, "Choose low, medium, high, xhigh, or max effort.");

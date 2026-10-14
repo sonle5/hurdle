@@ -1839,7 +1839,7 @@ export function createRunEngineWithWriter({
           reportExecutionProgress(progress, {
             kind: "cell-completed",
             cell: progressCell,
-            terminal,
+            terminal: { ...terminal, checks: settled.checks },
           });
           return { runs: attemptRuns, terminal };
         });

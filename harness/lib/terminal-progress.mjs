@@ -26,11 +26,22 @@ export function createTerminalProgress({
     return label.trim();
   };
 
+  // CLEAR_LINE erases only the cursor's row, so a live line that wraps leaves fragments
+  // behind. Shorten it from the middle to keep both the subject and the current phase.
+  const fit = (label, reserved) => {
+    const columns = stream.columns;
+    if (!Number.isSafeInteger(columns) || columns <= 0) return label;
+    const room = columns - 1 - reserved;
+    if (label.length <= room) return label;
+    if (room < 2) return "";
+    const head = Math.ceil((room - 1) / 2);
+    return `${label.slice(0, head)}…${label.slice(label.length - (room - 1 - head))}`;
+  };
   const render = () => {
     if (!active || !isTTY) return;
     const glyph = paint(FRAMES[frame % FRAMES.length], "cyan", useColor);
     const elapsed = showElapsed ? `  ${Math.max(0, Math.floor((now() - startedAt) / 1000))}s` : "";
-    stream.write(`${CLEAR_LINE}${glyph} ${active}${elapsed}`);
+    stream.write(`${CLEAR_LINE}${glyph} ${fit(active, 2 + elapsed.length)}${elapsed}`);
     frame += 1;
   };
   const clearTimer = () => {

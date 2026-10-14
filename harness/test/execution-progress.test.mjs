@@ -162,3 +162,41 @@ test("attempt progress maps concurrent lifecycle events to a cell without privat
   }
   assert.doesNotMatch(JSON.stringify(events), /private-cell|private-token/);
 });
+
+test("completed progress projects stored checks without evidence and re-projects losslessly", () => {
+  const events = [];
+  const observer = { observe(event) { events.push(event); } };
+  const cell = { ordinal: 1, total: 1, taskId: "sample", conditionId: "baseline", adapterId: "codex", repeatOrdinal: 1, repeatTotal: 1 };
+  const stored = (id, outcome = "pass", effectiveAuthority = "required", summary = "Fine.") => ({
+    id, authoredAuthority: "required", effectiveAuthority, outcome, summary,
+    evidenceRefs: [`sha256:${"a".repeat(64)}`], details: { raw: "private-detail" },
+  });
+  reportExecutionProgress(observer, {
+    kind: "cell-completed", cell,
+    terminal: { id: "run_one", verdict: "fail", verdictReasons: [], checks: [
+      stored("completed"),
+      stored("exact-copy", "fail", "required", "answer.txt\n\u001b[31mdiffers\u001b[0m."),
+      stored("tone", "skip", "advisory", "x".repeat(1000)),
+      stored("completed", "fail"), stored("Invalid-Id"), stored("bad-outcome", "error"),
+      stored("bad-authority", "pass", "authored"), { ...stored("no-summary"), summary: null },
+      ...Array.from({ length: 130 }, (_, index) => stored(`extra-${index}`)),
+    ] },
+  });
+  const { checks, omittedCheckCount } = events[0].terminal;
+  assert.deepEqual(checks.slice(0, 2), [
+    { id: "completed", outcome: "pass", effectiveAuthority: "required", summary: "Fine." },
+    { id: "exact-copy", outcome: "fail", effectiveAuthority: "required", summary: "answer.txt differs." },
+  ]);
+  assert.equal(checks[2].effectiveAuthority, "advisory");
+  assert.equal(checks[2].summary.length, 300);
+  assert.equal(checks.length, 123, "invalid and duplicate checks are dropped within the projection bound");
+  assert.equal(omittedCheckCount, 138 - 123);
+  assert.ok(Object.isFrozen(checks) && checks.every(Object.isFrozen));
+  assert.doesNotMatch(JSON.stringify(events), /sha256|private-detail|authoredAuthority|\\u001b|\\n/);
+
+  reportExecutionProgress(observer, events[0]);
+  assert.deepEqual(events[1], events[0], "observers that re-report a projected event keep every check");
+  reportExecutionProgress(observer, { kind: "cell-completed", cell, terminal: { id: "run_two", verdict: "pass", checks: [stored("completed")] } });
+  assert.deepEqual(events[2].terminal.checks, [{ id: "completed", outcome: "pass", effectiveAuthority: "required", summary: "Fine." }]);
+  assert.equal(Object.hasOwn(events[2].terminal, "omittedCheckCount"), false);
+});

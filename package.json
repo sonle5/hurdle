@@ -28,6 +28,7 @@
     "examples/copy-message",
     "examples/together-api",
     "examples/concurrency-smoke",
+    "examples/kitchen-sink",
     "docs/sandbox-setup.md",
     "harness/bin",
     "harness/index.mjs",
