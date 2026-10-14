@@ -38,19 +38,6 @@ const localJudgeRuntime = fileURLToPath(new URL(
   "../../evals/together/runtime/local-judge.json",
   import.meta.url,
 ));
-const fullTogetherSkillNames = [
-  "together-audio",
-  "together-batch-inference",
-  "together-chat-completions",
-  "together-dedicated-containers",
-  "together-dedicated-model-inference",
-  "together-embeddings",
-  "together-evaluations",
-  "together-fine-tuning",
-  "together-gpu-clusters",
-  "together-images",
-  "together-video",
-];
 
 function writeSuite(root, checks) {
   const taskRoot = join(root, "tasks", "native-tools");

@@ -2,19 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const skill = readFileSync(
-  new URL("../../evals/together/skills/together-gpu-clusters/SKILL.md", import.meta.url),
-  "utf8",
-);
-const discovery = readFileSync(
-  new URL(
-    "../../evals/together/skills/together-gpu-clusters/references/pricing-and-discovery.md",
-    import.meta.url,
-  ),
-  "utf8",
-);
+const skillRoot = new URL("../../evals/together/skills/together-ai/", import.meta.url);
+const read = (path) => readFileSync(new URL(path, skillRoot), "utf8");
+const router = read("SKILL.md");
+const skill = read("domains/gpu-clusters.md");
+const discovery = read("references/gpu-clusters/pricing-and-discovery.md");
 
 test("GPU cluster skill routes current inventory and pricing questions", () => {
+  assert.ok(router.includes("domains/gpu-clusters.md"), "missing route to the GPU cluster guide");
   for (const phrase of [
     "pricing-and-discovery.md",
     "https://www.together.ai/pricing#gpu-clusters",

@@ -19,8 +19,9 @@ an Opus 4.8 Judge, saves results to the filesystem, and opens the Viewer.
 | `tool-calling-agent-loop` | Native Together tool calls with local mock tools |
 | `gpu-clusters` | GPU discovery and reservation-command generation; it never reserves a cluster |
 
-The legacy and hybrid Suites compare a no-skills baseline with MCP and the full
-vendored Together skills directory.
+The legacy and hybrid Suites compare a no-skills baseline with MCP and
+Together's official `together-ai` skill. See
+[Update the Together skill](#update-the-together-skill).
 
 ## Choose a Suite
 
@@ -66,6 +67,26 @@ The legacy and hybrid Suites share their task prompts and Judge rubrics.
 However, this framework uses a different evidence envelope and stricter Run
 Trust than the previous production runner. Do not combine these results with the
 historical score series.
+
+## Update the Together skill
+
+`skills/together-ai/` is an unmodified copy of
+[togethercomputer/skills](https://github.com/togethercomputer/skills) at commit
+`f59f28e`. Fix skill content upstream, then refresh the copy from the
+repository root:
+
+```sh
+git clone --depth 1 https://github.com/togethercomputer/skills.git /tmp/together-skills
+rm -rf evals/together/skills/together-ai
+cp -R /tmp/together-skills/skills/together-ai evals/together/skills/
+cp /tmp/together-skills/LICENSE evals/together/skills/LICENSE
+git -C /tmp/together-skills rev-parse HEAD HEAD:skills/together-ai HEAD:LICENSE
+```
+
+Copy the three printed ids into `upstreamSkills` in
+`harness/test/public-preview-tasks.test.mjs`, update the commit above, and run
+`npm test`. The test fails if the copy differs from that upstream commit. Do
+not compare `skills` results recorded with different skill commits.
 
 ## Optional backends
 

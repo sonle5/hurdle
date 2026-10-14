@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -34,6 +34,23 @@ const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 // Exact cooked template text from "Be strict" through the final "wrong.";
 // excludes the legacy evidence envelope and response-schema instructions.
 const legacyRubricHash = "8830a8888d3eeaa05b6bd058e52ba59729587a7d0a82702c7c135173cff3a602";
+// Git object ids of skills/together-ai and LICENSE in togethercomputer/skills
+// at this commit. The vendored copy is unmodified; refresh all three together.
+const upstreamSkills = {
+  commit: "f59f28e7e7d5937e50581fcfef87b957e8ee8636",
+  skillTree: "4eed8ed5d387d114c797c630a323d01642980c21",
+  license: "5f4a6d288be6620fddde90ebf8137a86a968f118",
+};
+const gitObject = (type, bytes) => createHash("sha1").update(`${type} ${bytes.byteLength}\0`).update(bytes).digest("hex");
+function gitTree(directory) {
+  const entries = readdirSync(directory, { withFileTypes: true }).map((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return { mode: "40000", name: entry.name, order: `${entry.name}/`, id: gitTree(path) };
+    const mode = statSync(path).mode & 0o111 ? "100755" : "100644";
+    return { mode, name: entry.name, order: entry.name, id: gitObject("blob", readFileSync(path)) };
+  }).sort((left, right) => Buffer.compare(Buffer.from(left.order), Buffer.from(right.order)));
+  return gitObject("tree", Buffer.concat(entries.flatMap(({ mode, name, id }) => [Buffer.from(`${mode} ${name}\0`), Buffer.from(id, "hex")])));
+}
 
 test("the Together catalogue preserves all eight ported legacy task prompts and fixture bytes", () => {
   assert.deepEqual(readdirSync(new URL("tasks/", together)).sort(), Object.keys(prompts).sort());
@@ -45,7 +62,7 @@ test("the Together catalogue preserves all eight ported legacy task prompts and 
   }
 });
 
-test("Together legacy Suite uses only four Judge tasks and the complete selected skill suite", async (t) => {
+test("Together legacy Suite uses only four Judge tasks and the vendored Together skill", async (t) => {
   const suite = await resolveV1Suite({ suitePath: fileURLToPath(new URL("legacy.suite.mjs", together)) });
   t.after(() => suite.dispose());
   assert.equal(suite.ok, true, JSON.stringify(suite.diagnostics));
@@ -58,12 +75,16 @@ test("Together legacy Suite uses only four Judge tasks and the complete selected
   assert.equal(suite.value.definition.tasks["chat-app"].fixtures[0].workspacePath, "harness/fixtures/sample-audio.wav");
   const selectedSkills = suite.value.definition.conditions.skills.resources.skills.map(({ name }) => name);
   assert.deepEqual(selectedSkills, readdirSync(new URL("skills/", together), { withFileTypes: true }).filter(entry => entry.isDirectory() && existsSync(new URL("skills/" + entry.name + "/SKILL.md", together))).map(entry => entry.name).sort());
-  assert.deepEqual(selectedSkills, [
-    "together-audio", "together-batch-inference", "together-chat-completions",
-    "together-dedicated-containers", "together-dedicated-endpoints", "together-embeddings",
-    "together-evaluations", "together-fine-tuning", "together-gpu-clusters",
-    "together-images", "together-sandboxes", "together-video",
-  ]);
+  assert.deepEqual(selectedSkills, ["together-ai"]);
+});
+
+test("the vendored Together skill and LICENSE are the pinned upstream files", () => {
+  assert.equal(
+    gitTree(fileURLToPath(new URL("skills/together-ai/", together))),
+    upstreamSkills.skillTree,
+    `skills/together-ai must match togethercomputer/skills@${upstreamSkills.commit} exactly; remove local files such as .DS_Store, or refresh it as evals/together/README.md describes`,
+  );
+  assert.equal(gitObject("blob", readFileSync(new URL("skills/LICENSE", together))), upstreamSkills.license);
 });
 
 test("all eight Tasks compile with the exact legacy decision rubric and original staged fixture paths", async (t) => {
