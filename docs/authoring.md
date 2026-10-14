@@ -84,8 +84,9 @@ Use the same `--runtime FILE` and Agent filter and model override as your run to
 configuration you intend to execute.
 
 Use `npx hurdle setup` to configure the project Runtime: execution, result
-storage, Judge and Viewer settings. Execution can use Local, Together sandbox
-or E2B sandbox. Sandbox setup defaults to Together; use `--sandbox e2b` for E2B.
+storage, Judge and Viewer settings. Execution can use Local, E2B sandbox
+or Together sandbox. Sandbox setup defaults to E2B; use `--sandbox together`
+for Together sandbox.
 Without a saved Runtime, runs use Local execution and filesystem storage.
 The saved project Runtime is used by validate, run, and view; explicit Runtime
 or run topology options override it. Create a Together API demo with
@@ -103,7 +104,7 @@ For example, `evals/sandbox-smoke/example.suite.mjs` becomes `sandbox-smoke`.
 Use a unique name with `setup`, `validate` or `run`; ambiguous names require
 the full path. Use `suites --json` for scripts.
 
-For example, configure Together and Postgres in separate steps, then run:
+For example, configure E2B and Postgres in separate steps, then run:
 
 ```sh
 npx hurdle setup sandbox-smoke
@@ -300,8 +301,9 @@ npx hurdle setup concurrent-tasks
 npx hurdle run concurrent-tasks --view
 ```
 
-This runs three copy tasks in up to three Together VMs. Skip setup if your
-Runtime is already configured. Use `--concurrency 1` for sequential execution.
+This runs three copy tasks at once in E2B, using a workload VM and a Guardian
+VM per task. Skip setup if your Runtime is already configured. Use
+`--concurrency 1` for sequential execution.
 
 Label runs that you want to compare:
 
@@ -333,4 +335,4 @@ them.
 Local runs execute Agent code on the host and are not a security sandbox. Use
 a Runtime configured for E2B or Together sandbox for isolation and trusted
 HTTP/tool evidence.
-See [sandbox setup](./sandbox-setup.md#together-sandbox).
+See [sandbox setup](./sandbox-setup.md).

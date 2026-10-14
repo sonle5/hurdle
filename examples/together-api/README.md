@@ -9,20 +9,20 @@ npx hurdle setup --yes
 npx hurdle run --view
 ```
 
-Together Sandbox is the default. To use E2B instead:
+E2B is the default sandbox. To use Together Sandbox instead:
 
 ```sh
-npx hurdle setup --sandbox e2b --yes
+npx hurdle setup --sandbox together --yes
 npx hurdle run --view
 ```
 
 From the repository root, pass `examples/together-api/example.suite.mjs` to both
 commands and replace `npx hurdle` with `node harness/bin/hurdle.mjs`.
 
-Setup configures Together and reads Agent and Together credentials from
+Setup configures E2B and reads Agent, E2B and Together credentials from
 `.env.local` or the environment. Keep `.env.local` out of version control.
-Use `--interactive` for credential prompts. Setup may build a Together
-snapshot; it checks authentication through read-only requests and never runs
+Use `--interactive` for credential prompts. Setup may build an E2B
+template; it checks authentication through read-only requests and never runs
 inference or the evaluation. Remote tools and model access remain unverified
 until the run.
 
@@ -31,9 +31,10 @@ The starter pins `claude-opus-5-5` with `effort: "medium"`. Use
 Use `init --model MODEL --effort LEVEL` or edit the Suite to change these settings.
 
 The Suite uses one task, one baseline condition, and one repeat, with code
-scoring and no Judge. Explicit E2B setup also requires `E2B_API_KEY` and uses two
-sandboxes, each with a five-minute lifetime limit. Existing runtime limits are
-preserved on reruns. Agent, sandbox, and Together API usage may be billed.
+scoring and no Judge. E2B setup requires `E2B_API_KEY` and uses two sandboxes,
+a workload and a Guardian, each with a five-minute lifetime limit. Existing
+runtime limits are preserved on reruns. Agent, sandbox, and Together API usage
+may be billed.
 
 Together setup builds or reuses `hurdle-claude-code-network@v1`, with Linux
 firewall tools. It uses a separate Guardian VM for the same trusted HTTP activity,

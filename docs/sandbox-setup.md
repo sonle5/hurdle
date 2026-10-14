@@ -1,20 +1,21 @@
 # Configure sandbox and storage
 
-Configure Together sandbox in the directory containing your evaluation:
+Configure an E2B sandbox in the directory containing your evaluation:
 
 ```sh
 npx hurdle setup --yes
 npx hurdle run --view
 ```
 
-`setup` validates the Suite, reads configured credentials, checks authentication
-without inference, and saves the project Runtime. It reuses an available Hurdle
-snapshot or template; `--yes` builds a missing default image without prompting.
+`setup` validates the Suite, reads configured credentials (`E2B_API_KEY` plus
+the Suite's Agent and Task credentials), checks authentication without
+inference, and saves the project Runtime. It reuses an available Hurdle
+template or snapshot; `--yes` builds a missing default image without prompting.
 No evaluation or Agent runs during setup. Setup never prompts by
 default, even in a terminal. Missing credentials or required build acceptance
-produce an actionable error and a nonzero exit code. Together is the default
+produce an actionable error and a nonzero exit code. E2B is the default
 sandbox provider, including trusted API capture and request blocking (see below).
-Use `--sandbox e2b` to select E2B explicitly.
+Use `--sandbox together` to select [Together sandbox](#together-sandbox) explicitly.
 
 ## Try visible Together API activity
 
@@ -31,9 +32,9 @@ response, and summarizes its reply and token usage. The Viewer displays captured
 HTTP activity alongside the transcript, code checks, and `completion.json`. The Suite
 requires trusted HTTP capture from E2B or Together, so a Native Local runtime cannot score it.
 
-Configure `TOGETHER_API_KEY` and Agent credentials in `.env.local`
-or export them before setup. E2B setup also needs `E2B_API_KEY`.
-Exported values are not copied into the file.
+Configure `E2B_API_KEY`, `TOGETHER_API_KEY` and Agent credentials in `.env.local`
+or export them before setup. Together sandbox setup (`--sandbox together`) needs
+no `E2B_API_KEY`. Exported values are not copied into the file.
 Setup adds `.env.local`, `.hurdle/`, and legacy `.tae/` to `.gitignore` when
 configuration succeeds. For the same variable name, file values override exports; a blank
 assignment overrides a working exported value too. Use `--interactive` explicitly
@@ -50,7 +51,7 @@ curl, jq, git, and iproute2. Credentials are never baked into the image.
 ## Reuse an E2B template
 
 ```sh
-npx hurdle setup --sandbox e2b --template my-agent-template:v1
+npx hurdle setup --template my-agent-template:v1
 ```
 
 The selected template must already be available and contain the Suite's Agent
@@ -62,7 +63,7 @@ A new Hurdle template uses 2 CPUs and 2048 MB.
 Configure all credentials first. To accept building a missing default template:
 
 ```sh
-npx hurdle setup --sandbox e2b --yes
+npx hurdle setup --yes
 ```
 
 Template builds use your E2B account and may be billed. Rerunning setup reuses
@@ -117,8 +118,9 @@ npx hurdle run --environment local
 Existing `.tae/runtime/default.json` profiles are still discovered and reused
 by setup. Their configured Result Stores stay in place. If both directories
 contain a default Runtime, `.hurdle/runtime/default.json` takes precedence.
-Sandbox setup selects Together unless `--sandbox e2b` is supplied, including
-when replacing an existing sandbox provider. `run` and `validate` use the saved
+Sandbox setup selects E2B unless `--sandbox together` is supplied, including
+when replacing an existing sandbox provider: rerun setup with `--sandbox together`
+to keep a saved Together Runtime. `run` and `validate` use the saved
 environment; this setup default does not override their Runtime selection.
 Without a saved Runtime, local runs and the Viewer reuse `.tae/results-v1`
 when it exists and `.hurdle/results-v1` does not. Explicit paths always apply.
@@ -128,11 +130,11 @@ the saved default applies to this project, and the Suite argument still selects
 the evaluation for subsequent commands. `validate --offline` checks only Suite
 definitions; it does not establish sandbox readiness.
 
-New Together Runtime profiles use a local Result Store at `.hurdle/together-results-v1`
-and Viewer port 3000. Artifact tasks use one VM with a five-minute lifetime;
-API tasks use an Agent VM and a Guardian VM, each with a ten-minute lifetime.
-E2B profiles use `.hurdle/e2b-results-v1` and two VMs with five-minute lifetimes.
-This is a lifetime limit,
+New E2B Runtime profiles use a local Result Store at `.hurdle/e2b-results-v1`
+and Viewer port 3000. Each cell uses a workload VM and a Guardian VM, each with
+a five-minute lifetime. Together profiles use `.hurdle/together-results-v1`:
+artifact tasks use one VM with a five-minute lifetime; API tasks use an Agent VM
+and a Guardian VM, each with a ten-minute lifetime. This is a lifetime limit,
 not a dollar or token budget. Agent and Together inference may also be billed.
 The Agent runs inside the sandbox, so no local CLI installation is needed.
 Setup checks credentials and image access; model access and remote tools are
@@ -189,8 +191,8 @@ recreate it during setup. Update external SQL and `search_path` settings from
 
 Storage setup preserves your Local, E2B, or Together execution environment, Judge settings,
 and Viewer port. Without a saved Runtime, it configures Local execution. To use
-Together and Postgres, run `npx hurdle setup --yes` first, then `npx hurdle setup --store postgres`.
-For E2B, use `npx hurdle setup --sandbox e2b --yes` for the first step.
+E2B and Postgres, run `npx hurdle setup --yes` first, then `npx hurdle setup --store postgres`.
+For Together, use `npx hurdle setup --sandbox together --yes` for the first step.
 Configure sandbox and storage in separate commands; sandbox flags do not apply
 to storage setup. Subsequent `validate`, `run`, and `view` discover the saved
 storage configuration automatically.
@@ -303,10 +305,11 @@ Hurdle terminates the sandboxes at completion; the Result Store retains captured
 transcripts and artifacts for `hurdle view`.
 
 Hurdle runs up to three evaluation cells concurrently by default. Set Suite
-`concurrency` or pass `run --concurrency N` to change the limit (1–100). Together
-API cells use a workload VM and a Guardian VM each, so three active API cells
-can use six VMs. Artifact-only cells use one VM each. Slots remain occupied
-through retries, sandbox cleanup, and judging. Provider capacity still applies.
+`concurrency` or pass `run --concurrency N` to change the limit (1–100). E2B
+cells use a workload VM and a Guardian VM each, so three active cells can use
+six VMs. Together API cells also use two VMs each; Together artifact-only cells
+use one. Slots remain occupied through retries, sandbox cleanup, and judging.
+Provider capacity still applies.
 
 Each Run saves its normalized execution configuration in its immutable
 snapshot. The Viewer's session evidence table shows an Execution row with the

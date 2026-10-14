@@ -58,14 +58,18 @@ Create a Together API key:
 1. Sign in to [Together](https://api.together.ai) and select your project.
 2. Open [API Keys](https://api.together.ai/settings/projects/~current/api-keys),
    click **Create key**, name it `hurdle-evals`, then click **Create Key**.
-3. Copy the key immediately (it's shown only once) and add it to `.env.local`
-   alongside your agent credentials:
+3. Copy the key immediately (it's shown only once).
+
+The example runs in an E2B sandbox by default. Copy an E2B API key from the
+[E2B console](https://console.e2b.dev/?tab=keys), then add both keys to
+`.env.local` alongside your agent credentials:
 
 ```dotenv
 TOGETHER_API_KEY=your-together-api-key
+E2B_API_KEY=your-e2b-api-key
 ```
 
-Run the API example in Together Sandbox and inspect captured HTTP activity:
+Run the API example in an E2B sandbox and inspect captured HTTP activity:
 
 ```sh
 npx hurdle init api-evals --example together-api
@@ -75,9 +79,11 @@ npx hurdle run api-evals --view
 
 The agent lists models, makes a short completion, and saves `completion.json`.
 Setup builds or reuses a sandbox image. Sandbox and API usage may be billed.
+To use Together Sandbox instead, run `npx hurdle setup api-evals --sandbox together --yes`;
+it needs no E2B key.
 
 See [sandbox and storage setup](https://cdn.jsdelivr.net/npm/hurdle@latest/docs/sandbox-setup.md)
-for E2B, existing images, and Postgres.
+for Together Sandbox, existing images, and Postgres.
 
 ## Tasks and checks
 

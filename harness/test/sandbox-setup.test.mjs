@@ -66,6 +66,37 @@ test("setup builds once, saves a default, and validate/view discover it without 
   assert.doesNotMatch(f.output(), /test-e2b-secret|test-agent-secret|test-target-secret/);
 });
 
+test("setup defaults to E2B and never loads the Together backend", async t => {
+  const f = await fixture(t);
+  const cli = createFrameworkCli({ ...f.dependencies, loadTogetherSetupBackend() { assert.fail("Default setup must not use Together"); } });
+  assert.equal(await cli.main(["setup", "--yes", "--json"], f.io), 0, f.output());
+  const report = JSON.parse(f.output());
+  assert.equal(report.target, "e2b");
+  assert.equal(report.executionEnvironment, "e2b");
+  assert.ok(report.checks.some(check => check.status === "pass" && check.message === "Setup complete · E2B sandbox configured."));
+  assert.deepEqual(f.calls.find(call => call[0] === "build").slice(1, 3), ["hurdle-claude-code:v1", ["claude-code"]]);
+  const config = f.runtime();
+  assert.equal(config.environment.kind, "e2b");
+  assert.equal(config.environment.apiKeyEnv, "E2B_API_KEY");
+  assert.equal(config.resultStore.root, "../e2b-results-v1");
+});
+
+test("default setup replaces a saved Together Runtime with E2B and keeps its store", async t => {
+  const f = await fixture(t);
+  mkdirSync(join(f.root, ".hurdle/runtime"), { recursive: true });
+  writeFileSync(join(f.root, ".hurdle/runtime/default.json"), JSON.stringify({ schemaVersion: 1,
+    environment: { kind: "together", apiKeyEnv: "TOGETHER_API_KEY", settings: { snapshotAlias: "existing@v1" } },
+    resultStore: { kind: "local", root: "../together-results-v1" }, viewer: { port: 3022 } }));
+  const cli = createFrameworkCli({ ...f.dependencies, loadTogetherSetupBackend() { assert.fail("Default setup must not use Together"); } });
+  assert.equal(await cli.main(["setup", "--yes"], f.io), 0, f.output());
+  const config = f.runtime();
+  assert.equal(config.environment.kind, "e2b");
+  assert.equal(config.environment.settings.workloadTemplate, "hurdle-claude-code:v1");
+  assert.equal(config.environment.settings.maxLifetimeMs, 300_000);
+  assert.deepEqual(config.resultStore, { kind: "local", root: "../together-results-v1" });
+  assert.equal(config.viewer.port, 3022);
+});
+
 test("sandbox setup guides pending Postgres migrations and run blocks until explicit storage setup", async t => {
   for (const provider of ["e2b", "together"]) for (const json of [false, true]) {
     const f = await fixture(t, "together-api");

@@ -242,7 +242,7 @@ export async function setupTogetherSandbox(
     if (!readiness.ok)
       throw setupError(
         "setup.not-ready",
-        "Resolve the setup errors above and rerun setup. No snapshot build or evaluation started.",
+        "Resolve the setup errors above and rerun setup --sandbox together. No snapshot build or evaluation started.",
       );
     const backend = await (
       dependencies.loadTogetherSetupBackend ?? loadTogetherSetupBackend

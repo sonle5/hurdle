@@ -192,7 +192,8 @@ const HELP_TEXT = Object.freeze({
     "Credentials come from .env.local or exported environment variables.",
     "Interactive Agent logins are not inherited. Claude Code uses",
     "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN; Codex uses CODEX_ACCESS_TOKEN,",
-    "CODEX_API_KEY, or OPENAI_API_KEY. Together API also needs TOGETHER_API_KEY.",
+    "CODEX_API_KEY, or OPENAI_API_KEY. Together API also needs TOGETHER_API_KEY,",
+    "plus E2B_API_KEY for the default E2B sandbox.",
     "",
     "Options:",
     "  --agent ID         Choose Claude Code (default) or Codex",
@@ -208,9 +209,9 @@ const HELP_TEXT = Object.freeze({
     "Configure the project Runtime: sandbox execution or result storage.",
     "",
     "Options:",
-    "  --sandbox PROVIDER     together (default) or e2b",
-    "  --snapshot ALIAS       Reuse a Together snapshot",
+    "  --sandbox PROVIDER     e2b (default) or together",
     "  --template NAME        Reuse an E2B template",
+    "  --snapshot ALIAS       Reuse a Together snapshot",
     "  --store postgres       Configure Postgres storage separately",
     "  --yes                  Allow a missing image to be built",
     "  --interactive          Prompt for credentials and build approval",
@@ -240,7 +241,7 @@ const HELP_TEXT = Object.freeze({
     "  hurdle runtime [--runtime FILE] [--json]",
     "",
     "Show the project Runtime: execution, storage, Judge and Viewer settings.",
-    "Execution is Local, Together sandbox or E2B sandbox.",
+    "Execution is Local, E2B sandbox or Together sandbox.",
     "Uses the project Runtime saved by setup, or the built-in Local default.",
     "Reads configuration only; does not load credentials or contact services.",
     "Suite and command-line overrides apply when running an evaluation.",
@@ -372,8 +373,8 @@ function projectSuiteHelp(command, cwd, selectedSuite = null) {
   const heading = example ? `Examples using ${suiteSelection(example)}:` : "Examples after creating a Suite with init:";
   if (command === "setup") {
     const examples = [
-      [`${executable} setup ${selection}`, "Together sandbox (default)"],
-      [`${executable} setup ${selection} --sandbox e2b`, "E2B sandbox"],
+      [`${executable} setup ${selection}`, "E2B sandbox (default)"],
+      [`${executable} setup ${selection} --sandbox together`, "Together sandbox"],
       [`${executable} setup --store postgres`, "Postgres storage (separate step)"],
       [`${executable} run ${selection} --view`, "Run the evaluation"],
     ];
@@ -1080,9 +1081,9 @@ async function runCliMain(argv, io, dependencies) {
       + runFact("Agent", AGENT_LABELS[agent], { useColor })
       + runFact("Model", model, { useColor })
       + runFact("Effort", effort, { useColor })
-      + (example === "together-api" ? runFact("Needs", "Together sandbox + TOGETHER_API_KEY", { useColor }) : "")
+      + (example === "together-api" ? runFact("Needs", "E2B sandbox + TOGETHER_API_KEY", { useColor }) : "")
       + runFact("Auth", `.env.local or shell · see ${cliExecutable(io.cwd)} help init`, { useColor })
-      + runFact("Usage", example === "together-api" ? "Agent, Together sandbox, and API may be billed" : "Agent may be billed", { useColor })
+      + runFact("Usage", example === "together-api" ? "Agent, E2B sandbox, and Together API may be billed" : "Agent may be billed", { useColor })
       + terminalNext([
         suiteCommand(example === "together-api" ? "setup" : "validate", suite, { cwd: io.cwd }),
         suiteCommand("run", suite, { view: true, cwd: io.cwd }),
@@ -1091,13 +1092,13 @@ async function runCliMain(argv, io, dependencies) {
   }
 
   if (command === "setup") {
-    const options = { suite: defaultSuiteArgument(io.cwd), sandbox: "together", template: undefined, yes: false, interactive: false, json: args.includes("--json") };
+    const options = { suite: defaultSuiteArgument(io.cwd), sandbox: "e2b", template: undefined, yes: false, interactive: false, json: args.includes("--json") };
     const setupArgumentError = message => {
       const executable = projectExecutable(io.cwd);
       const sandboxIndex = args.findIndex(value => value.replace(/^-+/, "--") === "--sandbox");
       const requestedSandbox = sandboxIndex >= 0 ? args[sandboxIndex + 1] : null;
       const provider = ["e2b", "together"].includes(requestedSandbox) ? requestedSandbox
-        : ["e2b", "together"].includes(options.sandbox) ? options.sandbox : "together";
+        : ["e2b", "together"].includes(options.sandbox) ? options.sandbox : "e2b";
       let suites = [];
       try { suites = discoverProjectSuites(io.cwd); } catch { /* Explicit paths and help still work. */ }
       const example = suites.find(suite => suite.path === options.suite || suite.name === options.suite)
@@ -1142,7 +1143,7 @@ async function runCliMain(argv, io, dependencies) {
       return setupArgumentError("--interactive requires a terminal. Configure credentials in .env.local or the environment instead.");
     }
     if (!["e2b", "together"].includes(options.sandbox)) return setupArgumentError("Sandbox provider must be e2b or together.");
-    if (options.template && options.sandbox !== "e2b") return setupArgumentError("Use --snapshot ALIAS for Together, or --sandbox e2b --template NAME for an E2B template.");
+    if (options.template && options.sandbox !== "e2b") return setupArgumentError("Use --snapshot ALIAS for Together, or drop --sandbox together to use --template NAME with E2B.");
     if (options.snapshot && (options.sandbox !== "together" || !/^[A-Za-z0-9][A-Za-z0-9_.\/@:-]*$/.test(options.snapshot))) return setupArgumentError("Use --sandbox together --snapshot ALIAS to select a Together snapshot.");
     if (options.template && !/^[A-Za-z0-9][A-Za-z0-9_./:-]*$/.test(options.template)) return setupArgumentError("Use an E2B template ID or name, optionally with a tag.");
     if (options.store !== undefined) {
@@ -1288,7 +1289,7 @@ async function runCliMain(argv, io, dependencies) {
         "environment.trusted-egress-capture", "environment.trusted-request-blocking",
       ].includes(requirement))
     ))) {
-      writeError(io, `hurdle [runtime.capture-required] Selected Tasks require trusted API capture or request blocking. Run \`${suiteCommand("setup", options.suite, { cwd: io.cwd })}\` to configure Together sandbox, or select an E2B or Together Runtime with --runtime. No evaluation started.\n`);
+      writeError(io, `hurdle [runtime.capture-required] Selected Tasks require trusted API capture or request blocking. Run \`${suiteCommand("setup", options.suite, { cwd: io.cwd })}\` to configure E2B sandbox, or select an E2B or Together Runtime with --runtime. No evaluation started.\n`);
       disposeAuthoredSuite();
       return 1;
     }

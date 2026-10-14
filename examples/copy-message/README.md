@@ -1,8 +1,9 @@
 # Copy a message
 
 A product-neutral code-checked Task. It needs the selected Agent's authentication,
-but no Judge or database. Local execution needs no sandbox account; Together
-sandbox execution needs `TOGETHER_API_KEY`. The default Claude starter pins
+but no Judge or database. Local execution needs no sandbox account; E2B
+sandbox execution, the setup default, needs `E2B_API_KEY`, and Together sandbox
+execution needs `TOGETHER_API_KEY`. The default Claude starter pins
 `claude-opus-5-5` with medium effort. Use `hurdle init --agent codex` for
 `gpt-6.1-sol` with medium effort. Use `init --model MODEL --effort LEVEL` or
 edit the Suite to change these settings.
@@ -40,16 +41,17 @@ Local execution runs code on your host with network access; it is not a security
 sandbox. Use only trusted Suites, checks and task inputs.
 
 
-## Run the bundled Suite on Together sandbox
+## Run the bundled Suite in a sandbox
 
 From the Hurdle repository root:
 
 ```sh
-node harness/bin/hurdle.mjs setup examples/copy-message/example.suite.mjs --sandbox together --yes
+node harness/bin/hurdle.mjs setup examples/copy-message/example.suite.mjs --yes
 node harness/bin/hurdle.mjs run examples/copy-message/example.suite.mjs --view
 ```
 
-Setup builds or reuses the Agent snapshot and saves the Runtime. Agent inference,
-snapshot builds, and sandbox use may be billed. The Together API starter needs
-trusted HTTP capture through a separate Guardian VM. Copy-message uses only an
-Agent VM.
+Setup uses E2B by default: it builds or reuses the Agent template and saves the
+Runtime. E2B runs each cell with a workload VM and a Guardian VM. Add
+`--sandbox together` to setup to use Together sandbox instead; it builds or
+reuses an Agent snapshot, and copy-message uses only an Agent VM there. Agent
+inference, image builds, and sandbox use may be billed.

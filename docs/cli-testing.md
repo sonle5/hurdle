@@ -185,7 +185,9 @@ and `completion.json` in the Viewer. Repeat this path with
 `api-codex-evals/example.suite.mjs` to exercise Codex in E2B.
 
 Also try `setup api-evals/example.suite.mjs --template YOUR_EXISTING_TEMPLATE`.
-The supplied template must contain the selected agent CLI.
+The supplied template must contain the selected agent CLI. Setup uses E2B by
+default; repeat the path with `setup api-evals/example.suite.mjs --sandbox together --yes`
+to exercise Together sandbox.
 
 ## Postgres storage
 

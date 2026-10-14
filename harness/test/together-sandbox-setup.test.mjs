@@ -58,11 +58,11 @@ async function fixture(t, example = "copy-message") {
     runtimePath: join(root, ".hurdle/runtime/default.json"),
   };
 }
-test("setup defaults to Together, builds an agent snapshot, and validate discovers its private Runtime", async (t) => {
+test("setup --sandbox together builds an agent snapshot, and validate discovers its private Runtime", async (t) => {
   const f = await fixture(t);
-  const cli = createFrameworkCli({ ...f.dependencies, loadSetupBackend() { assert.fail("Default setup must not use E2B"); } });
+  const cli = createFrameworkCli({ ...f.dependencies, loadSetupBackend() { assert.fail("Together setup must not use E2B"); } });
   assert.equal(
-    await cli.main(["setup", "--yes", "--json"], f.io),
+    await cli.main(["setup", "--sandbox", "together", "--yes", "--json"], f.io),
     0,
     f.output(),
   );
@@ -110,7 +110,7 @@ test("Together setup preserves an existing store, Judge and limits while reusing
     }),
   });
   assert.equal(
-    await cli.main(["setup"], f.io),
+    await cli.main(["setup", "--sandbox", "together"], f.io),
     0,
     f.output(),
   );
@@ -126,7 +126,7 @@ test("Together API setup builds a network snapshot and configures a longer Guard
     ...f.dependencies,
   });
   assert.equal(
-    await cli.main(["setup", "--yes"], f.io),
+    await cli.main(["setup", "--sandbox", "together", "--yes"], f.io),
     0,
     f.output(),
   );

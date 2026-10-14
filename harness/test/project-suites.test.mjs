@@ -200,12 +200,12 @@ test("setup reports missing values, duplicates and incompatible options before a
   }
 });
 
-test("a Suite named e2b does not change the default sandbox in setup recovery commands", async t => {
+test("a Suite named together does not change the default sandbox in setup recovery commands", async t => {
   const f = fixture(t);
-  f.file("evals/e2b/example.suite.mjs");
-  assert.equal(await createFrameworkCli().main(["setup", "e2b", "--unknown", "--json"], f.io), 2);
+  f.file("evals/together/example.suite.mjs");
+  assert.equal(await createFrameworkCli().main(["setup", "together", "--unknown", "--json"], f.io), 2);
   const report = JSON.parse(f.stdout());
-  assert.equal(report.nextCommands[0], `${sourceExecutable} setup e2b --sandbox together`);
+  assert.equal(report.nextCommands[0], `${sourceExecutable} setup together --sandbox e2b`);
   assert.equal(f.stderr(), "");
 });
 
@@ -216,7 +216,8 @@ test("help shows project-specific examples without credentials and safely quotes
   assert.equal(await main(["help", "setup"], f.io), 0);
   assert.doesNotMatch(f.stdout(), /Available Suites/);
   assert.ok(f.stdout().includes(`${sourceExecutable} setup 'smoke test'`));
-  assert.ok(f.stdout().includes(`${sourceExecutable} setup 'smoke test' --sandbox e2b`));
+  assert.match(f.stdout(), /setup 'smoke test' +# E2B sandbox \(default\)/);
+  assert.ok(f.stdout().includes(`${sourceExecutable} setup 'smoke test' --sandbox together`));
   assert.ok(f.stdout().includes(`${sourceExecutable} setup --store postgres`));
   assert.ok(f.stdout().includes(`${sourceExecutable} run 'smoke test' --view`));
   assert.equal(f.stderr(), "");
