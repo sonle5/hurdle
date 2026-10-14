@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { createCodexAdapter } from "../lib/agent-adapters/codex.mjs";
 import { openLocalResultStore } from "../lib/local-result-store.mjs";
 import { resolveV1Suite } from "../lib/v1-authoring.mjs";
 import {
@@ -458,6 +459,91 @@ test("request blockers reject contradictory expectations", () => {
       path: "/v1/compute/clusters",
     });
   }), /cannot be both expected and blocked/);
+});
+
+function jsonl(frames) {
+  return `${frames.map((frame) => JSON.stringify(frame)).join("\n")}\n`;
+}
+
+function evaluateReply(transcript, expected) {
+  let agentReply;
+  const { checks } = evaluateChecks((run) => {
+    agentReply = run.agentReply;
+    run.expect.completed();
+    run.expect.replyIncludes(expected);
+  }, {
+    snapshot: { target: {} },
+    transcript: { evidenceRef: `sha256:${"c".repeat(64)}`, jsonl: transcript },
+    readArtifactText() { return { status: "missing", evidenceRef: null }; },
+  });
+  return { agentReply, checks: Object.fromEntries(checks.map(({ id, outcome }) => [id, outcome])) };
+}
+
+test("reply checks read the final agent message from a Codex transcript", () => {
+  const codex = createCodexAdapter({ runtimeEnv: {} });
+  const transcript = (frames) => codex.decodeControllerEvidence({ stdout: jsonl(frames) }).transcript;
+  const replied = transcript([
+    { type: "thread.started", thread_id: "codex-thread" },
+    { type: "turn.started" },
+    { type: "item.completed", item: { id: "item_0", type: "reasoning", text: "**Inspecting slugify**" } },
+    { type: "item.completed", item: { id: "item_1", type: "agent_message", text: "Checking src/slugify.js." } },
+    { type: "item.completed", item: { id: "item_2", type: "command_execution", command: "npm test", exit_code: 0 } },
+    { type: "item.completed", item: { id: "item_3", type: "agent_message", text: "Fixed: slugify replaces every space.\n\n" } },
+    // Only a later completed agent message with text replaces the reply.
+    { type: "item.completed", item: { id: "item_4", type: "reasoning", text: "A later note." } },
+    { type: "item.started", item: { id: "item_5", type: "agent_message", text: "An unfinished message." } },
+    { type: "item.completed", item: { id: "item_6", type: "agent_message" } },
+    { type: "item.completed", item: { id: "item_7", type: "agent_message", text: 42 } },
+    { type: "item.completed", item: null },
+    { type: "turn.completed", usage: { input_tokens: 10, output_tokens: 5 } },
+  ]);
+  assert.deepEqual(evaluateReply(replied, "Fixed: slugify"), {
+    agentReply: "Fixed: slugify replaces every space.",
+    checks: { completed: "pass", "reply-includes": "pass" },
+  });
+  assert.equal(evaluateReply(replied, "Checking").checks["reply-includes"], "fail");
+
+  const noReply = transcript([
+    { type: "thread.started", thread_id: "codex-thread" },
+    { type: "turn.started" },
+    { type: "item.completed", item: { id: "item_0", type: "command_execution", command: "npm test", exit_code: 1 } },
+    { type: "turn.failed", error: { message: "The model stream disconnected." } },
+  ]);
+  assert.deepEqual(evaluateReply(noReply, "Fixed:"), {
+    agentReply: null,
+    checks: { completed: "fail", "reply-includes": "skip" },
+  });
+});
+
+test("reply checks keep reading the Claude Code result frame", () => {
+  const claude = jsonl([
+    { type: "system", subtype: "init", session_id: "claude-session" },
+    {
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "text", text: "Checking src/slugify.js." }] },
+      session_id: "claude-session",
+    },
+    {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      session_id: "claude-session",
+      result: "Fixed: slugify replaces every space.\n",
+    },
+  ]);
+  assert.deepEqual(evaluateReply(claude, "Fixed: slugify"), {
+    agentReply: "Fixed: slugify replaces every space.",
+    checks: { completed: "pass", "reply-includes": "pass" },
+  });
+  assert.equal(evaluateReply(claude, "Checking").checks["reply-includes"], "fail");
+
+  // A result frame decides the reply even beside Codex-shaped frames and invalid lines.
+  const mixed = `${jsonl([
+    { type: "item.completed", item: { type: "agent_message", text: "Codex-shaped message." } },
+    { type: "result", subtype: "success", result: "Claude result." },
+    { type: "item.completed", item: { type: "agent_message", text: "Later Codex-shaped message." } },
+  ])}not-json\n`;
+  assert.equal(evaluateReply(mixed, "Claude").agentReply, "Claude result.");
 });
 
 test("failed and unavailable checks remain distinct and do not stop later repeats", async (t) => {

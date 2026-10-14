@@ -343,19 +343,28 @@ function correlatedTools(collections, expected) {
   return correlated;
 }
 
+// Claude Code reports its final reply in a result frame; Codex has none, so its
+// final reply is the last completed agent message.
 function agentReply(transcript) {
   if (!transcript || typeof transcript.jsonl !== "string") return null;
-  let reply = null;
+  let claudeReply = null;
+  let codexReply = null;
   for (const line of transcript.jsonl.split("\n")) {
     if (!line.trim()) continue;
     try {
       const frame = JSON.parse(line);
       if (frame?.type === "result" && typeof frame.result === "string") {
-        reply = frame.result.trimEnd();
+        claudeReply = frame.result.trimEnd();
+      } else if (
+        frame?.type === "item.completed"
+        && frame.item?.type === "agent_message"
+        && typeof frame.item.text === "string"
+      ) {
+        codexReply = frame.item.text.trimEnd();
       }
     } catch {}
   }
-  return reply;
+  return claudeReply ?? codexReply;
 }
 
 function agentCompleted(transcript) {
