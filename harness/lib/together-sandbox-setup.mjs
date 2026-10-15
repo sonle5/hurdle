@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseProjectEnvironment } from "./project-environment.mjs";
-import { managedImageAgents, SETUP_AGENT_PACKAGES } from "./sandbox-setup.mjs";
+import { managedImageAgents, managedImageName, SETUP_AGENT_PACKAGES } from "./managed-images.mjs";
 import { normalizeTogetherSettings } from "./execution-environments/together.mjs";
 import {
   resolveRuntimeProfile,
@@ -157,7 +157,7 @@ export async function setupTogetherSandbox(
       snapshot ??
       (saved && !managed
         ? saved
-        : `hurdle-${agents.join("-")}${needsCapture || managed?.network ? "-network" : ""}@v1`);
+        : managedImageName(agents, "together", { network: needsCapture || managed?.network }));
     const settings = normalizeTogetherSettings({
       ...(config.environment?.kind === "together"
         ? config.environment.settings
@@ -243,6 +243,8 @@ export async function setupTogetherSandbox(
       requiredCredentials: taskCredentials,
       judgeCredentialName: judgeRequired ? profile.judge.credentialEnv : null,
       allowResultStoreSetup: true,
+      suite,
+      cwd: io.cwd,
     });
     for (const check of readiness.checks)
       output.check(check.status, check.message, check.code);

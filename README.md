@@ -30,7 +30,8 @@ npx hurdle run --view
 Local execution is not a security sandbox. Use trusted tasks and keep `.env.local`
 out of version control. Agent usage may be billed.
 
-Results are saved in `.hurdle/`. Reopen them with `npx hurdle view`.
+Results are saved in `.hurdle/`. Reopen them with `npx hurdle view`, adding
+`--port 3001` if port 3000 is busy.
 
 ## Choose an agent
 

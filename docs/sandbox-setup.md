@@ -71,6 +71,13 @@ an available template, preserves the existing Result Store, Judge, Viewer, and
 runtime limits, and repeats read-only readiness checks. Failed or declined
 builds do not activate a new project Runtime.
 
+Hurdle names the templates it builds after the Agent CLIs inside, such as
+`hurdle-claude-code-codex:v2`, and adds an Agent to the template when a Suite in
+the project needs it. When a Hurdle upgrade pins a newer CLI for an Agent, that
+Agent's templates get a new tag: `validate` and `run` warn that the saved
+template is outdated, and rerunning setup builds the new one. A newer Agent CLI
+can change results, so compare Runs made with the same template.
+
 ## Automate setup
 
 Agents and scripts can consume one JSON document on stdout:
@@ -227,9 +234,10 @@ node harness/bin/hurdle.mjs run examples/copy-message/example.suite.mjs --view
 For an installed npm package, use `npx hurdle` in place of
 `node harness/bin/hurdle.mjs`. Setup builds a reusable snapshot containing Node
 22, Python, Linux controller tools, and the selected pinned Agent CLIs. No local
-Docker installation is needed. Rerunning setup reuses the snapshot alias. Pass
-`--snapshot ALIAS` to select an existing snapshot; setup does not rebuild a
-missing caller-selected alias.
+Docker installation is needed. Rerunning setup reuses the snapshot alias; like
+E2B templates, Hurdle's snapshots gain an Agent when a Suite needs it and a new
+tag when Hurdle pins a newer Agent CLI. Pass `--snapshot ALIAS` to select an
+existing snapshot; setup does not rebuild a missing caller-selected alias.
 
 Setup saves the existing Project Runtime, preserving its store, Judge, Viewer
 port, and Together resource limits. A new Together Runtime uses one CPU, 2048

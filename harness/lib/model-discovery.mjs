@@ -245,6 +245,12 @@ async function codexModels(env, { spawn, signal }) {
   }
 }
 
+// IDs the installed Codex CLI knows. For any other model it falls back to
+// generic metadata and drops tools such as apply_patch.
+export async function listLocalCodexModels({ env = process.env, signal = AbortSignal.timeout(TIMEOUT_MS) } = {}, { spawn = nodeSpawn } = {}) {
+  return (await codexModels(env, { spawn, signal })).map((model) => model.id);
+}
+
 export async function discoverModels({ agent, env = process.env, signal }, { fetch = globalThis.fetch, spawn = nodeSpawn, timeoutMs = TIMEOUT_MS } = {}) {
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(), timeoutMs);

@@ -112,6 +112,7 @@ hurdle run --agent codex
 hurdle run --model
 hurdle run --environment-settings '[]'
 hurdle view --store one --runtime two
+hurdle view --port 0
 hurdle setup --json --interactive
 hurdle setup --store postgres --sandbox e2b
 ```
@@ -135,7 +136,9 @@ hurdle validate codex-evals/example.suite.mjs
 
 Validation uses read-only provider requests and must not run agents. Subscription
 token validity can be reported as unverified. Missing or rejected credentials
-must give a clear recovery message before a run starts.
+must give a clear recovery message before a run starts. A local Codex that does
+not list the selected model, such as Codex 0.141 with `gpt-6.1-sol`, must give a
+warning naming the model.
 
 The following three small evaluations may incur agent charges:
 
@@ -154,8 +157,10 @@ hurdle view
 Each run should pass with `answer.txt` containing `Hello from the fixture.`
 and a newline. Inspect the transcript, checks, artifact, and model/effort
 configuration. Compare the two Claude labels in the default Viewer. Starting
-and stopping Viewers should release their port and child processes. A failed
-agent run should provide a diagnostic and exit nonzero.
+and stopping Viewers should release their port and child processes. While one
+Viewer runs, a second `hurdle view` should report the busy port and suggest
+`--port 3001`, which should start alongside it. A failed agent run should
+provide a diagnostic and exit nonzero.
 
 ## E2B and Together API
 
@@ -180,7 +185,9 @@ hurdle view --runtime .hurdle/runtime/default.json
 JSON setup must emit one valid JSON document and use exit 0 on success, 1 on
 setup failure, or 2 on argument failure. The saved Runtime should be reused by
 validate, run, and view. Repeat setup must reuse available templates and preserve
-storage configuration. The API run should show trusted Together HTTP evidence
+storage configuration. A template from an older Hurdle, such as
+`hurdle-codex:v1`, must make validate warn that it is outdated, and setup must
+then build the current one. The API run should show trusted Together HTTP evidence
 and `completion.json` in the Viewer. Repeat this path with
 `api-codex-evals/example.suite.mjs` to exercise Codex in E2B.
 

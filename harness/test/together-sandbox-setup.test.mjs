@@ -145,8 +145,22 @@ test("Together setup adds a new Agent to Hurdle's snapshot instead of reusing on
     0,
     f.output(),
   );
-  assert.equal(await savedAlias(), "hurdle-claude-code-codex@v1");
-  assert.deepEqual(builds.at(-1), ["hurdle-claude-code-codex@v1", ["claude-code", "codex"]]);
+  assert.equal(await savedAlias(), "hurdle-claude-code-codex@v2");
+  assert.deepEqual(builds.at(-1), ["hurdle-claude-code-codex@v2", ["claude-code", "codex"]]);
+
+  // A snapshot saved by an earlier Hurdle has an older Codex CLI.
+  const runtime = JSON.parse(await readFile(f.runtimePath, "utf8"));
+  runtime.environment.settings.snapshotAlias = "hurdle-claude-code-codex@v1";
+  await writeFile(f.runtimePath, JSON.stringify(runtime));
+  available.clear();
+  available.add("hurdle-claude-code-codex@v1");
+  assert.equal(
+    await cli.main(["setup", "codex/example.suite.mjs", "--sandbox", "together", "--yes"], f.io),
+    0,
+    f.output(),
+  );
+  assert.equal(await savedAlias(), "hurdle-claude-code-codex@v2");
+  assert.equal(builds.length, 3);
 });
 
 test("Together API setup builds a network snapshot and configures a longer Guardian lifetime", async (t) => {
@@ -188,6 +202,6 @@ test("Together Dockerfile includes pinned agents and Linux controller dependenci
   assert.match(text, /util-linux passwd/);
   assert.match(text, /passwd iptables/);
   assert.match(text, /@anthropic-ai\/claude-code@2\.1\.288/);
-  assert.match(text, /@openai\/codex@0\.141\.0/);
+  assert.match(text, /@openai\/codex@0\.159\.3/);
   assert.throws(() => togetherSandboxDockerfile(["unknown-agent"]));
 });

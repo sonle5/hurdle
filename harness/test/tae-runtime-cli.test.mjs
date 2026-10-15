@@ -881,6 +881,71 @@ test("hurdle view explains how to recover when its port is already occupied", as
   assert.doesNotMatch(streams.read().stderr, /secret-output/);
 });
 
+test("hurdle view --port serves on another port and rejects invalid ports", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-view-port-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const calls = [];
+  const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
+    env: {},
+    async launchViewer(input) {
+      calls.push(input);
+      return { kind: "stopped", exitCode: 0, url: `http://127.0.0.1:${input.port}` };
+    },
+  });
+  let streams = io(root);
+  assert.equal(await cli.main(["view", "--port", "4123", "--store", "results"], streams), 0, streams.read().stderr);
+  assert.equal(calls[0].port, 4123);
+  assert.equal(calls[0].storeEnvironment.HURDLE_RESULT_STORE_ROOT, join(root, "results"));
+  assert.match(streams.read().stdout, /http:\/\/127\.0\.0\.1:4123/);
+
+  for (const args of [
+    ["--port", "0"], ["--port", "65536"], ["--port", "30a"], ["--port", "3000.5"], ["--port", "03000"],
+    ["--port", "-1"], ["--port"], ["--port", "4000", "--port", "4001"],
+    ["--runtime", "runtime.json", "--store", "results"], ["--host", "0.0.0.0"],
+  ]) {
+    streams = io(root);
+    assert.equal(await cli.main(["view", ...args], streams), 2, args.join(" "));
+    assert.match(streams.read().stderr, /argument-error/);
+  }
+  assert.equal(calls.length, 1);
+});
+
+test("a busy Viewer port suggests the same view on the next port", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-view-port-busy-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeJudgePack(root, "unused", "code");
+  const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
+    env: {},
+    processTarget: new EventEmitter(),
+    async openLocalResultStore() { return Object.freeze({}); },
+    createRunEngine() { return { async run() { return completedResult(); } }; },
+    async launchViewer() { return { kind: "failed", exitCode: 1, reason: "port-in-use" }; },
+  });
+  const next = (streams) => stripVTControlCharacters(streams.read().stderr).match(/Next\s+(.*)/)?.[1];
+
+  let streams = io(root);
+  assert.equal(await cli.main(["view", "--store", "results", "--port", "4000"], streams), 1);
+  assert.match(streams.read().stderr, /Port 4000 is already in use/);
+  assert.equal(next(streams), `${sourceExecutable} view --store results --port 4001`);
+
+  streams = io(root);
+  assert.equal(await cli.main(["view", "--port", "65535"], streams), 1);
+  assert.equal(next(streams), `${sourceExecutable} view --port 3000`);
+
+  writeFileSync(join(root, "runtime.json"), JSON.stringify({ schemaVersion: 1, environment: { kind: "local" }, resultStore: { kind: "local", root: "results" } }));
+  streams = io(root);
+  assert.equal(await cli.main(["run", "example.suite.mjs", "--agent", "claude-code", "--runtime", "runtime.json", "--view"], streams), 1);
+  assert.equal(next(streams), `${sourceExecutable} view --runtime runtime.json --port 3001`);
+
+  // An inline topology has no view equivalent to name.
+  streams = io(root);
+  assert.equal(await cli.main(["run", "example.suite.mjs", "--agent", "claude-code", "--store", "results", "--view"], streams), 1);
+  assert.match(streams.read().stderr, /Port 3000 is already in use/);
+  assert.equal(next(streams), undefined);
+});
+
 test("hurdle view can open a canonical Local Result Store named directly", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-view-store-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

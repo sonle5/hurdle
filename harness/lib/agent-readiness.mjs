@@ -3,11 +3,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkE2bCredential, checkPostgresCredential, checkTogetherSandboxCredential } from "./credential-preflight.mjs";
+import { normalizeTogetherSettings } from "./execution-environments/together.mjs";
+import { managedImageAgents, managedImageName } from "./managed-images.mjs";
+import { listLocalCodexModels } from "./model-discovery.mjs";
+import { cliExecutable, suiteCommand } from "./terminal-output.mjs";
 
 const nonblank = value => typeof value === "string" && value.trim().length > 0;
 const result = (status, code, message) => ({ status, code, message });
 const CLAUDE_RECOVERY = "Set a valid ANTHROPIC_API_KEY in .env.local, or unset it and set CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`. Hurdle uses isolated credentials rather than your interactive login.";
 const CODEX_RECOVERY = "Set CODEX_ACCESS_TOKEN, CODEX_API_KEY, or OPENAI_API_KEY in .env.local. Hurdle does not inherit your interactive Codex login.";
+const AGENT_LABELS = { "claude-code": "Claude Code", codex: "Codex" };
 
 // Probe only the executable, without credentials, project settings, or an Agent
 // prompt. Bound both process lifetime and captured output; never display it.
@@ -27,6 +32,27 @@ export async function probeAgentCli(command, env) {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+}
+
+// A Hurdle-built image names the Agent CLIs it holds; caller-owned images are
+// left to the caller.
+function checkManagedImage(environment, adapterIds, setup) {
+  const together = environment.kind === "together";
+  const provider = together ? "together" : "e2b";
+  const image = together ? normalizeTogetherSettings(environment.settings).snapshotAlias : environment.settings?.workloadTemplate;
+  const managed = managedImageAgents(image, provider);
+  if (!managed) return null;
+  const label = `${together ? "Together snapshot" : "E2B template"} ${image}`;
+  const agents = [...new Set([...managed.agents, ...adapterIds])];
+  const rebuild = `Run \`${setup} --sandbox ${provider}\` to build ${managedImageName(agents, provider, { network: managed.network })}.`;
+  const missing = adapterIds.filter(id => !managed.agents.includes(id));
+  if (missing.length) {
+    return result("fail", "runtime.image-agent-missing", `${label} has no ${missing.map(id => AGENT_LABELS[id]).join(" or ")} CLI. ${rebuild}`);
+  }
+  if (!managed.current) {
+    return result("warning", "runtime.image-outdated", `${label} has older Agent CLIs than this version of Hurdle pins. ${rebuild}`);
+  }
+  return null;
 }
 
 async function checkApiKey(provider, name, key, fetch) {
@@ -66,10 +92,12 @@ export async function checkAgentReadiness({
   agentSelections, runtimeProfile, runtimeEnv, requiredCredentials = [],
   judgeCredentialName = null,
   allowResultStoreSetup = false,
+  suite = "evals/example.suite.mjs", cwd,
 }, {
   fetch = globalThis.fetch, probeCli = probeAgentCli,
   checkE2b = checkE2bCredential, checkPostgres = checkPostgresCredential,
   checkTogetherSandbox = checkTogetherSandboxCredential,
+  listCodexModels = listLocalCodexModels,
 } = {}) {
   const checks = [];
   const verified = new Map();
@@ -91,6 +119,16 @@ export async function checkAgentReadiness({
       checks.push(result(installed ? "pass" : "fail", "agent.installed", installed
         ? `${label} executable is available.`
         : `${label} executable is missing or could not start. Install ${label} and ensure it is on PATH.`));
+      if (!claude && installed) {
+        // Codex runs a model missing from its catalog with generic metadata
+        // and without tools such as apply_patch. Older CLIs cannot list.
+        const models = new Set(agentSelections.filter(value => value.adapterId === adapterId).map(value => value.requestedModel).filter(nonblank));
+        const listed = models.size ? await listCodexModels({ env: runtimeEnv }).catch(() => null) : null;
+        const unlisted = [...models].filter(model => listed && !listed.includes(model));
+        if (unlisted.length) {
+          checks.push(result("warning", "agent.model-unlisted", `The installed Codex does not list ${unlisted.join(", ")}, so it runs without that model's metadata and may lack tools such as apply_patch. Update Codex, or pick a model from \`${cliExecutable(cwd)} models --agent codex\`.`));
+        }
+      }
     } else {
       // A host CLI probe is inapplicable; run observes startup inside the VM.
       checks.push(result("skip", "agent.remote-unverified", `${label} runs inside the ${runtimeProfile.environment.kind === "together" ? "Together" : "E2B"} sandbox; no local CLI installation needed.`));
@@ -121,6 +159,11 @@ export async function checkAgentReadiness({
     checks.push(result(nonblank(runtimeEnv[name]) ? "pass" : "fail", "credential.required", nonblank(runtimeEnv[name])
       ? `Required task credential ${name} is configured (provider access is not checked).`
       : `Required task credential ${name} is missing. Set it in .env.local before running.`));
+  }
+  if (runtimeProfile.environment.kind !== "local") {
+    const adapterIds = [...new Set(agentSelections.map(value => value.adapterId))];
+    const checked = checkManagedImage(runtimeProfile.environment, adapterIds, suiteCommand("setup", suite, { cwd }));
+    if (checked) checks.push(checked);
   }
   if (runtimeProfile.environment.kind === "e2b") {
     const checked = await checkE2b(runtimeEnv[runtimeProfile.environment.apiKeyEnv]);

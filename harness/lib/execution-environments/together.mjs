@@ -15,9 +15,10 @@ import { createTogetherProvider } from "./together-provider.mjs";
 import { randomBytes } from "node:crypto";
 import { validateSandboxEnvelope } from "./e2b.mjs";
 import { createTogetherGuardianController } from "./together-guardian.mjs";
+import { managedImageName } from "../managed-images.mjs";
 
 const DEFAULT_SETTINGS = Object.freeze({
-  snapshotAlias: "hurdle-claude-code@v1",
+  snapshotAlias: managedImageName(["claude-code"], "together"),
   cpuCount: 1,
   memoryMiB: 2048,
   maxLifetimeMs: 3_600_000,

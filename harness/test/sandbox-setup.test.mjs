@@ -325,13 +325,39 @@ test("setup adds a new Agent to Hurdle's template instead of reusing one without
   // A Codex Suite in the same project cannot run on the Claude-only template.
   assert.equal((await initializeSuite({ destination: join(f.root, "codex"), agent: "codex" })).ok, true);
   assert.equal(await cli.main(["setup", "codex/example.suite.mjs", "--yes"], f.io), 0, f.output());
-  assert.equal(f.runtime().environment.settings.workloadTemplate, "hurdle-claude-code-codex:v1");
-  assert.deepEqual(builds.at(-1), ["hurdle-claude-code-codex:v1", ["claude-code", "codex"]]);
+  assert.equal(f.runtime().environment.settings.workloadTemplate, "hurdle-claude-code-codex:v2");
+  assert.deepEqual(builds.at(-1), ["hurdle-claude-code-codex:v2", ["claude-code", "codex"]]);
 
   // The combined template still serves the Claude Suite without another build.
   assert.equal(await cli.main(["setup", "--yes"], f.io), 0, f.output());
-  assert.equal(f.runtime().environment.settings.workloadTemplate, "hurdle-claude-code-codex:v1");
+  assert.equal(f.runtime().environment.settings.workloadTemplate, "hurdle-claude-code-codex:v2");
   assert.equal(builds.length, 2);
+});
+
+test("setup replaces a Hurdle template built before the current Agent CLI pins", async t => {
+  const f = await fixture(t);
+  f.dependencies.env.OPENAI_API_KEY = "test-openai-secret";
+  assert.equal((await initializeSuite({ destination: join(f.root, "codex"), agent: "codex" })).ok, true);
+  const available = new Set();
+  const builds = [];
+  const cli = createFrameworkCli({ ...f.dependencies,
+    async loadSetupBackend() { return {
+      exists: async (name) => available.has(name),
+      async build(name, ids) { builds.push([name, ids]); available.add(name); return { templateId: name }; },
+    }; },
+  });
+  assert.equal(await cli.main(["setup", "codex/example.suite.mjs", "--yes"], f.io), 0, f.output());
+  assert.deepEqual(builds, [["hurdle-codex:v2", ["codex"]]]);
+
+  // A template saved by an earlier Hurdle has an older Codex CLI.
+  const runtime = f.runtime();
+  runtime.environment.settings.workloadTemplate = "hurdle-codex:v1";
+  writeFileSync(join(f.root, ".hurdle/runtime/default.json"), JSON.stringify(runtime));
+  available.clear();
+  available.add("hurdle-codex:v1");
+  assert.equal(await cli.main(["setup", "codex/example.suite.mjs", "--yes"], f.io), 0, f.output());
+  assert.equal(f.runtime().environment.settings.workloadTemplate, "hurdle-codex:v2");
+  assert.deepEqual(builds.at(-1), ["hurdle-codex:v2", ["codex"]]);
 });
 
 test("a failed build cannot change an active runtime, and reruns preserve custom settings", async t => {
@@ -412,7 +438,7 @@ test("template recipe includes requested Agent CLIs and API tools but no credent
   const source = commands.join("\n");
   assert.match(source, /curl jq git/);
   assert.match(source, /@anthropic-ai\/claude-code@2\.1\.288/);
-  assert.match(source, /@openai\/codex@0\.141\.0/);
+  assert.match(source, /@openai\/codex@0\.159\.3/);
   assert.doesNotMatch(source, /API_KEY|TOKEN|secret/);
 });
 

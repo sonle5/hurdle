@@ -11,33 +11,15 @@ import { ensureSetupCredentials } from "./setup-credentials.mjs";
 import { regularFileContents, atomicWrite, saveCredentials } from "./setup-project-files.mjs";
 import { normalizeE2BSettings } from "./execution-environments/e2b.mjs";
 import { DEFAULT_PROJECT_RUNTIME, projectRuntimePath } from "./project-paths.mjs";
+import { managedImageAgents, managedImageName, SETUP_AGENT_PACKAGES } from "./managed-images.mjs";
 import {
   terminalUsesColor, terminalFact, terminalHeader,
   terminalNote, terminalNext, suiteCommand, runtimeSummaryRows,
 } from "./terminal-output.mjs";
 
 export { DEFAULT_PROJECT_RUNTIME, projectRuntimePath } from "./project-paths.mjs";
-export const SETUP_AGENT_PACKAGES = Object.freeze({
-  "claude-code": "@anthropic-ai/claude-code@2.1.288",
-  codex: "@openai/codex@0.141.0",
-});
+export { SETUP_AGENT_PACKAGES } from "./managed-images.mjs";
 function setupError(code, message) { return Object.assign(new Error(message), { code }); }
-
-const MANAGED_IMAGE_NAMES = Object.freeze({
-  e2b: /^hurdle-((?:claude-code|codex)(?:-(?:claude-code|codex))*):v1$/,
-  together: /^hurdle-((?:claude-code|codex)(?:-(?:claude-code|codex))*)(-network)?@v1$/,
-});
-
-// Hurdle names the images it builds after the Agent CLIs inside them. Return
-// those Agents for a Hurdle-built name, or null for a caller-owned image.
-export function managedImageAgents(name, provider) {
-  const match = MANAGED_IMAGE_NAMES[provider].exec(name ?? "");
-  if (!match) return null;
-  return {
-    agents: Object.keys(SETUP_AGENT_PACKAGES).filter((id) => `-${match[1]}-`.includes(`-${id}-`)),
-    network: Boolean(match[2]),
-  };
-}
 
 
 export function createSetupTemplate(Template, agents) {
@@ -115,7 +97,7 @@ export async function setupSandbox({ suite, template, yes = false, interactive =
     // A Hurdle template must hold every Agent CLI the project runs; keep
     // caller-owned templates as configured.
     const agents = [...new Set([...(managed?.agents ?? []), ...ids])].sort();
-    const name = template ?? (saved && !managed ? saved : `hurdle-${agents.join("-")}:v1`);
+    const name = template ?? (saved && !managed ? saved : managedImageName(agents, "e2b"));
     const config = old ?? structuredClone(createRuntimeConfig("e2b", { template: name }));
     if (!old) {
       delete config.judge;
@@ -149,7 +131,7 @@ export async function setupSandbox({ suite, template, yes = false, interactive =
       ...(profile.resultStore.kind === "postgres" ? [{ label: "Postgres", anyOf: [profile.resultStore.databaseUrlEnv] }] : []),
     ];
     const entered = await ensureSetupCredentials({ requirements, environment: env, interactive, prompt, io, report: output.result });
-    const readiness = await dependencies.checkAgentReadiness({ agentSelections: authored.defaults.agentSelections, runtimeProfile: profile, runtimeEnv: env, requiredCredentials: taskCredentials, judgeCredentialName: judgeRequired ? profile.judge.credentialEnv : null, allowResultStoreSetup: true });
+    const readiness = await dependencies.checkAgentReadiness({ agentSelections: authored.defaults.agentSelections, runtimeProfile: profile, runtimeEnv: env, requiredCredentials: taskCredentials, judgeCredentialName: judgeRequired ? profile.judge.credentialEnv : null, allowResultStoreSetup: true, suite, cwd: io.cwd });
     for (const check of readiness.checks) line(check.status, check.message, check.code ?? null);
     if (!readiness.ok) throw setupError("setup.not-ready", "Resolve the setup errors above and rerun npx hurdle setup --sandbox e2b. No template build or evaluation started.");
     const backend = await (dependencies.loadSetupBackend ?? loadSetupBackend)();

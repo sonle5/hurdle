@@ -331,13 +331,14 @@ const HELP_TEXT = Object.freeze({
   ].join("\n"),
   view: [
     "Usage:",
-    "  hurdle view [--runtime FILE | --store DIR]",
+    "  hurdle view [--runtime FILE | --store DIR] [--port PORT]",
     "",
     "Start the Results Viewer for the default or selected Result Store.",
     "",
     "Options:",
     "  --runtime FILE      Read the Result Store from a Runtime Profile",
     "  --store DIR         Open a local Result Store directory",
+    "  --port PORT         Serve on PORT instead of the Runtime's Viewer port (3000)",
     "  -h, --help          Show this help",
   ].join("\n"),
 });
@@ -848,21 +849,25 @@ function parseRunArguments(args, io, { validation = false } = {}) {
 }
 
 function parseViewArguments(args, io) {
-  if (args.length === 0) return { ok: true, values: { runtime: null, store: null } };
-  if (
-    args.length !== 2
-    || !["--runtime", "--store"].includes(args[0])
-    || !args[1]
-    || args[1].startsWith("-")
-  ) {
-    return argumentError(
-      "view accepts only an optional '--runtime FILE' or '--store DIR'.",
-      io,
-    );
+  const values = { runtime: null, store: null, port: null };
+  for (let index = 0; index < args.length; index += 2) {
+    const field = { "--runtime": "runtime", "--store": "store", "--port": "port" }[args[index]];
+    const value = args[index + 1];
+    if (!field || values[field] !== null || !value || value.startsWith("-")) {
+      return argumentError("view accepts only an optional '--runtime FILE' or '--store DIR', and '--port PORT'.", io);
+    }
+    values[field] = value;
   }
-  return args[0] === "--store"
-    ? { ok: true, values: { runtime: null, store: args[1] } }
-    : { ok: true, values: { runtime: args[1], store: null } };
+  if (values.runtime !== null && values.store !== null) {
+    return argumentError("view accepts only an optional '--runtime FILE' or '--store DIR', and '--port PORT'.", io);
+  }
+  if (values.port !== null) {
+    if (!/^[1-9]\d{0,4}$/.test(values.port) || Number(values.port) > 65_535) {
+      return argumentError("--port must be a whole number from 1 to 65535.", io);
+    }
+    values.port = Number(values.port);
+  }
+  return { ok: true, values };
 }
 
 function validateRunSelection(options, definition, io) {
@@ -884,7 +889,7 @@ function validateRunSelection(options, definition, io) {
 }
 
 async function serveResolvedViewer(runtimeProfile, io, dependencies, {
-  showHeader = true, suite = defaultSuiteArgument(io.cwd), storeOverride = false,
+  showHeader = true, suite = defaultSuiteArgument(io.cwd), storeOverride = false, viewCommand = null,
 } = {}) {
   let storeEnvironment;
   try {
@@ -944,11 +949,14 @@ async function serveResolvedViewer(runtimeProfile, io, dependencies, {
     return 1;
   }
   if (outcome.reason === "port-in-use") {
+    const { port } = runtimeProfile.viewer;
     writeError(io,
-      `hurdle [viewer-port-in-use] Port ${runtimeProfile.viewer.port} is already in use.\n`
-      + `Open http://127.0.0.1:${runtimeProfile.viewer.port} if the Viewer is already running, `
+      `hurdle [viewer-port-in-use] Port ${port} is already in use.\n`
+      + `Open http://127.0.0.1:${port} if the Viewer is already running, `
       + "or stop that process and run this command again.\n",
     );
+    // Name the same Result Store on another port.
+    if (viewCommand) io.stderr.write(terminalNext([`${viewCommand} --port ${port === 65_535 ? 3000 : port + 1}`], io.stderr));
   } else if (outcome.reason === "viewer-lock-held") {
     writeError(io,
       "hurdle [viewer-lock-held] Another Viewer development server appears to be running from this checkout.\n"
@@ -1379,6 +1387,7 @@ async function runCliMain(argv, io, dependencies) {
         runtimeEnv: dependencies.env,
         requiredCredentials: [...selectedCredentialNames],
         judgeCredentialName: authorityNeedsJudge ? runtimeProfile.judge.credentialEnv : null,
+        suite: options.suite, cwd: io.cwd,
       });
     } catch {
       writeError(io, "hurdle [readiness-unavailable] Readiness checks could not complete. No evaluation started; check your setup and retry.\n");
@@ -1716,7 +1725,11 @@ async function runCliMain(argv, io, dependencies) {
     if (interruptedSignal === "SIGHUP") return 129;
     const runExitCode = counts.fail + counts.incomplete + counts.unknown === 0 ? 0 : 1;
     if (!options.viewAfterRun) return runExitCode;
-    const viewerExitCode = await serveResolvedViewer(runtimeProfile, io, dependencies, { showHeader: false, suite: options.suite });
+    const runtimeArgument = options.runtime && options.runtime !== projectRuntimePath(io.cwd) ? ` --runtime ${quoteCommandArgument(options.runtime)}` : "";
+    const viewerExitCode = await serveResolvedViewer(runtimeProfile, io, dependencies, {
+      showHeader: false, suite: options.suite,
+      viewCommand: options.explicitTopology.size ? null : `${cliExecutable(io.cwd)} view${runtimeArgument}`,
+    });
     return viewerExitCode === 0 ? runExitCode : viewerExitCode;
   }
 
@@ -1738,12 +1751,21 @@ async function runCliMain(argv, io, dependencies) {
           }),
         });
       }
+      if (parsed.values.port !== null) {
+        runtimeProfile = Object.freeze({
+          ...runtimeProfile,
+          viewer: Object.freeze({ ...runtimeProfile.viewer, port: parsed.values.port }),
+        });
+      }
     } catch (error) {
       if (!(error instanceof RuntimeProfileError)) throw error;
       writeError(io, `hurdle [${error.code}] ${error.message}\n`);
       return 2;
     }
-    return serveResolvedViewer(runtimeProfile, io, dependencies, { storeOverride: Boolean(parsed.values.store) });
+    const viewCommand = `${cliExecutable(io.cwd)} view`
+      + (parsed.values.runtime ? ` --runtime ${quoteCommandArgument(parsed.values.runtime)}` : "")
+      + (parsed.values.store ? ` --store ${quoteCommandArgument(parsed.values.store)}` : "");
+    return serveResolvedViewer(runtimeProfile, io, dependencies, { storeOverride: Boolean(parsed.values.store), viewCommand });
   }
 
   return usage(io);

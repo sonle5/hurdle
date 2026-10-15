@@ -138,6 +138,89 @@ test("remote readiness diagnoses account failures and blocks unconfigured stores
   }
 });
 
+test("Hurdle-built sandbox images must hold the selected Agents and current CLIs", async () => {
+  const remote = {
+    probeCli() { assert.fail("Remote readiness does not probe a local CLI"); },
+    fetch: async () => success(),
+    checkE2b: async () => ({ status: "pass", message: "account accessible" }),
+    checkTogetherSandbox: async () => ({ status: "pass", message: "account accessible" }),
+  };
+  const check = async (kind, settings, adapterId) => {
+    const checked = await checkAgentReadiness({
+      ...input({ OPENAI_API_KEY: "key", ANTHROPIC_API_KEY: "key", REMOTE_KEY: "key" }, adapterId),
+      runtimeProfile: { environment: { kind, apiKeyEnv: "REMOTE_KEY", settings }, resultStore: { kind: "local" } },
+      suite: "evals/codex.suite.mjs",
+    }, remote);
+    return { ok: checked.ok, image: checked.checks.filter(value => value.code.startsWith("runtime.image")) };
+  };
+
+  let checked = await check("e2b", { workloadTemplate: "hurdle-claude-code:v1" }, "codex");
+  assert.equal(checked.ok, false);
+  assert.equal(checked.image[0].code, "runtime.image-agent-missing");
+  assert.match(checked.image[0].message, /E2B template hurdle-claude-code:v1 has no Codex CLI/);
+  assert.match(checked.image[0].message, /setup evals\/codex\.suite\.mjs --sandbox e2b` to build hurdle-claude-code-codex:v2/);
+
+  checked = await check("e2b", { workloadTemplate: "hurdle-codex:v1" }, "codex");
+  assert.equal(checked.ok, true, "an older CLI still runs");
+  assert.equal(checked.image[0].status, "warning");
+  assert.equal(checked.image[0].code, "runtime.image-outdated");
+  assert.match(checked.image[0].message, /to build hurdle-codex:v2/);
+
+  checked = await check("together", { snapshotAlias: "hurdle-claude-code-codex-network@v1" }, "claude-code");
+  assert.equal(checked.image[0].code, "runtime.image-outdated");
+  assert.match(checked.image[0].message, /Together snapshot .* --sandbox together` to build hurdle-claude-code-codex-network@v2/);
+
+  // The default Together snapshot holds only Claude Code.
+  assert.equal((await check("together", undefined, "codex")).image[0].code, "runtime.image-agent-missing");
+  for (const [kind, settings, adapterId] of [
+    ["e2b", { workloadTemplate: "hurdle-codex:v2" }, "codex"],
+    ["e2b", { workloadTemplate: "hurdle-claude-code:v1" }, "claude-code"],
+    ["e2b", { workloadTemplate: "my-codex-template:v1" }, "codex"],
+    ["e2b", {}, "codex"],
+    ["together", undefined, "claude-code"],
+    ["together", { snapshotAlias: "my-snapshot@v1" }, "codex"],
+  ]) {
+    checked = await check(kind, settings, adapterId);
+    assert.deepEqual(checked, { ok: true, image: [] }, JSON.stringify(settings));
+  }
+});
+
+test("Local Codex readiness warns when the installed CLI does not list the selected model", async () => {
+  const listings = [];
+  const check = (models, { installed = true, listed = ["gpt-5.5", "gpt-5.4"] } = {}) => checkAgentReadiness({
+    runtimeProfile: profile, runtimeEnv: { OPENAI_API_KEY: "key", PATH: "/test-bin" },
+    agentSelections: models.map(requestedModel => ({ adapterId: "codex", requestedModel })),
+  }, {
+    probeCli: async () => installed,
+    fetch: async () => success(),
+    listCodexModels: async ({ env }) => {
+      listings.push(env);
+      if (listed instanceof Error) throw listed;
+      return listed;
+    },
+  });
+
+  let checked = await check(["gpt-6.1-sol", "gpt-5.5", "gpt-6.1-sol"]);
+  assert.equal(checked.ok, true);
+  const warning = checked.checks.find(value => value.code === "agent.model-unlisted");
+  assert.equal(warning.status, "warning");
+  assert.match(warning.message, /does not list gpt-6\.1-sol, so it runs without that model's metadata/);
+  assert.match(warning.message, /models --agent codex/);
+  assert.deepEqual(listings, [{ OPENAI_API_KEY: "key", PATH: "/test-bin" }], "one listing per readiness check");
+
+  for (const [models, options] of [
+    [["gpt-5.4"], {}],
+    [["gpt-6.1-sol"], { listed: new Error("app-server unsupported") }],
+    [[null], {}],
+    [["gpt-6.1-sol"], { installed: false }],
+  ]) {
+    listings.length = 0;
+    checked = await check(models, options);
+    assert.equal(checked.checks.some(value => value.code === "agent.model-unlisted"), false, JSON.stringify(models));
+    assert.equal(listings.length, models[0] === null || options.installed === false ? 0 : 1);
+  }
+});
+
 test("CLI validate and run reject bad authentication before a store, agent, Judge, or Viewer starts", async t => {
   const root = mkdtempSync(join(tmpdir(), "hurdle-onboarding-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
