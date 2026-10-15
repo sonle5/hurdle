@@ -54,11 +54,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Nutlope/together-agent-evals.git"
+    "url": "git+https://github.com/Nutlope/hurdle.git"
   },
-  "homepage": "https://github.com/Nutlope/together-agent-evals#readme",
+  "homepage": "https://github.com/Nutlope/hurdle#readme",
   "bugs": {
-    "url": "https://github.com/Nutlope/together-agent-evals/issues"
+    "url": "https://github.com/Nutlope/hurdle/issues"
   },
   "publishConfig": {
     "access": "public",

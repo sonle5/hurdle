@@ -17,11 +17,11 @@ not an applied branding change. `readiness fail` previews rejection and recovery
 text. Previews make no provider requests, run no agent, and start no server.
 
 To try the draft against your existing quickstart project, run the source CLI
-from that directory, replacing `/path/to/together-agent-evals` with your checkout:
+from that directory, replacing `/path/to/hurdle` with your checkout:
 
 ```sh
-node /path/to/together-agent-evals/harness/bin/hurdle.mjs validate
-node /path/to/together-agent-evals/harness/bin/hurdle.mjs view
+node /path/to/hurdle/harness/bin/hurdle.mjs validate
+node /path/to/hurdle/harness/bin/hurdle.mjs view
 ```
 
 The CLI uses one line per authentication check, green/red/yellow status
@@ -52,9 +52,9 @@ Hurdle has a public `setup` command. For the Together API demo,
 use a new project directory and run the source CLI from your checkout:
 
 ```sh
-node /path/to/together-agent-evals/harness/bin/hurdle.mjs init --example together-api
-node /path/to/together-agent-evals/harness/bin/hurdle.mjs setup --sandbox e2b --yes
-node /path/to/together-agent-evals/harness/bin/hurdle.mjs run --view
+node /path/to/hurdle/harness/bin/hurdle.mjs init --example together-api
+node /path/to/hurdle/harness/bin/hurdle.mjs setup --sandbox e2b --yes
+node /path/to/hurdle/harness/bin/hurdle.mjs run --view
 ```
 
 Run each step separately and continue only after it succeeds. Configure the E2B,

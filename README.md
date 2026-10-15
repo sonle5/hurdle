@@ -126,11 +126,9 @@ Score with `code`, an LLM `judge`, or `hybrid` checks. See
 
 ## From source
 
-Repository access is required while it is private.
-
 ```sh
-git clone https://github.com/Nutlope/together-agent-evals.git
-cd together-agent-evals
+git clone https://github.com/Nutlope/hurdle.git
+cd hurdle
 cp .env.example .env.local
 npm run setup
 ```
