@@ -156,8 +156,7 @@ order by created_at desc;
 
 ## Beta limitations
 
-E2B, Agent, Judge, and Together usage may be billed. A known tool/MCP
-process-quiescence defect can mark a run incomplete even when its Judge passes.
+E2B, Agent, Judge, and Together usage may be billed.
 
 Voice, DMI, fine-tuning, Jig, and persistent-resource lifecycle Tasks are
 outside the preview. This release does not claim legacy score continuity or full
