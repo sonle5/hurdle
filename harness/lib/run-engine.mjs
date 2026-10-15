@@ -97,21 +97,25 @@ function normalizedAgentSettings(adapter, requestedModel, settings) {
 // Environments skip collection after interrupted or untrusted execution. Every
 // declared artifact still needs an outcome, or checks read undeclared paths.
 function withUncollectedArtifacts(artifacts, declarations) {
-  const reported = new Set(artifacts.map(({ path }) => path));
   const capturedAt = new Date().toISOString();
+  const uncollected = ({ path, kind, maxBytes, required }) => ({
+    path,
+    kind,
+    maxBytes,
+    required,
+    status: "rejected",
+    reason: "not_collected",
+    capturedAt,
+  });
+  // Sandboxes report every artifact as not started until they collect it, so
+  // such an artifact was never collected rather than missing from the workspace.
+  const collected = artifacts.map((artifact) => (
+    artifact.status === "missing" && artifact.reason === "execution-not-started" ? uncollected(artifact) : artifact
+  ));
+  const reported = new Set(collected.map(({ path }) => path));
   return [
-    ...artifacts,
-    ...declarations
-      .filter(({ path }) => !reported.has(path))
-      .map(({ path, kind, maxBytes, required }) => ({
-        path,
-        kind,
-        maxBytes,
-        required,
-        status: "rejected",
-        reason: "not_collected",
-        capturedAt,
-      })),
+    ...collected,
+    ...declarations.filter(({ path }) => !reported.has(path)).map(uncollected),
   ];
 }
 
@@ -1024,6 +1028,9 @@ async function runOne({
           evidenceRedaction,
         )
       : null;
+    // A cancelled run's process exit and transcript follow from the
+    // cancellation, so report the cancellation instead of them.
+    const cancelled = observed.integrityIssues.some(({ code }) => code === "environment.cancelled");
     const integrityIssues = [
       ...observed.integrityIssues.map((issue) => ({
         ...issue,
@@ -1033,9 +1040,9 @@ async function runOne({
           evidenceRedaction,
         ),
       })),
-      ...processIssues(observed.process, redactedOperatorReason),
+      ...(cancelled ? [] : processIssues(observed.process, redactedOperatorReason)),
       ...artifactIssues,
-      ...decodeIssues,
+      ...(cancelled ? [] : decodeIssues),
     ];
     const transcriptInvalid = !decoded
       || decodeIssues.some(({ code }) => code === "controller.transcript-invalid");

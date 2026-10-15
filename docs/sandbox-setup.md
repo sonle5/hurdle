@@ -284,8 +284,9 @@ node harness/bin/hurdle.mjs run examples/copy-message/example.suite.mjs --runtim
 Runtime settings are `snapshotAlias`, `cpuCount` (1–16), `memoryMiB` (1024–8192
 per CPU), and `maxLifetimeMs` (1000–86400000). Separate Runtime initialization
 uses a one-hour lifetime; setup uses five minutes for artifact tasks and ten for
-API capture. Hurdle reserves the final
-30 seconds for process cleanup and evidence sealing. A lifetime that leaves no
+API capture. When a project adds an API Suite, setup raises its own five-minute
+default to ten minutes; other configured limits stay as set. Hurdle reserves the
+final 30 seconds for process cleanup and evidence sealing. A lifetime that leaves no
 execution time produces an incomplete run. Lifetime limits are not dollar or
 token budgets.
 

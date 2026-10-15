@@ -382,3 +382,41 @@ test('Together composes with the public Suite API, Claude adapter, checks, and c
   assert.equal(disposed, true);
   assert.doesNotMatch(JSON.stringify(record), /agent-auth-test-value|sandbox-auth-test-value/);
 });
+
+test('a Together run cancelled while the Agent runs reports cancellation, not a process failure', async (t) => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const { createRunEngine } = await import('../lib/run-engine.mjs');
+  const { openLocalResultStore } = await import('../lib/local-result-store.mjs');
+  const { resolveV1Suite } = await import('../lib/v1-authoring.mjs');
+  const { createClaudeCodeAdapter } = await import('../lib/agent-adapters/claude-code.mjs');
+  const root = await mkdtemp(join(tmpdir(), 'hurdle-together-cancel-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const suite = await resolveV1Suite({ suitePath: fileURLToPath(new URL('../../examples/copy-message/example.suite.mjs', import.meta.url)) });
+  assert.equal(suite.ok, true, JSON.stringify(suite.diagnostics));
+  t.after(() => suite.dispose());
+  const store = await openLocalResultStore({ root: join(root, 'results') });
+  const controller = new AbortController();
+  let disposed = false;
+  const provider = {
+    async acquire() { return { sandboxId: 'controlled-sandbox' }; },
+    async stage() {},
+    async run() {
+      controller.abort();
+      // The sandbox SDK rejects an aborted command, which the shared controller
+      // reports as an unavailable remote process.
+      const now = new Date().toISOString();
+      return { exitCode: null, signal: null, timedOut: false, quiescent: true, spawnError: 'remote-process-unavailable', startedAt: now, endedAt: now, durationMs: 1 };
+    },
+    async collectArtifacts() { return []; },
+    async dispose() { disposed = true; }, async isDisposed() { return disposed; },
+  };
+  const engine = createRunEngine({ resultStore: store, agentAdapter: createClaudeCodeAdapter({ runtimeEnv: { ANTHROPIC_API_KEY: 'agent-auth-test-value' } }), executionEnvironment: createTogetherExecutionEnvironment({ apiKey: 'sandbox-auth-test-value', provider }) });
+  const result = await engine.run({ runPlan: suite.value, signal: controller.signal });
+  const codes = (await store.getRun(result.runs[0].id)).integrityIssues.map(({ code }) => code);
+  assert.ok(codes.includes('environment.cancelled'), JSON.stringify(codes));
+  assert.deepEqual(codes, ['environment.cancelled', 'artifact.required-uncollected']);
+  assert.equal(disposed, true);
+});

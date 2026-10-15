@@ -178,6 +178,26 @@ test("Together API setup builds a network snapshot and configures a longer Guard
   assert.equal(config.environment.settings.maxLifetimeMs, 600000);
   assert.match(f.output(), /separate Guardian VM/);
 });
+test("Together setup gives a later API Suite ten minutes but keeps a configured limit", async (t) => {
+  const f = await fixture(t);
+  const cli = createFrameworkCli(f.dependencies);
+  const lifetime = async () =>
+    JSON.parse(await readFile(f.runtimePath, "utf8")).environment.settings.maxLifetimeMs;
+  assert.equal(await cli.main(["setup", "--sandbox", "together", "--yes"], f.io), 0, f.output());
+  assert.equal(await lifetime(), 300000);
+
+  assert.equal((await initializeSuite({ destination: join(f.root, "api"), example: "together-api" })).ok, true);
+  const api = ["setup", "api/example.suite.mjs", "--sandbox", "together", "--yes"];
+  assert.equal(await cli.main(api, f.io), 0, f.output());
+  assert.equal(await lifetime(), 600000);
+
+  const runtime = JSON.parse(await readFile(f.runtimePath, "utf8"));
+  runtime.environment.settings.maxLifetimeMs = 420000;
+  await writeFile(f.runtimePath, JSON.stringify(runtime));
+  assert.equal(await cli.main(api, f.io), 0, f.output());
+  assert.equal(await lifetime(), 420000);
+});
+
 test("Together setup declines unapproved builds and missing caller-selected snapshots", async (t) => {
   for (const flags of [[], ["--snapshot", "missing@v1", "--yes"]]) {
     const f = await fixture(t);

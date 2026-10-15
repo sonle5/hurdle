@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { postgresConnectionFailure } from "./postgres-connection-string.mjs";
 import { join, relative, resolve } from "node:path";
 import { parseProjectEnvironment } from "./project-environment.mjs";
 import { resolveRuntimeProfile } from "./runtime-profile.mjs";
@@ -29,12 +30,12 @@ function postgresNextCommands(cwd, suite) {
   return [`${executable} init ${destination}`];
 }
 
-function postgresCredentialRecovery(code, name, source, io, suite) {
+function postgresCredentialRecovery(code, name, source, io, suite, reason = "database could not be reached") {
   const summaries = {
     "setup.credentials-missing": "Postgres connection URL is missing or blank.",
     "setup.credential": "Enter a nonblank Postgres connection URL without spaces or line breaks.",
     "setup.database-url": "Use a full postgres:// or postgresql:// connection URL.",
-    "setup.database-connection": "A Postgres URL was found, but the connection failed.",
+    "setup.database-connection": `A Postgres URL was found, but the connection failed: ${reason}.`,
   };
   if (!Object.hasOwn(summaries, code)) return null;
   const executable = cliExecutable(io.cwd);
@@ -122,7 +123,10 @@ export async function setupPostgresStore({ suite, interactive = false, json = fa
     }
     const backend = await (dependencies.loadPostgresSetupBackend ?? loadPostgresSetupBackend)();
     try { await backend.checkConnection(connectionString); }
-    catch { throw setupError("setup.database-connection", `Could not connect to Postgres. Check ${name}, network access, and TLS settings. Project Runtime was not changed.`); }
+    catch (error) {
+      const reason = postgresConnectionFailure(error);
+      throw Object.assign(setupError("setup.database-connection", `Could not connect to Postgres: ${reason}. Check ${name}; the Project Runtime was not changed.`), { reason });
+    }
     line("pass", "Postgres connection verified.");
     try { await backend.migrate(connectionString); }
     catch (error) {
@@ -143,7 +147,7 @@ export async function setupPostgresStore({ suite, interactive = false, json = fa
     return output.finish(0);
   } catch (error) {
     const known = error.code?.startsWith("setup.") || error.code?.startsWith("runtime.");
-    const recovery = postgresCredentialRecovery(error.code, credentialName, credentialSource, io, suite);
+    const recovery = postgresCredentialRecovery(error.code, credentialName, credentialSource, io, suite, error.reason);
     if (recovery) output.result.nextCommands = recovery.nextCommands;
     return output.finish(1, { code: known ? error.code : "setup.store-failed", message: recovery?.message ?? (known ? error.message
       : "Storage setup could not complete. Check project file permissions and the installed package, then retry. Database migrations may already have been applied; rerunning setup is safe.") });

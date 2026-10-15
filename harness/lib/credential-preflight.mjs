@@ -1,4 +1,4 @@
-import { normalizePostgresConnectionString } from "./postgres-connection-string.mjs";
+import { normalizePostgresConnectionString, postgresConnectionFailure } from "./postgres-connection-string.mjs";
 import { backendDependencyInstallCommand } from "./backend-dependencies.mjs";
 import { hurdleEnvironmentValue, RESULT_STORE_DATABASE_URL_ENV } from "./hurdle-environment.mjs";
 
@@ -176,10 +176,7 @@ export async function checkPostgresCredential(connectionString, { createPool } =
       ? "connected, but the result schema needs upgrading"
       : "connected, but the result schema needs initializing", "postgres.setup-required");
   } catch (error) {
-    if (error?.code === "28P01" || error?.code === "28000") {
-      return result("Postgres", "fail", "credential rejected");
-    }
-    return result("Postgres", "fail", "database could not be reached");
+    return result("Postgres", "fail", postgresConnectionFailure(error));
   } finally {
     client?.release?.();
     try {

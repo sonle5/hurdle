@@ -162,6 +162,13 @@ export async function setupTogetherSandbox(
       ...(config.environment?.kind === "together"
         ? config.environment.settings
         : { maxLifetimeMs: needsCapture ? 600_000 : 300_000 }),
+      // API capture needs ten minutes, so replace the five-minute artifact
+      // default an earlier setup saved; other configured limits stay.
+      ...(needsCapture &&
+      config.environment?.kind === "together" &&
+      config.environment.settings?.maxLifetimeMs === 300_000
+        ? { maxLifetimeMs: 600_000 }
+        : {}),
       snapshotAlias: alias,
     });
     config.environment = {

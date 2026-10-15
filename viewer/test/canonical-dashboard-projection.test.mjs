@@ -15,8 +15,10 @@ import {
 } from "../../harness/lib/local-result-store-reader.mjs";
 import {
   createCanonicalDashboardProjection,
+  MAX_CANONICAL_DASHBOARD_TRANSCRIPT_BYTES,
 } from "../lib/canonical-dashboard-projection.mjs";
 import { createClaudeCodeAdapter } from "../../harness/lib/agent-adapters/claude-code.mjs";
+import { DEFAULT_CONTROLLER_CAPTURE_MAX_BYTES } from "../../harness/lib/controller-transcript.mjs";
 
 const fixture = JSON.parse(readFileSync(
   new URL("../../harness/test/fixtures/canonical-run-record-v2.json", import.meta.url),
@@ -44,7 +46,7 @@ test("new and existing Claude runs show the same full usage and tools without ch
       async readEvidence(reference, options) {
         reads++;
         assert.equal(reference, record.evidence.transcript);
-        assert.equal(options.maxBytes, 32 * 1024 * 1024);
+        assert.equal(options.maxBytes, MAX_CANONICAL_DASHBOARD_TRANSCRIPT_BYTES);
         return Buffer.from(jsonl);
       },
     });
@@ -336,7 +338,7 @@ test("canonical dashboard detail reads only the selected digest-verified transcr
   assert.deepEqual(detail.evaluatorSources, []);
   assert.deepEqual(calls, [{
     reference: record.evidence.transcript,
-    options: { maxBytes: 32 * 1024 * 1024 },
+    options: { maxBytes: MAX_CANONICAL_DASHBOARD_TRANSCRIPT_BYTES },
   }]);
 });
 
@@ -578,13 +580,29 @@ test("canonical dashboard projects the stored deterministic result for the sessi
   assert.equal(detail.deterministicEffectiveVerdict, "pass");
 });
 
+test("the Viewer reads every transcript that capture keeps", async () => {
+  assert.equal(MAX_CANONICAL_DASHBOARD_TRANSCRIPT_BYTES, DEFAULT_CONTROLLER_CAPTURE_MAX_BYTES);
+  const record = structuredClone(completeRecord);
+  record.evidence.transcript.sizeBytes = 40 * 1024 * 1024;
+  let reads = 0;
+  const projection = createCanonicalDashboardProjection({ ...fixtureReader(record),
+    async readEvidence() {
+      reads++;
+      return Buffer.from("");
+    },
+  });
+  const [summary] = await projection.listSessions(record.experimentVersion);
+  await projection.findSession(summary.id);
+  assert.ok(reads > 0, "a 40 MB transcript is read, not reported unavailable");
+});
+
 test("canonical dashboard keeps absent headline unknown and never reads oversized transcript", async () => {
   const unknown = structuredClone(completeRecord);
   unknown.evidence.egress = [];
   delete unknown.verdict;
   delete unknown.verdictReasons;
   delete unknown.headline;
-  unknown.evidence.transcript.sizeBytes = 32 * 1024 * 1024 + 1;
+  unknown.evidence.transcript.sizeBytes = MAX_CANONICAL_DASHBOARD_TRANSCRIPT_BYTES + 1;
   let evidenceReads = 0;
   const reader = fixtureReader(unknown);
   reader.readEvidence = async () => {

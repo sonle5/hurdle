@@ -212,7 +212,7 @@ test("JSON argument errors and database failures have stable codes and never pro
     const f = fixture(t);
     const cli = createFrameworkCli({ ...f.dependencies, promptSetup() { assert.fail("These invocations must never prompt"); },
       loadPostgresSetupBackend: async () => ({
-        checkConnection: async () => { if (scenario === "connection") throw Error(secret); },
+        checkConnection: async () => { if (scenario === "connection") throw Object.assign(Error(secret), { code: "3D000" }); },
         migrate: async () => { if (scenario === "migration") throw Error(secret); },
       }),
     });
@@ -224,6 +224,7 @@ test("JSON argument errors and database failures have stable codes and never pro
       const report = JSON.parse(f.output());
       assert.equal(report.exitCode, exit);
       assert.equal(report.error.code, scenario === "connection" ? "setup.database-connection" : scenario === "migration" ? "setup.database-migration" : "argument-error");
+      if (scenario === "connection") assert.match(report.error.message, /connection failed: the database named in the connection URL does not exist\./);
     }
     assert.doesNotMatch(f.output(), /private-password|example\.test/);
   }

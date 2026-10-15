@@ -8,7 +8,7 @@ import {
   checkTogetherCredential,
   runCredentialPreflight,
 } from "../lib/credential-preflight.mjs";
-import { normalizePostgresConnectionString } from "../lib/postgres-connection-string.mjs";
+import { normalizePostgresConnectionString, postgresConnectionFailure } from "../lib/postgres-connection-string.mjs";
 
 function response(status, body) {
   const bytes = Buffer.from(JSON.stringify(body));
@@ -215,4 +215,30 @@ test("unconfigured services are skipped and the aggregate remains secret-safe", 
   });
   assert.equal(results.length, 4);
   assert.ok(results.every(({ status }) => status === "skip"));
+});
+
+test("Postgres connection failures name the cause without echoing connection details", async () => {
+  // Shapes observed from pg 8 against a real server and unreachable targets.
+  const failure = (fields) => Object.assign(new Error(fields.message ?? "failed"), fields);
+  const cases = [
+    [{ code: "28P01", message: 'password authentication failed for user "private-user"' }, /^credential rejected/],
+    [{ code: "28000", message: 'role "private-user" does not exist' }, /^credential rejected/],
+    [{ code: "3D000", message: 'database "private-db" does not exist' }, /database named in the connection URL does not exist/],
+    [{ code: "ENOTFOUND", message: "getaddrinfo ENOTFOUND private-host.example" }, /host .* could not be resolved/],
+    [{ code: "ECONNREFUSED", message: "connect ECONNREFUSED 10.0.0.7:5432" }, /refused the connection/],
+    [{ message: "Connection terminated due to connection timeout" }, /timed out/],
+    [{ message: "The server does not support SSL connections" }, /TLS connection failed/],
+    [{ code: "SELF_SIGNED_CERT_IN_CHAIN", message: "self-signed certificate in certificate chain" }, /TLS connection failed/],
+    [{ code: "ERR_INVALID_URL", message: "Invalid URL" }, /connection URL is invalid/],
+    [{ code: "XX000", message: "private internal detail" }, /^database could not be reached$/],
+  ];
+  for (const [fields, expected] of cases) {
+    const result = await checkPostgresCredential("postgresql://private-user:private-password@private-host.example/private-db", {
+      createPool: () => ({ async connect() { throw failure(fields); }, async end() {} }),
+    });
+    assert.equal(result.status, "fail");
+    assert.match(result.message, expected, JSON.stringify(fields));
+    assert.doesNotMatch(result.message, /private|10\.0\.0\.7/);
+    assert.equal(postgresConnectionFailure(failure(fields)), result.message);
+  }
 });

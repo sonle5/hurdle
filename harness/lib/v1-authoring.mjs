@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { DEFAULT_RUN_CONCURRENCY, normalizeRunConcurrency } from "./run-concurrency.mjs";
 import {
@@ -160,6 +161,32 @@ function compileRunPlan({ root, sourcePath, definition, fixturePaths, behaviorGr
 
 function fail(code, message, file) {
   throw new V1AuthoringError(code, message, file);
+}
+
+// Generated modules keep the author's line numbers, so the stack names the
+// failing line. Report that line and whether it is a syntax error, never the
+// error text.
+function failModule(code, message, syntaxMessage, file, error, sources) {
+  const stack = String(error?.stack ?? "");
+  let located = null;
+  for (const [generated, source] of sources) {
+    for (const href of new Set([generated, realpathSync(generated)].map((path) => pathToFileURL(path).href))) {
+      const escaped = href.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const match = new RegExp(`${escaped}(?:\\?[^:\\s]*)?:(\\d+)`).exec(stack);
+      if (match) { located = { file: source, line: Number(match[1]) }; break; }
+    }
+    if (located) break;
+    // Node keeps a syntax error's location out of its stack; node --check
+    // prints it on the first line of its output.
+    if (error?.name === "SyntaxError") {
+      const checked = spawnSync(process.execPath, ["--check", generated], { encoding: "utf8", timeout: 10_000 });
+      const line = /:(\d+)\s*$/.exec(String(checked.stderr ?? "").split("\n")[0] ?? "");
+      if (checked.status !== 0 && line) { located = { file: source, line: Number(line[1]) }; break; }
+    }
+  }
+  const failure = new V1AuthoringError(code, error?.name === "SyntaxError" ? syntaxMessage : message, located?.file ?? file);
+  if (located) failure.pointer = located.line;
+  throw failure;
 }
 
 function plainObject(value) {
@@ -512,8 +539,8 @@ export async function resolveV1Suite({ suitePath }) {
     let imported;
     try {
       imported = await import(`${pathToFileURL(generatedSuite).href}?v=${Date.now()}`);
-    } catch {
-      fail("suite.module-invalid", "Suite source could not be evaluated.", suiteFile);
+    } catch (error) {
+      failModule("suite.module-invalid", "Suite source could not be evaluated.", "Suite source has a syntax error.", suiteFile, error, [[generatedSuite, suiteFile]]);
     }
     const validated = validateSuite(imported.default, suiteFile);
     const suiteRoot = dirname(suiteFile);
@@ -689,13 +716,16 @@ export async function resolveV1Suite({ suitePath }) {
           guard = guardModule.default;
         }
         declarations = evaluatorRuntime.collectTaskDeclarations(checksModule.default, guard);
-      } catch {
-        fail(
+      } catch (error) {
+        failModule(
           guardSource === null ? "task.checks-invalid" : "task.behavior-invalid",
           guardSource === null
             ? "Task checks could not be evaluated."
             : "Task checks or guard could not be evaluated.",
+          "Task code has a syntax error.",
           guardSource === null ? checksFile : taskRoot,
+          error,
+          [[generatedChecks, checksFile], ...(generatedGuard === null ? [] : [[generatedGuard, guardFile]])],
         );
       }
       const rubric = validated.verdict === "code" ? null : declarations.rubric;

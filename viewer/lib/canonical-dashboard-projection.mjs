@@ -25,7 +25,8 @@ const CONDITIONS = Object.freeze({
   "mcp-skills": Object.freeze({ id: "C4", label: "MCP + Skills" }),
 });
 
-export const MAX_CANONICAL_DASHBOARD_TRANSCRIPT_BYTES = 32 * 1024 * 1024;
+// Every Environment captures transcripts up to 64 MiB; show all of them.
+export const MAX_CANONICAL_DASHBOARD_TRANSCRIPT_BYTES = 64 * 1024 * 1024;
 export const MAX_CANONICAL_DASHBOARD_EGRESS_BYTES = 16 * 1024 * 1024;
 const MAX_CANONICAL_DASHBOARD_REQUESTS = 250;
 const MAX_CANONICAL_EGRESS_SOURCE_REQUESTS = 10_000;

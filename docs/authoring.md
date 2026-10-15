@@ -63,7 +63,11 @@ configuration; an interactive CLI login alone is not inherited.
 
 - Claude Code: `ANTHROPIC_API_KEY`, or `CLAUDE_CODE_OAUTH_TOKEN` generated with
   `claude setup-token`. A nonblank API key takes precedence over the OAuth token.
-- Codex: `CODEX_ACCESS_TOKEN`, then `CODEX_API_KEY`, then `OPENAI_API_KEY`.
+- Codex: `CODEX_ACCESS_TOKEN`, then `CODEX_API_KEY`, then `OPENAI_API_KEY`. Codex
+  access tokens exist only for ChatGPT Business and Enterprise workspaces, where
+  they are created in the ChatGPT admin console
+  ([OpenAI docs](https://developers.openai.com/codex/enterprise/access-tokens)).
+  With a personal ChatGPT plan, use an OpenAI API key.
 
 Keep `.env.local` out of version control, then check readiness:
 
