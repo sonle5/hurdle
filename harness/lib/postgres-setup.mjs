@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { parseEnv } from "node:util";
+import { parseProjectEnvironment } from "./project-environment.mjs";
 import { resolveRuntimeProfile } from "./runtime-profile.mjs";
 import { DEFAULT_PROJECT_RUNTIME, projectRuntimePath } from "./project-paths.mjs";
 import { discoverProjectSuites } from "./project-suites.mjs";
@@ -95,7 +95,7 @@ export async function setupPostgresStore({ suite, interactive = false, json = fa
     credentialName = name;
     let environment = { ...dependencies.env };
     const source = await regularFileContents(join(io.cwd, ".env.local"));
-    const localEnvironment = source === null ? {} : parseEnv(source);
+    const localEnvironment = source === null ? {} : parseProjectEnvironment(source);
     Object.assign(environment, localEnvironment);
     const selectedName = Object.hasOwn(environment, name) ? name
       : name === RESULT_STORE_DATABASE_URL_ENV ? "TAE_RESULT_STORE_DATABASE_URL" : name;

@@ -8,6 +8,15 @@ export const ANTHROPIC_JSON_JUDGE_MAX_RESPONSE_BYTES = 256 * 1024;
 
 const MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const OUTCOMES = new Set(["pass", "fail", "incomplete"]);
+// Rate limits and overload are transient; one should not discard a costly
+// Agent run. Retries happen only before any decision bytes are read.
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504, 529]);
+// Models that think by default stream thinking before the decision text.
+// Thinking never contributes to the decision; other block types stay invalid.
+const THINKING_BLOCKS = new Set(["thinking", "redacted_thinking"]);
+const THINKING_DELTAS = new Set(["thinking_delta", "signature_delta"]);
+const MAX_ATTEMPTS = 3;
+const MAX_RETRY_DELAY_MS = 10_000;
 
 export const ANTHROPIC_JSON_JUDGE_SYSTEM_PROMPT = [
   "You are an evidence-only evaluation judge.",
@@ -28,6 +37,32 @@ function invalidOutput() {
 
 function providerFailed() {
   return new Error("Anthropic JSON Judge provider failed");
+}
+
+function retryDelayMs(response, attempt, baseDelayMs) {
+  const retryAfter = Number(response?.headers?.get?.("retry-after"));
+  const delay = Number.isFinite(retryAfter) && retryAfter >= 0
+    ? retryAfter * 1_000
+    : baseDelayMs * 2 ** (attempt - 1);
+  return Math.min(delay, MAX_RETRY_DELAY_MS);
+}
+
+function waitBeforeRetry(milliseconds, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(providerFailed());
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(providerFailed());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function parseDecision(text) {
@@ -62,6 +97,7 @@ function appendSseText(event, text) {
     throw invalidOutput();
   }
   if (value.type === "content_block_delta") {
+    if (THINKING_DELTAS.has(value.delta?.type)) return text;
     if (
       !value.delta
       || typeof value.delta !== "object"
@@ -74,6 +110,7 @@ function appendSseText(event, text) {
     return `${text}${value.delta.text}`;
   }
   if (value.type === "content_block_start") {
+    if (THINKING_BLOCKS.has(value.content_block?.type)) return text;
     if (value.content_block?.type !== "text") throw invalidOutput();
     return text;
   }
@@ -151,6 +188,7 @@ export function createAnthropicJsonJudge({
   model,
   apiKey,
   fetch = globalThis.fetch,
+  retryDelayMs: baseRetryDelayMs = 1_000,
 } = {}) {
   if (!nonblank(model) || !nonblank(apiKey) || typeof fetch !== "function") {
     throw new TypeError("Anthropic JSON Judge configuration is invalid");
@@ -185,22 +223,31 @@ export function createAnthropicJsonJudge({
       if (Buffer.byteLength(body) > ANTHROPIC_JSON_JUDGE_MAX_REQUEST_BYTES) {
         throw new Error("Anthropic JSON Judge request exceeds its limit");
       }
-      let response;
-      try {
-        response = await fetch(MESSAGES_URL, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01",
-          },
-          body,
-          signal,
-        });
-      } catch {
-        throw providerFailed();
+      for (let attempt = 1; ; attempt += 1) {
+        let response;
+        try {
+          response = await fetch(MESSAGES_URL, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "x-api-key": apiKey,
+              "anthropic-version": "2023-06-01",
+            },
+            body,
+            signal,
+          });
+        } catch {
+          if (signal?.aborted || attempt >= MAX_ATTEMPTS) throw providerFailed();
+          await waitBeforeRetry(retryDelayMs(null, attempt, baseRetryDelayMs), signal);
+          continue;
+        }
+        if (RETRYABLE_STATUSES.has(response?.status) && attempt < MAX_ATTEMPTS) {
+          try { await response.body?.cancel(); } catch {}
+          await waitBeforeRetry(retryDelayMs(response, attempt, baseRetryDelayMs), signal);
+          continue;
+        }
+        return readDecision(response);
       }
-      return readDecision(response);
     },
   });
 }

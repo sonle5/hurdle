@@ -35,10 +35,13 @@ async function runIsolatedEvaluator({
 }) {
   const allowedBehaviorRoot = await realpath(behaviorRoot);
   const selectedEvaluatorPath = await realpath(evaluatorPath);
+  const allowedWorkerPath = await realpath(workerPath);
   const child = spawn(process.execPath, [
     "--permission",
     `--allow-fs-read=${allowedBehaviorRoot}`,
-    workerPath,
+    // Node 22.13-22.16 do not implicitly grant read access to the entry script.
+    `--allow-fs-read=${allowedWorkerPath}`,
+    allowedWorkerPath,
     selectedEvaluatorPath,
   ], {
     cwd: allowedBehaviorRoot,

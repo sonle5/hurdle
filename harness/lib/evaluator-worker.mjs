@@ -156,15 +156,18 @@ function reply(message) {
   sendResult(message, () => terminate(0));
 }
 
-let input = "";
-process.stdin.setEncoding("utf8");
+// Count bytes per chunk; re-measuring the accumulated input is quadratic and
+// lets large transcripts exhaust the controller's evaluation deadline.
+const inputChunks = [];
+let inputBytes = 0;
 process.stdin.on("data", (chunk) => {
-  input += chunk;
-  if (Buffer.byteLength(input) > 128 * 1024 * 1024) process.exit(1);
+  inputBytes += chunk.byteLength;
+  if (inputBytes > 128 * 1024 * 1024) process.exit(1);
+  inputChunks.push(chunk);
 });
 process.stdin.on("end", async () => {
   try {
-    const payload = JSON.parse(input);
+    const payload = JSON.parse(Buffer.concat(inputChunks).toString("utf8"));
     const evaluatorModule = await import(pathToFileURL(process.argv[2]).href);
     if (typeof evaluatorModule.evaluate !== "function") throw new TypeError("invalid evaluator");
     const evaluation = await evaluatorModule.evaluate(evidenceView(payload));

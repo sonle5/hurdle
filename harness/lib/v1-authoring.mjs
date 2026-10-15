@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { DEFAULT_RUN_CONCURRENCY, normalizeRunConcurrency } from "./run-concurrency.mjs";
 import {
+  accessSync,
+  constants as fsConstants,
   cpSync,
   existsSync,
   lstatSync,
@@ -204,15 +206,21 @@ function listFixtureFiles(root, current = root) {
     }
   }
   const files = [];
-  for (const entry of readdirSync(current, { withFileTypes: true })) {
+  let entries;
+  try { entries = readdirSync(current, { withFileTypes: true }); }
+  catch { fail("task.fixture-unreadable", "Task fixtures must be readable.", current); }
+  for (const entry of entries) {
     const absolute = join(current, entry.name);
     const stats = lstatSync(absolute);
     if (stats.isSymbolicLink()) {
       fail("task.fixture-symlink", "Task fixtures may not contain symbolic links.", absolute);
     }
     if (entry.isDirectory()) files.push(...listFixtureFiles(root, absolute));
-    else if (entry.isFile()) files.push(relative(root, absolute));
-    else fail("task.fixture-invalid", "Task fixtures must be regular files.", absolute);
+    else if (entry.isFile()) {
+      try { accessSync(absolute, fsConstants.R_OK); }
+      catch { fail("task.fixture-unreadable", "Task fixtures must be readable.", absolute); }
+      files.push(relative(root, absolute));
+    } else fail("task.fixture-invalid", "Task fixtures must be regular files.", absolute);
   }
   return files.sort();
 }

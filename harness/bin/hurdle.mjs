@@ -10,7 +10,7 @@ import { assertRuntimeDependencies, BackendDependencyError } from "../lib/backen
 import { createE2BExecutionEnvironment, normalizeE2BSettings } from "../lib/execution-environments/e2b.mjs";
 import { createTogetherExecutionEnvironment, normalizeTogetherSettings } from "../lib/execution-environments/together.mjs";
 import { createLocalExecutionEnvironment } from "../lib/execution-environments/local.mjs";
-import { createAnthropicJsonJudge } from "../lib/judges/anthropic-json.mjs";
+import { ANTHROPIC_JSON_JUDGE_ID, createAnthropicJsonJudge } from "../lib/judges/anthropic-json.mjs";
 import { resolveAuthoritySelections } from "../lib/authority-profile.mjs";
 import { ENVIRONMENT_STATUS_LABELS, normalizeExecutionProgressObserver, projectVerdictReasons, reportExecutionProgress } from "../lib/execution-progress.mjs";
 import { openLocalResultStore } from "../lib/local-result-store.mjs";
@@ -1263,8 +1263,15 @@ async function runCliMain(argv, io, dependencies) {
           cwd: io.cwd,
           defaultRoot: authoredSuite ? io.cwd : resolvedPlan.value.sourceRoot,
         });
+        // Like setup, judge with the Suite's own Judge model when it names one.
+        const judgeModels = [...new Set(resolvedPlan.value.definition.authorityProfiles
+          .filter((profile) => profile.judge?.availability === "required")
+          .map((profile) => profile.judge.capability.model))];
         runtimeProfile = Object.freeze({
           ...builtIn,
+          ...(judgeModels.length === 1 ? {
+            judge: Object.freeze({ kind: ANTHROPIC_JSON_JUDGE_ID, model: judgeModels[0], credentialEnv: "ANTHROPIC_API_KEY" }),
+          } : {}),
           environment: Object.freeze({
             kind: options.environment,
             ...(options.environment === "e2b" ? { apiKeyEnv: "E2B_API_KEY" } : options.environment === "together" ? { apiKeyEnv: "TOGETHER_API_KEY" } : {}),
@@ -1564,8 +1571,11 @@ async function runCliMain(argv, io, dependencies) {
     };
     const onSigint = () => interrupt("SIGINT");
     const onSigterm = () => interrupt("SIGTERM");
+    // A closed terminal must still stop the Agent and sandboxes, not orphan them.
+    const onSighup = () => interrupt("SIGHUP");
     dependencies.processTarget.on("SIGINT", onSigint);
     dependencies.processTarget.on("SIGTERM", onSigterm);
+    dependencies.processTarget.on("SIGHUP", onSighup);
     let result;
     let storeCloseFailed = false;
     let executionFailed = false;
@@ -1619,6 +1629,7 @@ async function runCliMain(argv, io, dependencies) {
       progress.stop();
       dependencies.processTarget.off("SIGINT", onSigint);
       dependencies.processTarget.off("SIGTERM", onSigterm);
+      dependencies.processTarget.off("SIGHUP", onSighup);
       if (runtimeProfile.resultStore.kind === "postgres") {
         try {
           await dependencies.closePostgresResultStore(resultStore);
@@ -1702,6 +1713,7 @@ async function runCliMain(argv, io, dependencies) {
     io.stdout.write(`${runFact(runtimeProfile.resultStore.kind === "postgres" ? "Artifacts" : "Results", displayResultsPath(runtimeProfile, io.cwd), { useColor })}\n`);
     if (interruptedSignal === "SIGINT") return 130;
     if (interruptedSignal === "SIGTERM") return 143;
+    if (interruptedSignal === "SIGHUP") return 129;
     const runExitCode = counts.fail + counts.incomplete + counts.unknown === 0 ? 0 : 1;
     if (!options.viewAfterRun) return runExitCode;
     const viewerExitCode = await serveResolvedViewer(runtimeProfile, io, dependencies, { showHeader: false, suite: options.suite });
@@ -1766,8 +1778,8 @@ export async function main(argv, io = {
 }) {
   const versionResult = versionCommand(argv, io);
   if (versionResult !== null) return versionResult;
-  // Configuration, discovery and help need no credentials or readable project environment.
-  if (!argv.length || ["runtime", "suites", "ls", "help", "--help", "-h"].includes(argv[0]) || hasHelpFlag(argv.slice(1))) {
+  // Starters, configuration, discovery and help need no credentials or readable project environment.
+  if (!argv.length || ["init", "runtime", "suites", "ls", "help", "--help", "-h"].includes(argv[0]) || hasHelpFlag(argv.slice(1))) {
     return createFrameworkCli({ env: {} }).main(argv, io);
   }
   if (argv[0] === "models") {
@@ -1776,13 +1788,16 @@ export async function main(argv, io = {
   }
   let configured;
   try { configured = loadProjectEnvironment(io.cwd); }
-  catch (error) {
+  catch {
     if (argv[0] === "models") return modelsError(io, argv.includes("--json"), "models.environment-unavailable", "Could not read .env.local. Use a readable regular file, then retry.");
-    if (argv[0] !== "setup") throw error;
-    return createSetupOutput(io, { json: argv.includes("--json") }).finish(1, {
-      code: "setup.environment-unavailable",
-      message: "Could not read .env.local. Use a readable regular file, then rerun setup.",
-    });
+    if (argv[0] === "setup") {
+      return createSetupOutput(io, { json: argv.includes("--json") }).finish(1, {
+        code: "setup.environment-unavailable",
+        message: "Could not read .env.local. Use a readable regular file, then rerun setup.",
+      });
+    }
+    writeError(io, "hurdle [environment-unavailable] Could not read .env.local. Use a readable regular file, then retry.\n");
+    return 1;
   }
   const { environment, source } = configured;
   return createFrameworkCli({ env: environment, environmentSource: source }).main(argv, io);
@@ -1792,6 +1807,9 @@ if (
   process.argv[1] &&
   realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
+  // Output is best-effort once a terminal or pipe closes; a failed write must
+  // not abort cancellation, sandbox cleanup or Result Store settlement.
+  for (const stream of [process.stdout, process.stderr]) stream.on("error", () => {});
   try {
     process.exitCode = await main(process.argv.slice(2));
   } catch {

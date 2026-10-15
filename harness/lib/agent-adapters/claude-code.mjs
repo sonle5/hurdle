@@ -45,6 +45,9 @@ function claudeOperatorReason(metadata) {
   if (metadata.api_error_status === 401 || /API key is invalid|Failed to authenticate|OAuth token has expired/iu.test(metadata.result)) {
     return "Claude Code authentication failed. Replace ANTHROPIC_API_KEY in .env.local, or unset it and set CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`. Run `npx hurdle validate` before retrying.";
   }
+  if (metadata.api_error_status === 404 || /issue with the selected model/iu.test(metadata.result)) {
+    return "Claude Code could not use the requested model; it may not exist or the account may lack access. Check the model ID with `npx hurdle models --agent claude-code`.";
+  }
   return /credit balance is too low/iu.test(metadata.result)
     ? LOW_CREDIT_OPERATOR_REASON
     : null;

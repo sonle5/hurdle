@@ -367,6 +367,37 @@ test("hurdle run preflights authority before resolving secrets or opening Postgr
   assert.match(streams.read().stderr, /authority\.judge-capability-mismatch/);
 });
 
+test("without a Runtime file, hurdle run judges with the Suite's Judge model", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-runtime-default-judge-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeJudgePack(root, "suite-judge-model");
+  let judgeConfig = null;
+  let engineJudge = null;
+  const cli = createFrameworkCli({
+    async checkAgentReadiness({ judgeCredentialName }) {
+      assert.equal(judgeCredentialName, "ANTHROPIC_API_KEY");
+      return { ok: true, checks: [] };
+    },
+    env: { ANTHROPIC_API_KEY: "test-judge-key" },
+    processTarget: new EventEmitter(),
+    createAnthropicJsonJudge(config) {
+      judgeConfig = config;
+      return { id: "anthropic-json-v1", model: config.model, inputSchemaVersions: [2], maxTimeoutMs: 120_000, async judge() {} };
+    },
+    createRunEngine({ judge }) {
+      engineJudge = judge;
+      return { async run() { return completedResult(); } };
+    },
+  });
+  const streams = io(root);
+
+  const exit = await cli.main(["run", "example.suite.mjs", "--agent", "claude-code", "--store", "results"], streams);
+
+  assert.equal(exit, 0, streams.read().stderr);
+  assert.deepEqual(judgeConfig, { model: "suite-judge-model", apiKey: "test-judge-key" });
+  assert.ok(engineJudge);
+});
+
 test("hurdle run composes Postgres sidecar and the required Judge after preflight", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-runtime-postgres-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -608,6 +639,42 @@ test("hurdle run forwards Local termination through cleanup and closes Postgres"
   const stopped = streams.read();
   t.mock.timers.tick(1000);
   assert.deepEqual(streams.read(), stopped, "no spinner survives interruption");
+});
+
+test("hurdle run cancels the evaluation when its terminal closes", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-runtime-local-hangup-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  assert.equal(await createFrameworkCli().main(["init"], io(root)), 0);
+  const processTarget = new EventEmitter();
+  let receivedSignal = null;
+  const cli = createFrameworkCli({
+    async checkAgentReadiness() { return { ok: true, checks: [] }; },
+    env: {},
+    processTarget,
+    createRunEngine() {
+      return {
+        async run(input) {
+          // Without a handler, SIGHUP would end the CLI and orphan the Agent.
+          await new Promise((resolve) => {
+            input.signal.addEventListener("abort", resolve, { once: true });
+            queueMicrotask(() => processTarget.emit("SIGHUP"));
+          });
+          receivedSignal = input.signal.aborted;
+          const result = completedResult();
+          result.summary.terminalVerdicts = { pass: 0, fail: 0, incomplete: 1, unknown: 0 };
+          return result;
+        },
+      };
+    },
+  });
+
+  const exit = await cli.main(["run", "evals/example.suite.mjs", "--store", "results"], io(root));
+
+  assert.equal(exit, 129);
+  assert.equal(receivedSignal, true);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    assert.equal(processTarget.listenerCount(signal), 0, signal);
+  }
 });
 
 test("hurdle run --view opens the recorded Local store and preserves a non-pass", async (t) => {

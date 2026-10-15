@@ -61,6 +61,24 @@ test("the Local Result Store reader returns canonical Run Record v3 lanes unchan
   assert.equal((await store.getRun(complete.id)).headline.decidedBy, "effective-deterministic");
 });
 
+test("one unreadable Run does not hide the other Runs in a listing", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-result-reader-corrupt-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const v3 = canonicalRunRecordV3Fixture();
+  const complete = v3.history.at(-1);
+  seedFixtureStore(root, v3);
+  // A truncated write, a sync-conflict copy, or a newer record schema.
+  const damaged = "run_00000000-0000-4000-8000-000000000001";
+  mkdirSync(join(root, "runs", damaged, "revisions"), { recursive: true });
+  writeFileSync(join(root, "runs", damaged, "revisions", "000000.json"), '{"truncated": ');
+  mkdirSync(join(root, "runs", "run_copy of a run", "revisions"), { recursive: true });
+
+  const store = await openLocalResultStoreReader({ root });
+
+  assert.deepEqual(await store.listRuns(), [complete]);
+  await assert.rejects(store.getRun(damaged));
+});
+
 test("the Local Result Store reader performs no creation and returns canonical fixture truth", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-result-reader-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

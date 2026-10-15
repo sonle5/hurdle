@@ -1,6 +1,7 @@
 import { cliExecutable } from "../lib/terminal-output.mjs";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import {
   chmodSync,
   cpSync,
@@ -164,6 +165,70 @@ test("hurdle validate reports a missing Suite as an ordinary validation failure"
     /\[suite\.missing\] No Suites found in this project\. Create an evaluation first\./,
   );
   assert.ok(result.stderr.endsWith(`\n  Next      ${cliExecutable(cwd)} init\n\n`));
+});
+
+test("an unreadable .env.local is reported as an actionable error", (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "tae-cli-env-unreadable-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(join(cwd, ".env.local"));
+
+  // Creating a starter needs no credentials.
+  const initialized = runCli(cwd, ["init"]);
+  assert.equal(initialized.status, 0, initialized.stderr);
+  for (const args of [["validate"], ["run"], ["view"]]) {
+    const result = runCli(cwd, args);
+    assert.equal(result.status, 1, args[0]);
+    assert.match(result.stderr, /\[environment-unavailable\] Could not read \.env\.local\./);
+    assert.doesNotMatch(result.stderr, /internal-error/);
+  }
+});
+
+test("hurdle run settles the Run when its output pipe closes early", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "tae-cli-closed-output-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  assert.equal(runCli(cwd, ["init"]).status, 0);
+  editStarter(cwd);
+  const binRoot = join(cwd, "bin");
+  mkdirSync(binRoot);
+  const fakeClaude = join(binRoot, "claude");
+  writeFileSync(fakeClaude, [
+    "#!/usr/bin/env node",
+    'const { readFileSync, writeFileSync } = require("node:fs");',
+    'if (process.argv.includes("--version")) { console.log("test-agent"); process.exit(0); }',
+    'readFileSync(0, "utf8");',
+    // Finish after the reader has gone, so later progress writes fail.
+    "setTimeout(() => {",
+    '  writeFileSync("answer.txt", readFileSync("fixtures/message.txt"));',
+    '  process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", session_id: "s", model: "test-model" })}\\n`);',
+    "}, 1_500);",
+    "",
+  ].join("\n"));
+  chmodSync(fakeClaude, 0o755);
+  const storeRoot = join(cwd, "run-results");
+  const child = spawn(process.execPath, [cliPath, "run", "--store", storeRoot], {
+    cwd,
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `--import=${fileURLToPath(new URL("./helpers/readiness-fetch.mjs", import.meta.url))}`,
+      ANTHROPIC_API_KEY: "test-only-key",
+      PATH: `${binRoot}:${process.env.PATH}`,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+
+  // Like `hurdle run | head -1`, or a closed terminal: read once, then go away.
+  await once(child.stdout, "data");
+  child.stdout.destroy();
+  const [code] = await once(child, "exit");
+
+  assert.doesNotMatch(stderr, /Unhandled 'error' event|EPIPE/);
+  assert.equal(code, 0);
+  const store = await openLocalResultStore({ root: storeRoot });
+  const [record] = await store.listRuns();
+  assert.equal(record.state, "complete");
+  assert.equal(record.verdict, "pass");
 });
 
 test("hurdle run composes Claude Code and local execution into the canonical store", async (t) => {
@@ -374,6 +439,8 @@ test("hurdle run composes Codex and maps CI auth into redacted canonical evidenc
     "--sandbox",
     "workspace-write",
     "-c",
+    "sandbox_workspace_write.network_access=true",
+    "-c",
     'model_reasoning_effort="medium"',
     "--model",
     "future-codex-2099",
@@ -506,6 +573,25 @@ test("Claude Code classifies a low-credit API failure for the operator", () => {
   assert.equal(unknown.operatorReason, undefined);
 });
 
+test("Claude Code tells the operator when the requested model is unavailable", () => {
+  const adapter = createClaudeCodeAdapter({
+    runtimeEnv: { ANTHROPIC_API_KEY: "test-credential" },
+  });
+  const decoded = adapter.decodeControllerEvidence({
+    stdout: `${JSON.stringify({
+      type: "result", subtype: "success", session_id: "model-session",
+      is_error: true, api_error_status: 404,
+      result: "There's an issue with the selected model (claude-typo). It may not exist or you may not have access to it. Run --model to pick a different model.",
+    })}\n`,
+    exitCode: 1,
+  });
+
+  assert.equal(
+    decoded.operatorReason,
+    "Claude Code could not use the requested model; it may not exist or the account may lack access. Check the model ID with `npx hurdle models --agent claude-code`.",
+  );
+});
+
 test("Claude Code requires explicit auth for isolated execution", () => {
   const adapter = createClaudeCodeAdapter({ runtimeEnv: {} });
   assert.throws(
@@ -561,7 +647,7 @@ test("hurdle run expands the configured matrix and filters narrow it", async (t)
     "--store",
     matrixStore,
   ], env);
-  assert.equal(matrix.status, 0);
+  assert.equal(matrix.status, 0, `${matrix.stdout}\n${matrix.stderr}`);
   assert.match(matrix.stdout, /^  Plan\s+8 runs · 2 tasks · 2 conditions$/m);
   assert.match(matrix.stdout, /^  Runs\s+8 passed$/m);
   const matrixResults = await openLocalResultStore({ root: matrixStore });

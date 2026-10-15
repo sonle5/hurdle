@@ -478,18 +478,24 @@ function markerPayload(stdout, marker) {
   return JSON.parse(line.slice(marker.length));
 }
 
-async function snapshotSandboxProcesses(workload, signal) {
+// Kernel threads (PF_KTHREAD) appear with disk writeback, ignore signals and
+// never run Agent code; counting them made busy runs falsely non-quiescent.
+const PROCESS_START_TIME_PY = `def start_time(pid):
+    try:
+        with open(f"/proc/{pid}/stat", "r", encoding="ascii") as handle:
+            suffix = handle.read().rsplit(")", 1)[1].split()
+        if int(suffix[6]) & 0x00200000:
+            return None
+        return suffix[19]
+    except (FileNotFoundError, PermissionError, IndexError, ValueError):
+        return None`;
+
+export async function snapshotSandboxProcesses(workload, signal) {
   const marker = "TAE_PROCESS_CENSUS_SNAPSHOT=";
   const result = await workload.commands.run(`/usr/bin/python3 - <<'PY'
 import json, os
 
-def start_time(pid):
-    try:
-        with open(f"/proc/{pid}/stat", "r", encoding="ascii") as handle:
-            suffix = handle.read().rsplit(")", 1)[1].split()
-        return suffix[19]
-    except (FileNotFoundError, PermissionError, IndexError):
-        return None
+${PROCESS_START_TIME_PY}
 
 pids = {
     int(name): start_time(int(name)) for name in os.listdir("/proc")
@@ -533,13 +539,7 @@ async function terminateUntrackedProcesses(workload, baseline) {
 import json, os, signal, time
 baseline = {int(pid): started for pid, started in ${JSON.stringify(baseline)}}
 
-def start_time(pid):
-    try:
-        with open(f"/proc/{pid}/stat", "r", encoding="ascii") as handle:
-            suffix = handle.read().rsplit(")", 1)[1].split()
-        return suffix[19]
-    except (FileNotFoundError, PermissionError, IndexError):
-        return None
+${PROCESS_START_TIME_PY}
 
 def census():
     identities = {

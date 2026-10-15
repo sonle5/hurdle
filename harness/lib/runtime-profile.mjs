@@ -374,6 +374,8 @@ export function resolveRuntimeProfile({ runtimePath, cwd, defaultRoot } = {}, { 
     throw new RuntimeProfileError("runtime.profile-read", "Runtime Profile could not be read.", { sourcePath, cause });
   }
   if (typeof source !== "string") source = Buffer.from(source).toString("utf8");
+  // RFC 8259 lets parsers ignore a byte order mark; some editors add one.
+  source = source.replace(/^\uFEFF/, "");
   if (Buffer.byteLength(source) > MAX_PROFILE_BYTES) {
     throw new RuntimeProfileError("runtime.profile-schema", "Runtime Profile exceeds 262144 bytes.", { sourcePath });
   }

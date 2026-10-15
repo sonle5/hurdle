@@ -122,18 +122,33 @@ export async function checkTogetherCredential(apiKey, { fetch = globalThis.fetch
   }
 }
 
-export async function checkE2bCredential(apiKey, { loadE2b } = {}) {
+// Only 401/403 prove a bad key; rate limits, timeouts and outages are retried
+// once and then reported as unavailability rather than a rejected credential.
+function e2bRejected(error) {
+  return error?.name === "AuthenticationError" || /^403\b/.test(String(error?.message ?? ""));
+}
+
+export async function checkE2bCredential(apiKey, { loadE2b, retryDelayMs = 1_000 } = {}) {
   if (!apiKey?.trim()) return result("E2B", "skip", "E2B_API_KEY is not set");
+  let Sandbox;
   try {
-    const { Sandbox } = await (loadE2b ?? (() => import("e2b")))();
-    const paginator = Sandbox.list({ apiKey, limit: 1, requestTimeoutMs: REQUEST_TIMEOUT_MS });
-    await paginator.nextItems();
-    return result("E2B", "pass", "account access succeeded; no sandbox was created");
+    ({ Sandbox } = await (loadE2b ?? (() => import("e2b")))());
   } catch (error) {
     if (error?.code === "ERR_MODULE_NOT_FOUND") {
       return result("E2B", "fail", `backend dependencies are not installed; run ${backendDependencyInstallCommand()}`);
     }
-    return result("E2B", "fail", "credential or account access was rejected");
+    return result("E2B", "fail", "the E2B SDK could not be loaded");
+  }
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const paginator = Sandbox.list({ apiKey, limit: 1, requestTimeoutMs: REQUEST_TIMEOUT_MS });
+      await paginator.nextItems();
+      return result("E2B", "pass", "account access succeeded; no sandbox was created");
+    } catch (error) {
+      if (e2bRejected(error)) return result("E2B", "fail", "credential or account access was rejected");
+      if (attempt >= 2) return result("E2B", "fail", "E2B could not be reached or returned an error; check your network and retry");
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
   }
 }
 

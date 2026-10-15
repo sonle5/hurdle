@@ -77,7 +77,11 @@ function createReader(pool) {
          LIMIT $2`,
         [targetId ?? null, limit],
       );
-      return deepFreeze(result.rows.map((row) => assertCurrentRecord(row.record, row)));
+      // One unreadable Run must not hide every other Run; getRun still fails.
+      return deepFreeze(result.rows.flatMap((row) => {
+        try { return [assertCurrentRecord(row.record, row)]; }
+        catch { return []; }
+      }));
     },
     async readEvidence(reference, { maxBytes } = {}) {
       if (

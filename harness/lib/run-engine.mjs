@@ -94,6 +94,27 @@ function normalizedAgentSettings(adapter, requestedModel, settings) {
   });
 }
 
+// Environments skip collection after interrupted or untrusted execution. Every
+// declared artifact still needs an outcome, or checks read undeclared paths.
+function withUncollectedArtifacts(artifacts, declarations) {
+  const reported = new Set(artifacts.map(({ path }) => path));
+  const capturedAt = new Date().toISOString();
+  return [
+    ...artifacts,
+    ...declarations
+      .filter(({ path }) => !reported.has(path))
+      .map(({ path, kind, maxBytes, required }) => ({
+        path,
+        kind,
+        maxBytes,
+        required,
+        status: "rejected",
+        reason: "not_collected",
+        capturedAt,
+      })),
+  ];
+}
+
 function requiredArtifactIssues(artifacts) {
   return artifacts
     .filter((artifact) => (
@@ -105,14 +126,18 @@ function requiredArtifactIssues(artifacts) {
         ? "artifact.required-invalid-text"
         : artifact.status === "missing"
           ? "artifact.required-missing"
-          : "artifact.required-rejected",
+          : artifact.reason === "not_collected"
+            ? "artifact.required-uncollected"
+            : "artifact.required-rejected",
       phase: "seal",
       effect: "incomplete",
       message: artifact.textEncoding === "invalid_utf8"
         ? `Required text Output Artifact '${artifact.path}' is not valid UTF-8.`
         : artifact.status === "missing"
           ? `Required Output Artifact '${artifact.path}' was not produced.`
-          : `Required Output Artifact '${artifact.path}' could not be sealed safely.`,
+          : artifact.reason === "not_collected"
+            ? `Required Output Artifact '${artifact.path}' was not collected because execution did not complete.`
+            : `Required Output Artifact '${artifact.path}' could not be sealed safely.`,
     }));
 }
 
@@ -925,7 +950,7 @@ async function runOne({
 
     const artifacts = redactArtifacts(
       agentAdapter,
-      observed.artifacts,
+      withUncollectedArtifacts(observed.artifacts, prepared.snapshot.task.outputArtifacts),
       credentials,
       evidenceRedaction,
     );

@@ -4,7 +4,7 @@ Thanks for helping improve Hurdle — Together Agent Evals.
 
 ## Set up the repository
 
-Use Node.js 22.13 or newer, then install the locked development dependencies:
+Use Node.js 22.18 or newer, then install the locked development dependencies:
 
 ```sh
 npm run setup:ci

@@ -308,6 +308,32 @@ test("setup refuses credential symlinks and suppresses provider exception detail
   assert.doesNotMatch(g.output(), /private-response|test-agent-secret/);
 });
 
+test("setup adds a new Agent to Hurdle's template instead of reusing one without its CLI", async t => {
+  const f = await fixture(t);
+  f.dependencies.env.OPENAI_API_KEY = "test-openai-secret";
+  const available = new Set();
+  const builds = [];
+  const cli = createFrameworkCli({ ...f.dependencies,
+    async loadSetupBackend() { return {
+      exists: async (name) => available.has(name),
+      async build(name, ids) { builds.push([name, ids]); available.add(name); return { templateId: name }; },
+    }; },
+  });
+  assert.equal(await cli.main(["setup", "--yes"], f.io), 0, f.output());
+  assert.equal(f.runtime().environment.settings.workloadTemplate, "hurdle-claude-code:v1");
+
+  // A Codex Suite in the same project cannot run on the Claude-only template.
+  assert.equal((await initializeSuite({ destination: join(f.root, "codex"), agent: "codex" })).ok, true);
+  assert.equal(await cli.main(["setup", "codex/example.suite.mjs", "--yes"], f.io), 0, f.output());
+  assert.equal(f.runtime().environment.settings.workloadTemplate, "hurdle-claude-code-codex:v1");
+  assert.deepEqual(builds.at(-1), ["hurdle-claude-code-codex:v1", ["claude-code", "codex"]]);
+
+  // The combined template still serves the Claude Suite without another build.
+  assert.equal(await cli.main(["setup", "--yes"], f.io), 0, f.output());
+  assert.equal(f.runtime().environment.settings.workloadTemplate, "hurdle-claude-code-codex:v1");
+  assert.equal(builds.length, 2);
+});
+
 test("a failed build cannot change an active runtime, and reruns preserve custom settings", async t => {
   const f = await fixture(t);
   const runtime = { schemaVersion: 1, environment: { kind: "e2b", apiKeyEnv: "E2B_API_KEY", settings: { workloadTemplate: "existing:v1", cpuCount: 2, memoryMiB: 2048, maxLifetimeMs: 120_000 } }, resultStore: { kind: "local", root: "../custom-results" }, viewer: { port: 3050 } };

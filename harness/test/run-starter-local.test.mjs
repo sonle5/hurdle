@@ -1260,6 +1260,39 @@ test("local execution abort stops the evaluated process group", async (t) => {
   assert.ok(Date.now() - abortedAt < 1_250);
 });
 
+test("cancelling an unfinished local Agent records cancellation, not a failure", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-starter-cancel-running-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const runPlan = await initializeStarterRunPlanFixture(root);
+  const readyPath = join(root, "agent-ready");
+  const agentScript = writeHermeticAgentScript(root, [
+    'writeFileSync("answer.txt", readFileSync("fixtures/message.txt"));',
+    `writeFileSync(${JSON.stringify(readyPath)}, "ready");`,
+    // Stay busy so the helper's result frame is never written.
+    "await new Promise(() => setInterval(() => {}, 1_000));",
+  ]);
+  const controller = new AbortController();
+  const running = runStarter({
+    root,
+    runPlan,
+    agentScript,
+    adapterOptions: { timeoutMs: 10_000 },
+    runRequest: { signal: controller.signal },
+  });
+  await waitForPath(readyPath);
+  controller.abort(new Error("operator interrupted"));
+
+  const { record } = await running;
+
+  assert.equal(record.verdict, "incomplete");
+  const codes = record.integrityIssues.map(({ code }) => code);
+  assert.ok(codes.includes("environment.cancelled"));
+  assert.ok(codes.includes("artifact.required-uncollected"));
+  assert.equal(codes.includes("evaluator.invalid"), false);
+  assert.equal(record.checks.some(({ outcome }) => outcome === "fail"), false);
+});
+
 test("local execution stops background descendants after the agent exits", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-starter-descendant-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -1282,6 +1315,35 @@ test("local execution stops background descendants after the agent exits", async
   assert.equal(record.verdict, "pass");
   assert.equal(record.execution.timedOut, false);
   assert.ok(record.execution.durationMs < 750);
+});
+
+test("local capture keeps multibyte characters split across output chunks", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-starter-split-utf8-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const runPlan = await initializeStarterRunPlanFixture(root);
+  // Pause mid-character so each half reaches the controller as its own chunk.
+  const agentScript = writeHermeticAgentScript(root, [
+    'const pause = () => new Promise((resolvePromise) => setTimeout(resolvePromise, 100));',
+    'const line = Buffer.from(`${JSON.stringify({ type: "assistant", text: "split 😀 — done" })}\\n`);',
+    'const cut = line.indexOf(Buffer.from("😀")) + 2;',
+    "process.stdout.write(line.subarray(0, cut));",
+    "await pause();",
+    "process.stdout.write(line.subarray(cut));",
+    'const note = Buffer.from("stderr — 😀\\n");',
+    "process.stderr.write(note.subarray(0, 9));",
+    "await pause();",
+    "process.stderr.write(note.subarray(9));",
+    'writeFileSync("answer.txt", readFileSync("fixtures/message.txt"));',
+  ]);
+  const { store, record } = await runStarter({ root, runPlan, agentScript });
+
+  assert.equal(record.verdict, "pass");
+  const transcript = (await store.readEvidence(record.evidence.transcript, { maxBytes: 65_536 })).toString("utf8");
+  const stderr = (await store.readEvidence(record.evidence.stderr, { maxBytes: 65_536 })).toString("utf8");
+  assert.match(transcript, /split 😀 — done/);
+  assert.equal(stderr, "stderr — 😀\n");
+  assert.doesNotMatch(transcript + stderr, /�/);
 });
 
 test("non-JSON evaluator details produce an unknown canonical verdict", async (t) => {

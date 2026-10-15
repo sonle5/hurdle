@@ -4,8 +4,7 @@ import * as React from "react";
 import { Combobox } from "@base-ui/react/combobox";
 import { Check, ChevronsUpDown, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { evalVersionDisplayName } from "@/lib/version-display";
-import { formatVersionDateRange, UNVERSIONED_ID } from "@/lib/version-date.mjs";
+import { versionOptionItem } from "@/lib/version-option.mjs";
 
 export type VersionComboboxOption = {
   id: string;
@@ -32,29 +31,9 @@ function compareNewestFirst(a: VersionComboboxOption, b: VersionComboboxOption):
   return b.id.localeCompare(a.id);
 }
 
-function formatVersionDate(option: VersionComboboxOption): string | null {
-  const value = option.runAt ?? option.createdAt ?? (/^\d{4}-\d{2}-\d{2}$/.test(option.id) ? option.id : null);
-  if (!value) return null;
-
-  return formatVersionDateRange(value);
-}
-
-function toItem(option: VersionComboboxOption): Item {
-  const name = evalVersionDisplayName(option).trim();
-  const date = formatVersionDate(option);
-  const hasReadableName = Boolean(name && name !== option.id);
-
-  return {
-    value: option.id,
-    label: hasReadableName ? name : (date ?? "Date unavailable"),
-    sub: hasReadableName && option.id !== UNVERSIONED_ID && name !== date ? date : null,
-    description: option.description?.trim() || null,
-  };
-}
-
 function buildGroups(options: VersionComboboxOption[]): ItemGroup[] {
-  const weeklies = options.filter(isWeeklyLike).sort(compareNewestFirst).map(toItem);
-  const rest = options.filter((option) => !isWeeklyLike(option)).sort(compareNewestFirst).map(toItem);
+  const weeklies = options.filter(isWeeklyLike).sort(compareNewestFirst).map((option): Item => versionOptionItem(option));
+  const rest = options.filter((option) => !isWeeklyLike(option)).sort(compareNewestFirst).map((option): Item => versionOptionItem(option));
   const groups: ItemGroup[] = [];
   if (weeklies.length > 0) groups.push({ value: "Weeklies", items: weeklies });
   if (rest.length > 0) groups.push({ value: "Experiments & probes", items: rest });

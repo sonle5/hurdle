@@ -13,6 +13,26 @@ test("Codex redacts authentication prefixes in nested controller output and arti
   assert.equal(adapter.redactEvidenceBytes(Buffer.from(`${secret.slice(0, 10)}...`)).toString(), "<REDACTED>...");
 });
 
+test("Codex Adapter names model, authentication and quota failures for the operator", () => {
+  const adapter = createCodexAdapter({ runtimeEnv: { OPENAI_API_KEY: "test-key" } });
+  const reason = (message) => adapter.decodeControllerEvidence({
+    stdout: [
+      JSON.stringify({ type: "thread.started", thread_id: "thread-1" }),
+      JSON.stringify({ type: "error", message: `Reconnecting... 1/5 (${message})` }),
+      JSON.stringify({ type: "turn.failed", error: { message } }),
+      "",
+    ].join("\n"),
+  }).operatorReason;
+
+  assert.equal(
+    reason("unexpected status 404 Not Found: The model `gpt-typo` does not exist or you do not have access to it."),
+    "Codex could not use the requested model; it may not exist or the account may lack access. Check the model ID with `npx hurdle models --agent codex`.",
+  );
+  assert.match(reason("unexpected status 401 Unauthorized: Missing bearer or basic authentication in header"), /^Codex authentication failed\./);
+  assert.match(reason("You exceeded your current quota, please check your plan and billing details."), /insufficient quota/);
+  assert.equal(reason("provider-supplied detail must not become an operator reason"), undefined);
+});
+
 test("Codex Adapter creates a bounded launch plan from normalized settings", () => {
   const adapter = createCodexAdapter({
     runtimeEnv: {
@@ -56,6 +76,8 @@ test("Codex Adapter creates a bounded launch plan from normalized settings", () 
       "--skip-git-repo-check",
       "--sandbox",
       "workspace-write",
+      "-c",
+      "sandbox_workspace_write.network_access=true",
       "--model",
       "gpt-test",
       "-",

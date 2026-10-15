@@ -11,7 +11,14 @@ export function discoverProjectSuites(cwd) {
   let visited = 0;
   function walk(directory, depth) {
     if (depth > 12) throw new Error("Suite discovery reached its directory depth limit. Use an explicit .suite.mjs path.");
-    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    let entries;
+    try { entries = readdirSync(directory, { withFileTypes: true }); }
+    catch (error) {
+      // Unreadable directories, such as container volumes, cannot hold Suites.
+      if (depth > 0 && ["EACCES", "EPERM"].includes(error?.code)) return;
+      throw error;
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       if (++visited > 50_000) throw new Error("Suite discovery reached its file limit. Use an explicit .suite.mjs path.");
       if (entry.name.startsWith(".") || /[\x00-\x1f\x7f]/.test(entry.name)) continue;
       const path = resolve(directory, entry.name);

@@ -19,10 +19,12 @@ const scenarios = [
   { name: "unsupported probe", probe: 'console.error("unsupported option"); process.exit(1);', expected: null },
   { name: "malformed probe", probe: 'console.log("not a version");', expected: null },
   { name: "overflowing probe", probe: 'process.on("SIGTERM", () => process.exit(0)); console.log("2.1.263"); console.error("x".repeat(8_192)); setInterval(() => {}, 1_000); return;', expected: null },
-  { name: "timed out probe", probe: 'process.on("SIGTERM", () => process.exit(0)); console.log("2.1.263"); setInterval(() => {}, 1_000); return;', expected: null },
+  // A busy machine can take seconds to start an interpreter; that is not a hang.
+  { name: "slow probe", probe: 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3_000); console.log("2.1.263");', expected: "2.1.263" },
+  { name: "timed out probe", probe: 'process.on("SIGTERM", () => process.exit(0)); console.log("2.1.263"); setInterval(() => {}, 1_000); return;', probeTimeoutMs: 2_000, expected: null },
   { name: "cancelled probe never starts the Agent", probe: 'process.on("SIGTERM", () => process.exit(0)); console.log("2.1.263"); setInterval(() => {}, 1_000); return;', cancel: true, expected: null },
   { name: "cancellation during fixture staging never starts the Agent", probe: 'console.log("2.1.263");', stageAbort: true, expected: null },
-  { name: "denied process termination fails closed within a bound", probe: 'console.log("2.1.263"); setInterval(() => {}, 1_000); return;', denyKill: true, expected: null },
+  { name: "denied process termination fails closed within a bound", probe: 'console.log("2.1.263"); setInterval(() => {}, 1_000); return;', denyKill: true, probeTimeoutMs: 2_000, expected: null },
   { name: "missing observation overrides decoded metrics", probe: 'console.log("2.1.263");', observed: null, expected: null },
   { name: "malformed observation overrides decoded metrics", probe: 'console.log("2.1.263");', observed: { runner: { forged: true }, node: [], extra: "hidden" }, expected: null },
 ];
@@ -75,7 +77,7 @@ for (const scenario of scenarios) {
         return { ...decoded, metrics: { ...decoded.metrics, adapter: { ...decoded.metrics?.adapter, toolVersions: { runner: "9.9.9" } } } };
       },
     };
-    const local = createLocalExecutionEnvironment();
+    const local = createLocalExecutionEnvironment(scenario.probeTimeoutMs ? { versionProbeTimeoutMs: scenario.probeTimeoutMs } : {});
     let lastObservation;
     const executionEnvironment = {
       ...local,

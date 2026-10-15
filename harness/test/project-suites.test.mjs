@@ -1,7 +1,7 @@
 import { cliExecutable } from "../lib/terminal-output.mjs";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -45,6 +45,20 @@ test("Suite discovery lists filenames without imports, credentials, generated fi
   ]);
   assert.equal(report.defaultSuite, null, "multiple project Suites must not be guessed");
   assert.equal(f.stderr(), "");
+});
+
+test("Suite discovery skips unreadable directories such as container volumes", { skip: process.getuid?.() === 0 }, t => {
+  const f = fixture(t);
+  f.file("evals/smoke.suite.mjs");
+  const volume = join(f.root, "pgdata");
+  mkdirSync(volume);
+  chmodSync(volume, 0o000);
+  try {
+    assert.deepEqual(discoverProjectSuites(f.root).map(suite => suite.path), ["evals/smoke.suite.mjs"]);
+    assert.deepEqual(resolveProjectSuite(f.root, "smoke"), { path: "evals/smoke.suite.mjs" });
+  } finally {
+    chmodSync(volume, 0o700);
+  }
 });
 
 test("default discovery selects a sole authored Suite, preserves conventional defaults and excludes bundled examples", t => {

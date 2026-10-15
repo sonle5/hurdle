@@ -34,7 +34,7 @@ const VIEWER_PROCESS_ENV_KEYS = new Set([
 ]);
 
 function signalExitCode(signal) {
-  return signal === "SIGINT" ? 130 : 143;
+  return { SIGHUP: 129, SIGINT: 130 }[signal] ?? 143;
 }
 
 function nonblank(value) {
@@ -220,6 +220,8 @@ export function launchViewer({
     const timeout = setTimeout(() => stop("SIGTERM"), readinessTimeoutMs);
     const onSigint = () => interrupt("SIGINT");
     const onSigterm = () => interrupt("SIGTERM");
+    // The detached server survives a closed terminal unless it is stopped here.
+    const onSighup = () => interrupt("SIGHUP");
     const cleanUp = () => {
       clearTimeout(timeout);
       clearTimeout(forceKillTimer);
@@ -228,6 +230,7 @@ export function launchViewer({
       child.stderr?.off?.("data", onStderr);
       processTarget?.off?.("SIGINT", onSigint);
       processTarget?.off?.("SIGTERM", onSigterm);
+      processTarget?.off?.("SIGHUP", onSighup);
     };
     const finish = (outcome) => {
       if (settled) return;
@@ -257,7 +260,7 @@ export function launchViewer({
     const interrupt = (signal) => {
       if (interruptedSignal || settled) return;
       interruptedSignal = signal;
-      stop(signal);
+      stop(signal === "SIGHUP" ? "SIGTERM" : signal);
     };
     const finishClosed = (outcome) => {
       closeOutcome = outcome;
@@ -305,5 +308,6 @@ export function launchViewer({
     });
     processTarget?.on?.("SIGINT", onSigint);
     processTarget?.on?.("SIGTERM", onSigterm);
+    processTarget?.on?.("SIGHUP", onSighup);
   });
 }

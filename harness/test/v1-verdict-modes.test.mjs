@@ -345,20 +345,21 @@ test("Judge provider failure leaves new hybrid incomplete and Judge-only unknown
   }
 });
 
-test("the CLI rejects a judged Suite before creating its default Store", (t) => {
+test("the CLI rejects a judged Suite it cannot judge before creating its default Store", (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-v1-verdict-cli-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeTask(root);
   writeSuite(root, "judge");
 
+  // The default Runtime judges with the Suite's Judge model, which needs a credential.
   const result = spawnSync(process.execPath, [cliPath, "run", "judge.suite.mjs"], {
     cwd: root,
     encoding: "utf8",
-    env: process.env,
+    env: { PATH: process.env.PATH },
   });
 
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /authority\.judge-capability-missing/);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /\[runtime\.secret-missing\] .*'ANTHROPIC_API_KEY'/);
   assert.equal(existsSync(join(root, ".hurdle", "results-v1")), false);
 });
 

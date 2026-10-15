@@ -422,6 +422,8 @@ test("Codex composes with E2B through the canonical Together path", async (t) =>
     "--skip-git-repo-check",
     "--sandbox",
     "workspace-write",
+    "-c",
+    "sandbox_workspace_write.network_access=true",
     "-",
   ]);
   assert.match(observedRun.launchPlan.stdin, /Build a CLI tool/);

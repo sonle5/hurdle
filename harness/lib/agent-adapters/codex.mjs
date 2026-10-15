@@ -91,8 +91,27 @@ function optionalCount(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+// Fixed, operator-safe strings: provider messages are matched, never shown.
+function codexOperatorReason(frames) {
+  const failures = frames
+    .map((frame) => (frame.type === "turn.failed" ? frame.error?.message : frame.type === "error" ? frame.message : null))
+    .filter((message) => typeof message === "string");
+  const failed = (pattern) => failures.some((message) => pattern.test(message));
+  if (failed(/insufficient_quota|exceeded your current quota/iu)) {
+    return "Codex could not run because the OpenAI account has insufficient quota.";
+  }
+  if (failed(/\b401\b|unauthorized|invalid_api_key|incorrect api key/iu)) {
+    return "Codex authentication failed. Set a valid CODEX_ACCESS_TOKEN, CODEX_API_KEY, or OPENAI_API_KEY in .env.local, then run `npx hurdle validate`.";
+  }
+  if (failed(/model_not_found|model `[^`]*` does not exist/iu)) {
+    return "Codex could not use the requested model; it may not exist or the account may lack access. Check the model ID with `npx hurdle models --agent codex`.";
+  }
+  return null;
+}
+
 function decodeCodexControllerEvidence(stdout) {
   const { frames, transcript } = decodeControllerJsonl(stdout);
+  const operatorReason = codexOperatorReason(frames);
   let sessionId = null;
   const usage = {
     input_tokens: null,
@@ -141,6 +160,7 @@ function decodeCodexControllerEvidence(stdout) {
   const webSearches = completedItemsByType.web_search ?? 0;
   return deepFreeze({
     transcript,
+    ...(operatorReason ? { operatorReason } : {}),
     observedModel: null,
     sessionId,
     metrics: {
@@ -204,6 +224,11 @@ export function createCodexAdapter({
           "--skip-git-repo-check",
           "--sandbox",
           "workspace-write",
+          // workspace-write blocks all sockets, even the sandbox's loopback
+          // capture relay; Claude Code has network, and Hurdle's sandboxes
+          // police egress. Codex still confines file writes.
+          "-c",
+          "sandbox_workspace_write.network_access=true",
           ...mcpArguments(resources),
           ...(normalized.settings.effort
             ? ["-c", `model_reasoning_effort=${JSON.stringify(normalized.settings.effort)}`]

@@ -2,8 +2,8 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { parseEnv } from "node:util";
-import { SETUP_AGENT_PACKAGES } from "./sandbox-setup.mjs";
+import { parseProjectEnvironment } from "./project-environment.mjs";
+import { managedImageAgents, SETUP_AGENT_PACKAGES } from "./sandbox-setup.mjs";
 import { normalizeTogetherSettings } from "./execution-environments/together.mjs";
 import {
   resolveRuntimeProfile,
@@ -145,12 +145,19 @@ export async function setupTogetherSandbox(
             resultStore: { kind: "local", root: "../together-results-v1" },
           }
         : JSON.parse(previous);
+    const saved =
+      config.environment?.kind === "together"
+        ? config.environment.settings?.snapshotAlias
+        : null;
+    const managed = saved ? managedImageAgents(saved, "together") : null;
+    // A Hurdle snapshot must hold every Agent CLI the project runs, and keeps
+    // network tools once capture needs them; caller-owned snapshots stay.
+    const agents = [...new Set([...(managed?.agents ?? []), ...ids])].sort();
     const alias =
       snapshot ??
-      (config.environment?.kind === "together" && (!needsCapture || config.environment.settings?.snapshotAlias !== `hurdle-${ids.join("-")}@v1`)
-        ? config.environment.settings?.snapshotAlias
-        : null) ??
-      `hurdle-${ids.join("-")}${needsCapture ? "-network" : ""}@v1`;
+      (saved && !managed
+        ? saved
+        : `hurdle-${agents.join("-")}${needsCapture || managed?.network ? "-network" : ""}@v1`);
     const settings = normalizeTogetherSettings({
       ...(config.environment?.kind === "together"
         ? config.environment.settings
@@ -202,7 +209,7 @@ export async function setupTogetherSandbox(
     ];
     const env = { ...dependencies.env };
     const source = await regularFileContents(join(io.cwd, ".env.local"));
-    if (source !== null) Object.assign(env, parseEnv(source));
+    if (source !== null) Object.assign(env, parseProjectEnvironment(source));
     await regularFileContents(join(io.cwd, ".gitignore"));
     const requirements = [
       { label: "Together sandbox", anyOf: [profile.environment.apiKeyEnv] },
@@ -260,7 +267,7 @@ export async function setupTogetherSandbox(
       io.stdout.write(
         "\n" +
           fact("Snapshot", alias) +
-          fact("Build", ids.map(id => id === "claude-code" ? "Claude Code" : "Codex").join(" + ")) +
+          fact("Build", agents.map(id => id === "claude-code" ? "Claude Code" : "Codex").join(" + ")) +
           "\n",
       );
       if (!yes) {
@@ -282,7 +289,7 @@ export async function setupTogetherSandbox(
       await saveCredentials(io.cwd, entered);
       io.stdout.write(terminalNote("Building Together snapshot…", io.stdout));
       try {
-        await backend.build(alias, ids, env[profile.environment.apiKeyEnv]);
+        await backend.build(alias, agents, env[profile.environment.apiKeyEnv]);
       } catch {
         throw setupError(
           "setup.build-failed",

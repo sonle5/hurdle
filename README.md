@@ -7,7 +7,7 @@ API calls, tool use, and artifacts in the results viewer.
 
 ## Quick start
 
-Install Node.js 22.13+ and Claude Code, then create an evaluation:
+Install Node.js 22.18+ and Claude Code, then create an evaluation:
 
 ```sh
 mkdir my-evals && cd my-evals

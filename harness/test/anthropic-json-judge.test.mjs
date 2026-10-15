@@ -101,6 +101,7 @@ test("Anthropic JSON Judge accepts only the exact decision and keeps provider fa
   const failedJudge = createAnthropicJsonJudge({
     model: "claude-test-model",
     apiKey: secret,
+    retryDelayMs: 0,
     async fetch() {
       throw new Error(`upstream rejected ${secret}`);
     },
@@ -123,6 +124,109 @@ test("Anthropic JSON Judge accepts only the exact decision and keeps provider fa
     (error) => error.message === "Anthropic JSON Judge provider failed"
       && !error.message.includes(secret),
   );
+});
+
+test("Anthropic JSON Judge reads the decision after a model's thinking blocks", async () => {
+  // Current models think by default and stream thinking before the answer.
+  const judge = createAnthropicJsonJudge({
+    model: "claude-test-model",
+    apiKey: "test-anthropic-key",
+    async fetch() {
+      return streamingResponse([
+        { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", content: [] } },
+        { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "The rubric asks for 'done'; output pass." } },
+        { type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "c2lnbmF0dXJl" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "content_block_start", index: 1, content_block: { type: "redacted_thinking", data: "opaque" } },
+        { type: "content_block_stop", index: 1 },
+        { type: "content_block_start", index: 2, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 2, delta: { type: "text_delta", text: '{"outcome":"pass","summary":"The transcript says done."}' } },
+        { type: "content_block_stop", index: 2 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" } },
+        { type: "message_stop" },
+      ]);
+    },
+  });
+
+  assert.deepEqual(await judge.judge({ schemaVersion: 2 }), {
+    outcome: "pass",
+    summary: "The transcript says done.",
+  });
+
+  const toolUse = createAnthropicJsonJudge({
+    model: "claude-test-model",
+    apiKey: "test-anthropic-key",
+    async fetch() {
+      return streamingResponse([
+        { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_1", name: "x", input: {} } },
+        { type: "message_stop" },
+      ]);
+    },
+  });
+  await assert.rejects(toolUse.judge({ schemaVersion: 2 }), /returned invalid output/);
+});
+
+test("Anthropic JSON Judge retries transient provider failures before failing closed", async () => {
+  const decision = { outcome: "pass", summary: "Evidence satisfies the rubric." };
+  const passing = () => streamingResponse([
+    { type: "content_block_delta", delta: { type: "text_delta", text: JSON.stringify(decision) } },
+    { type: "message_stop" },
+  ]);
+  const judgeWith = (fetch) => createAnthropicJsonJudge({
+    model: "claude-test-model", apiKey: "test-anthropic-key", retryDelayMs: 0, fetch,
+  });
+
+  // Overload, rate limits and dropped connections must not discard a finished Agent run.
+  const transient = [
+    () => new Response("{}", { status: 529 }),
+    () => new Response("{}", { status: 429, headers: { "retry-after": "0" } }),
+  ];
+  let calls = 0;
+  const recovered = judgeWith(async () => {
+    calls += 1;
+    return (transient.shift() ?? passing)();
+  });
+  assert.deepEqual(await recovered.judge({ schemaVersion: 2 }), decision);
+  assert.equal(calls, 3);
+
+  let dropped = 0;
+  const reconnected = judgeWith(async () => {
+    dropped += 1;
+    if (dropped === 1) throw new TypeError("fetch failed");
+    return passing();
+  });
+  assert.deepEqual(await reconnected.judge({ schemaVersion: 2 }), decision);
+
+  let overloaded = 0;
+  const exhausted = judgeWith(async () => {
+    overloaded += 1;
+    return new Response("{}", { status: 529 });
+  });
+  await assert.rejects(exhausted.judge({ schemaVersion: 2 }), /Anthropic JSON Judge provider failed/);
+  assert.equal(overloaded, 3);
+
+  let unauthorized = 0;
+  const rejected = judgeWith(async () => {
+    unauthorized += 1;
+    return new Response("{}", { status: 401 });
+  });
+  await assert.rejects(rejected.judge({ schemaVersion: 2 }), /Anthropic JSON Judge provider failed/);
+  assert.equal(unauthorized, 1);
+
+  const controller = new AbortController();
+  const waiting = createAnthropicJsonJudge({
+    model: "claude-test-model",
+    apiKey: "test-anthropic-key",
+    retryDelayMs: 60_000,
+    async fetch() {
+      queueMicrotask(() => controller.abort());
+      return new Response("{}", { status: 503 });
+    },
+  });
+  const startedAt = Date.now();
+  await assert.rejects(waiting.judge({ schemaVersion: 2 }, { signal: controller.signal }), /provider failed/);
+  assert.ok(Date.now() - startedAt < 5_000, "cancellation must interrupt the retry delay");
 });
 
 test("Anthropic JSON Judge bounds its wire data and forwards cancellation to fetch", async () => {

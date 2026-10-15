@@ -254,6 +254,50 @@ test("Local and Postgres readers return identical Run Record v3 history without 
   assert.deepEqual(await postgresStore.listRuns(), await localStore.listRuns());
 });
 
+test("one unreadable Postgres Run does not hide the other Runs in a listing", {
+  skip: !adminConnectionString,
+}, async (t) => {
+  const database = await createPostgresTestDatabase();
+  const { connectionString } = database;
+  const pool = new Pool({ connectionString, max: 2 });
+  let postgresStore;
+  t.after(async () => {
+    await closePostgresResultStore(postgresStore);
+    await pool.end();
+    await database.cleanup();
+  });
+  await applyPostgresResultStoreMigrations({ connectionString });
+  const v3 = canonicalRunRecordV3Fixture();
+  for (const artifact of v3.history.at(-1).evidence.artifacts) {
+    if (artifact.content) artifact.content.availability = "unavailable";
+  }
+  await seedFixture(pool, v3.history);
+  // For example, a record written by a newer Hurdle version.
+  const unreadable = "run_00000000-0000-4000-8000-0000000000bb";
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET CONSTRAINTS ALL DEFERRED");
+    await client.query(
+      `INSERT INTO hurdle.runs (id, current_revision, schema_version, state, target_id, created_at)
+       VALUES ($1, 0, 99, 'running', 'v1-suite', now())`,
+      [unreadable],
+    );
+    await client.query(
+      "INSERT INTO hurdle.run_revisions (run_id, revision, record) VALUES ($1, 0, $2::jsonb)",
+      [unreadable, JSON.stringify({ schemaVersion: 99 })],
+    );
+    await client.query("COMMIT");
+  } finally {
+    client.release();
+  }
+
+  postgresStore = await openPostgresResultStoreReader({ connectionString });
+
+  assert.deepEqual(await postgresStore.listRuns(), [v3.history.at(-1)]);
+  await assert.rejects(postgresStore.getRun(unreadable));
+});
+
 test("the Postgres reader performs no migration when canonical tables are absent", {
   skip: !adminConnectionString,
 }, async (t) => {

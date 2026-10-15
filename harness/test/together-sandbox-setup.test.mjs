@@ -120,6 +120,35 @@ test("Together setup preserves an existing store, Judge and limits while reusing
   assert.equal(saved.viewer.port, 3022);
   assert.match(f.output(), /✓ Setup complete · Together sandbox configured\./);
 });
+test("Together setup adds a new Agent to Hurdle's snapshot instead of reusing one without its CLI", async (t) => {
+  const f = await fixture(t);
+  f.dependencies.env.OPENAI_API_KEY = "test-openai-secret";
+  const available = new Set();
+  const builds = [];
+  const cli = createFrameworkCli({
+    ...f.dependencies,
+    loadTogetherSetupBackend: async () => ({
+      exists: async (alias) => available.has(alias),
+      build: async (alias, ids) => {
+        builds.push([alias, ids]);
+        available.add(alias);
+      },
+    }),
+  });
+  const savedAlias = async () => JSON.parse(await readFile(f.runtimePath, "utf8")).environment.settings.snapshotAlias;
+  assert.equal(await cli.main(["setup", "--sandbox", "together", "--yes"], f.io), 0, f.output());
+  assert.equal(await savedAlias(), "hurdle-claude-code@v1");
+
+  assert.equal((await initializeSuite({ destination: join(f.root, "codex"), agent: "codex" })).ok, true);
+  assert.equal(
+    await cli.main(["setup", "codex/example.suite.mjs", "--sandbox", "together", "--yes"], f.io),
+    0,
+    f.output(),
+  );
+  assert.equal(await savedAlias(), "hurdle-claude-code-codex@v1");
+  assert.deepEqual(builds.at(-1), ["hurdle-claude-code-codex@v1", ["claude-code", "codex"]]);
+});
+
 test("Together API setup builds a network snapshot and configures a longer Guardian lifetime", async (t) => {
   const f = await fixture(t, "together-api");
   const cli = createFrameworkCli({

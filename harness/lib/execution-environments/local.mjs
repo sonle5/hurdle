@@ -28,7 +28,11 @@ import {
 
 const TOTAL_ARTIFACT_LIMIT = 64 * 1024 * 1024;
 
-async function captureToolVersions(workspace, plan, signal) {
+// Interpreter startup can take seconds on a busy machine; a probe killed mid-start
+// can miss its quiescence window and needlessly block the Run.
+const DEFAULT_VERSION_PROBE_TIMEOUT_MS = 10_000;
+
+async function captureToolVersions(workspace, plan, signal, timeoutMs) {
   const root = await mkdtemp(join(workspace, ".versions-"));
   const env = {
     ...(typeof plan.env?.PATH === "string" ? { PATH: plan.env.PATH } : {}),
@@ -41,7 +45,7 @@ async function captureToolVersions(workspace, plan, signal) {
       ["runner", plan.command], ["node", "node"], ["python", "python3"], ["pip", "pip3"],
     ].map(async ([name, command]) => {
       const result = await executeProcess(root, {
-        command, args: ["--version"], env, timeoutMs: 2_000,
+        command, args: ["--version"], env, timeoutMs,
       }, 4_096, signal);
       const text = result.stdout.text.trim();
       const version = result.exitCode === 0 && result.stdout.complete && result.quiescent
@@ -211,14 +215,17 @@ async function executeProcess(workspace, launchPlan, captureMaxBytes, signal = n
     else signal.addEventListener("abort", onAbort, { once: true });
   }
 
+  // Stream decoding keeps multibyte characters intact across chunk boundaries.
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
-    if (!stdout.append(chunk.toString("utf8"))) {
+    if (!stdout.append(chunk)) {
       captureOverflow = true;
       requestTermination();
     }
   });
   child.stderr.on("data", (chunk) => {
-    if (!stderr.append(chunk.toString("utf8"))) {
+    if (!stderr.append(chunk)) {
       captureOverflow = true;
       requestTermination();
     }
@@ -404,6 +411,7 @@ function aggregateProcesses(turns) {
 
 export function createLocalExecutionEnvironment({
   captureMaxBytes = DEFAULT_CONTROLLER_CAPTURE_MAX_BYTES,
+  versionProbeTimeoutMs = DEFAULT_VERSION_PROBE_TIMEOUT_MS,
 } = {}) {
   return Object.freeze({
     id: "local",
@@ -460,7 +468,7 @@ export function createLocalExecutionEnvironment({
               throw new TypeError("Local agent execution program is invalid");
             }
             if (plan.versionProbe === true) {
-              const captured = await captureToolVersions(workspace, plan, envelope.signal);
+              const captured = await captureToolVersions(workspace, plan, envelope.signal, versionProbeTimeoutMs);
               toolVersions = captured.versions;
               if (!captured.quiescent) {
                 integrityIssues.push({
@@ -501,7 +509,17 @@ export function createLocalExecutionEnvironment({
               }, captureMaxBytes, envelope.signal);
               turns.push(turn);
               agentElapsedMs += turn.durationMs;
-              const elapsedLimitReached = agentElapsedMs >= program.maxElapsedMs;
+              // An interrupted Agent's partial work is not evidence of failure.
+              const cancelled = envelope.signal?.aborted === true;
+              if (cancelled) {
+                integrityIssues.push({
+                  code: "environment.cancelled",
+                  phase: "execute",
+                  effect: "incomplete",
+                  message: "Local execution was cancelled before the Agent process completed.",
+                });
+              }
+              const elapsedLimitReached = !cancelled && agentElapsedMs >= program.maxElapsedMs;
               if (elapsedLimitReached) {
                 integrityIssues.push({
                   code: "environment.agent-elapsed-limit",
@@ -519,7 +537,7 @@ export function createLocalExecutionEnvironment({
                 });
                 break;
               }
-              if (elapsedLimitReached) break;
+              if (cancelled || elapsedLimitReached) break;
               const directive = await program.onTurn(deepFreeze({
                 ordinal,
                 process: turn,

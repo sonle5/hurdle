@@ -233,6 +233,36 @@ test("Viewer launcher continuously drains output without retaining post-ready lo
   assert.equal((await completed).kind, "stopped");
 });
 
+test("Viewer launcher stops its server when the controlling terminal closes", async () => {
+  const child = childProcess();
+  const processTarget = new EventEmitter();
+  const signals = [];
+  child.kill = (signal) => {
+    signals.push(signal);
+    return true;
+  };
+  const completed = launchViewer({
+    cwd: "/workspace/eval-framework",
+    storeEnvironment: {
+      HURDLE_RESULT_STORE_MODE: "local",
+      HURDLE_RESULT_STORE_ROOT: "/workspace/results",
+    },
+    spawn: () => child,
+    processTarget,
+  });
+
+  processTarget.emit("SIGHUP");
+  child.emit("close", 0, null);
+
+  assert.deepEqual(signals, ["SIGTERM"]);
+  assert.deepEqual(await completed, {
+    kind: "interrupted",
+    signal: "SIGHUP",
+    exitCode: 129,
+  });
+  assert.equal(processTarget.listenerCount("SIGHUP"), 0);
+});
+
 test("Viewer launcher maps controller termination to a typed foreground interruption", async () => {
   const child = childProcess();
   const processTarget = new EventEmitter();

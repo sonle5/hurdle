@@ -671,6 +671,44 @@ test("v1 rejects the removed task.json configuration surface", (t) => {
   assert.match(result.stderr, /task\.json is not supported by the v1 facade/);
 });
 
+test("v1 reports an unreadable fixture as a Task diagnostic", { skip: process.getuid?.() === 0 }, (t) => {
+  const root = mkdtempSync(join(tmpdir(), "tae-v1-unreadable-fixture-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const taskRoot = join(root, "tasks", "copy-message");
+  mkdirSync(join(taskRoot, "fixtures"), { recursive: true });
+  writeFileSync(join(taskRoot, "prompt.md"), "Reply with `done`.\n");
+  writeFileSync(join(taskRoot, "checks.mjs"), [
+    'import { defineChecks } from "hurdle";',
+    "export default defineChecks((run) => {",
+    '  run.check({ id: "done", passed: true, summary: "Done." });',
+    "});",
+    "",
+  ].join("\n"));
+  const fixture = join(taskRoot, "fixtures", "secret.txt");
+  writeFileSync(fixture, "private\n");
+  writeFileSync(join(root, "general.suite.mjs"), [
+    'import { defineSuite } from "hurdle";',
+    "export default defineSuite({",
+    '  tasks: ["./tasks/copy-message"],',
+    '  agents: [{ runner: "claude-code", model: "test-model" }],',
+    '  verdict: "code",',
+    "});",
+    "",
+  ].join("\n"));
+  chmodSync(fixture, 0o000);
+
+  let result;
+  try {
+    result = runCli(root, ["validate", "general.suite.mjs", "--offline"]);
+  } finally {
+    chmodSync(fixture, 0o600);
+  }
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /\[task\.fixture-unreadable\]/);
+  assert.doesNotMatch(result.stderr, /internal-error/);
+});
+
 test("v1 rejects duplicate completion checks during validation", (t) => {
   const root = mkdtempSync(join(tmpdir(), "tae-v1-completed-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

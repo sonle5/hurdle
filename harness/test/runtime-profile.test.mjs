@@ -59,6 +59,21 @@ test("resolveRuntimeProfile anchors profile paths to the Runtime Profile file", 
   });
 });
 
+test("resolveRuntimeProfile ignores a UTF-8 byte order mark", () => {
+  const profile = resolveRuntimeProfile(
+    { runtimePath: "runtime.json", cwd: resolve("/workspace/current") },
+    {
+      readFile: () => `\uFEFF${JSON.stringify({
+        schemaVersion: 1,
+        environment: { kind: "local" },
+        resultStore: { kind: "local", root: "results" },
+      })}`,
+    },
+  );
+
+  assert.equal(profile.environment.kind, "local");
+});
+
 test("resolveRuntimeProfile rejects duplicate decoded JSON keys and closed-profile violations", () => {
   const cwd = resolve("/workspace/current");
   const invalidProfiles = [

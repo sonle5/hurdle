@@ -82,7 +82,10 @@ export function createLocalResultStoreReader(root) {
       const records = [];
       for (const entry of entries) {
         if (!entry.isDirectory() || !entry.name.startsWith("run_")) continue;
-        const record = await readLatestLocalRunRecord(root, entry.name);
+        let record;
+        // One unreadable Run must not hide every other Run; getRun still fails.
+        try { record = await readLatestLocalRunRecord(root, entry.name); }
+        catch { continue; }
         if (!record) continue;
         if (targetId && record.snapshot.target.id !== targetId) continue;
         records.push(record);

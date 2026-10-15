@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { parseEnv } from "node:util";
+import { parseProjectEnvironment } from "./project-environment.mjs";
 import { createRuntimeConfig } from "./runtime-init.mjs";
 import { resolveRuntimeProfile, describeRuntimeJudgeCapability } from "./runtime-profile.mjs";
 import { resolveAuthoritySelections } from "./authority-profile.mjs";
@@ -22,6 +22,22 @@ export const SETUP_AGENT_PACKAGES = Object.freeze({
   codex: "@openai/codex@0.141.0",
 });
 function setupError(code, message) { return Object.assign(new Error(message), { code }); }
+
+const MANAGED_IMAGE_NAMES = Object.freeze({
+  e2b: /^hurdle-((?:claude-code|codex)(?:-(?:claude-code|codex))*):v1$/,
+  together: /^hurdle-((?:claude-code|codex)(?:-(?:claude-code|codex))*)(-network)?@v1$/,
+});
+
+// Hurdle names the images it builds after the Agent CLIs inside them. Return
+// those Agents for a Hurdle-built name, or null for a caller-owned image.
+export function managedImageAgents(name, provider) {
+  const match = MANAGED_IMAGE_NAMES[provider].exec(name ?? "");
+  if (!match) return null;
+  return {
+    agents: Object.keys(SETUP_AGENT_PACKAGES).filter((id) => `-${match[1]}-`.includes(`-${id}-`)),
+    network: Boolean(match[2]),
+  };
+}
 
 
 export function createSetupTemplate(Template, agents) {
@@ -94,8 +110,12 @@ export async function setupSandbox({ suite, template, yes = false, interactive =
     const previous = await regularFileContents(runtimeFile);
     if (previous !== null) resolveRuntimeProfile({ cwd: io.cwd, runtimePath });
     const old = previous === null ? null : JSON.parse(previous);
-    const name = template ?? (old?.environment.kind === "e2b" ? old.environment.settings?.workloadTemplate : null)
-      ?? `hurdle-${ids.join("-")}:v1`;
+    const saved = old?.environment.kind === "e2b" ? old.environment.settings?.workloadTemplate : null;
+    const managed = saved ? managedImageAgents(saved, "e2b") : null;
+    // A Hurdle template must hold every Agent CLI the project runs; keep
+    // caller-owned templates as configured.
+    const agents = [...new Set([...(managed?.agents ?? []), ...ids])].sort();
+    const name = template ?? (saved && !managed ? saved : `hurdle-${agents.join("-")}:v1`);
     const config = old ?? structuredClone(createRuntimeConfig("e2b", { template: name }));
     if (!old) {
       delete config.judge;
@@ -118,7 +138,7 @@ export async function setupSandbox({ suite, template, yes = false, interactive =
     const env = { ...dependencies.env };
     // A project-local blank assignment must not fall back to an exported key.
     const source = await regularFileContents(join(io.cwd, ".env.local"));
-    if (source !== null) Object.assign(env, parseEnv(source));
+    if (source !== null) Object.assign(env, parseProjectEnvironment(source));
     await regularFileContents(join(io.cwd, ".gitignore"));
     const requirements = [
       { label: "E2B", anyOf: [profile.environment.apiKeyEnv] },
@@ -153,7 +173,7 @@ export async function setupSandbox({ suite, template, yes = false, interactive =
     if (!available) {
       const capacity = { cpuCount: settings.cpuCount, memoryMB: settings.memoryMiB };
       io.stdout.write("\n" + fact("Template", name)
-        + fact("Build", `${capacity.cpuCount} CPUs · ${capacity.memoryMB} MB · ${ids.join(" + ")}`)
+        + fact("Build", `${capacity.cpuCount} CPUs · ${capacity.memoryMB} MB · ${agents.join(" + ")}`)
         + fact("Usage", "Template build may be billed") + "\n");
       if (!yes) {
         if (!interactive) {
@@ -168,7 +188,7 @@ export async function setupSandbox({ suite, template, yes = false, interactive =
       const progress = io.stderr.isTTY ? createTerminalProgress({ stream: io.stderr }) : null;
       progress?.start("Building E2B template");
       if (!progress) io.stdout.write(terminalNote("Building E2B template…", io.stdout));
-      try { await backend.build(name, ids, env[profile.environment.apiKeyEnv], capacity); }
+      try { await backend.build(name, agents, env[profile.environment.apiKeyEnv], capacity); }
       catch { throw setupError("setup.build-failed", "E2B template build failed. Inspect the build in your E2B dashboard, then rerun setup --sandbox e2b. Project Runtime was not changed."); }
       finally { progress?.stop(); }
       line("pass", "E2B template built.");
