@@ -86,9 +86,10 @@ once per sandbox; a second `setup` is refused.
 The same server runs in a Kubernetes pod (`kind: "kubernetes"`), reached through
 the API server's port-forward. There the controller's setup job carries
 `"sandbox":"kubernetes"`: the pod adds only `NET_ADMIN`, so the sandbox stages the
-workspace in place at `/home/user/workspace` (checked as a private, root-owned
-directory before every step) instead of bind-mounting it, and seals its firewall
-with `iptables-nft`. Any other `sandbox` value is refused.
+workspace in place at `/home/user/workspace` instead of bind-mounting it, and
+seals its firewall with `iptables-nft` and `ip6tables-nft`. Before the Agent
+starts, the workspace is checked again: it must be the Agent's own `0700`
+directory under a root-owned parent the Agent cannot write to. Any other `sandbox` value is refused.
 
 **Egress.** Every stream the server opens is one TCP connection the Agent made to
 the sandbox's loopback proxy port, carried verbatim: its first bytes are the
