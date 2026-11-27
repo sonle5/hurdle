@@ -309,7 +309,6 @@ if os.path.lexists(target) and os.path.islink(target):
 
 async function prepareWorkspaceLayout(workload, WORKSPACE, layout, signal) {
   const selected = selectedWorkspaceLayout(WORKSPACE, layout);
-  if (layout === undefined) return selected;
   if (WORKSPACE === FIXED_WORKSPACE_LAYOUT.workingDirectory) {
     // Staged in place (no bind mount): check again that it is still the
     // Agent's own directory under a parent the Agent cannot change.
@@ -321,6 +320,7 @@ if not stat.S_ISDIR(info.st_mode) or (info.st_uid, info.st_gid) != (identity.pw_
 PY`, { timeoutMs: 30_000, signal, user: "root" });
     return selected;
   }
+  if (layout === undefined) return selected;
   await workload.commands.run(`set -eu
 python3 - <<'PY'
 ${FIXED_WORKSPACE_PARENT_CHECK}
@@ -621,7 +621,8 @@ PY`, { timeoutMs: 10_000, user: "root" });
 }
 
 // Shared controller-owned staging, process census, and artifact sealing.
-// These paths retain the original sandbox layout for image compatibility.
+// These paths retain the original sandbox layout for image compatibility,
+// except the workspace when it is staged in place.
 // `stagedInPlace` stages the workspace at the fixed layout's working directory
 // itself, for sandboxes that may not bind-mount it there (a Kubernetes pod in
 // its own user namespace under the runtime's default AppArmor profile).

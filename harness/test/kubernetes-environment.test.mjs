@@ -434,10 +434,14 @@ test("Kubernetes sandbox setup seals with nftables and stages in place", async (
     return { firewall, staged, task };
   };
   const kubernetes = await setup("kubernetes");
-  assert.match(kubernetes.firewall, /\/usr\/sbin\/iptables \/usr\/sbin\/ip6tables;/);
+  assert.match(kubernetes.firewall, /\/usr\/sbin\/iptables-nft \/usr\/sbin\/ip6tables-nft;/);
   assert.deepEqual(kubernetes.staged, ["kubernetes"]);
   const together = await setup(undefined);
   assert.match(together.firewall, /\/usr\/sbin\/iptables-legacy \/usr\/sbin\/ip6tables-legacy;/);
   assert.deepEqual(together.staged, ["together"]);
   await assert.rejects(together.task.run({ kind: "setup", hosts: [], sandbox: "e2b" }), /Unknown sandbox kind/);
+  // The kind is fixed at the one setup: a later one cannot switch it.
+  await assert.rejects(together.task.run({ kind: "setup", hosts: ["api.together.ai"], sandbox: "kubernetes" }), /already ran/);
+  await together.task.run({ kind: "stage", fixtures: [], workspaceFiles: [] });
+  assert.deepEqual(together.staged, ["together", "together"]);
 });

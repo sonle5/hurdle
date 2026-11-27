@@ -442,9 +442,41 @@ test("the in-place workspace checks refuse what the Agent could replace", { skip
   assert.equal(check(each).status, 0, check(each).stderr);
   chmodSync(target, 0o755);
   assert.match(check(each).stderr, /not the Agent's private directory/);
+  chmodSync(target, 0o700);
+  // Owned by someone other than the Agent.
+  assert.match(check(each.replace(/getpwnam\("[^"]+"\)/, 'getpwnam("root")')).stderr, /not the Agent's private directory|writable by the Agent/);
   chmodSync(root, 0o755);
   rmSync(target, { recursive: true });
   spawnSync("ln", ["-s", tmpdir(), target]);
   chmodSync(root, 0o555);
   assert.match(check(each).stderr, /target cannot be a symlink/);
+});
+
+test("staged in place, a run without the fixed layout still checks the workspace", async () => {
+  const { workload, commands } = recordingWorkload();
+  await createLinuxSandboxOperations({ stagedInPlace: true }).run(workload, agentLaunch());
+  assert.ok(commands.some(({ command }) => command.includes("not the Agent's private directory")));
+  const launch = JSON.parse(writtenEnding(workload, "/launch.json"));
+  assert.equal(launch.cwd, "/home/user/workspace");
+  assert.equal(launch.env.HOME, "/home/user/workspace/.home");
+  assert.equal(launch.env.TMPDIR, "/home/user/workspace/.tmp");
+});
+
+test("staged in place, artifact and metadata collection read the fixed workspace", async () => {
+  const helpers = {};
+  const workload = {
+    commands: { run: async () => ({ exitCode: 0 }) },
+    files: {
+      async write(path, data) { helpers[path] = data; },
+      async read() { return "[]"; },
+    },
+  };
+  const operations = createLinuxSandboxOperations({ stagedInPlace: true });
+  await operations.collectArtifacts(workload, []).catch(() => {});
+  await operations.collectWorkspaceArtifactMetadata(workload).catch(() => {});
+  for (const suffix of ["collect-artifacts.py", "collect-workspace-metadata.py"]) {
+    const [, source] = Object.entries(helpers).find(([path]) => path.endsWith(suffix));
+    assert.match(source, /\/home\/user\/workspace/);
+    assert.doesNotMatch(source, /\/tmp\/tae-e2b\/workspace/);
+  }
 });
