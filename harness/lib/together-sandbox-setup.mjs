@@ -137,6 +137,11 @@ export async function setupTogetherSandbox(
         authored.defaults.agentSelections.map((agent) => agent.adapterId),
       ),
     ].sort();
+    if (ids.includes("dsh"))
+      throw setupError(
+        "setup.agent",
+        "DeepSeek Harness (dsh) is not in the Together sandbox image yet; run dsh Suites with the local runtime.",
+      );
     const tasks = authored.defaults.taskIds.map(
       (id) => authored.value.definition.tasks[id],
     );

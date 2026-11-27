@@ -39,7 +39,7 @@ const TASK_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CONDITION_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CREDENTIAL_NAME = /^[A-Z][A-Z0-9_]*$/;
 const HOST = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?))+$/;
-const ADAPTER_IDS = new Set(["claude-code", "codex"]);
+const ADAPTER_IDS = new Set(["claude-code", "codex", "dsh"]);
 const VERDICTS = new Set(["code", "hybrid", "judge"]);
 
 const JUDGE_PROJECTION = Object.freeze({
@@ -395,7 +395,7 @@ function validateSuite(suite, suiteFile) {
   const agents = suite.agents.map((agent, index) => {
     assertClosedKeys(agent, ["runner", "model", "effort"], `Suite agent ${index + 1}`, suiteFile);
     if (!ADAPTER_IDS.has(agent.runner)) {
-      fail("suite.agent-invalid", "Suite agent runner must be 'claude-code' or 'codex'.", suiteFile);
+      fail("suite.agent-invalid", "Suite agent runner must be 'claude-code', 'codex', or 'dsh'.", suiteFile);
     }
     if (agent.model !== null && agent.model !== undefined && (
       typeof agent.model !== "string" || !agent.model.trim()

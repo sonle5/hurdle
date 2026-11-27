@@ -413,3 +413,68 @@ test("an API-key Judge on Together does not probe a local Claude Code", async ()
   assert.equal(checked.checks.find(check => check.code === "agent.remote-unverified").message, "Claude Code runs inside the Together sandbox; no local CLI installation needed.");
   assert.ok(checked.checks.some(check => check.message === "Anthropic · JUDGE_KEY verified."));
 });
+
+test("dsh readiness probes the dsh executable, needs DEEPSEEK_API_KEY, and makes no provider call", async () => {
+  let requests = 0;
+  const fetch = async () => { requests++; return success(); };
+  const missing = await checkAgentReadiness(input({ OPENAI_API_KEY: "private-openai-key" }, "dsh"), {
+    probeCli: async command => { assert.equal(command, "dsh"); return true; },
+    fetch,
+  });
+  assert.equal(missing.ok, false);
+  assert.match(JSON.stringify(missing), /DeepSeek Harness has no DEEPSEEK_API_KEY for its selected provider\./);
+
+  const configured = await checkAgentReadiness(input({ DEEPSEEK_API_KEY: "private-deepseek-key" }, "dsh"), {
+    probeCli: async () => true,
+    fetch,
+  });
+  assert.equal(configured.ok, true);
+  assert.equal(requests, 0);
+  assert.deepEqual(
+    configured.checks.find(value => value.code === "auth.key-unverified"),
+    { status: "warning", code: "auth.key-unverified", message: "DeepSeek Harness · DEEPSEEK_API_KEY configured; live validity unverified." },
+  );
+  assert.doesNotMatch(JSON.stringify(configured), /private-deepseek-key/);
+
+  const absent = await checkAgentReadiness(input({ DEEPSEEK_API_KEY: "k" }, "dsh"), { probeCli: async () => false, fetch });
+  assert.match(JSON.stringify(absent), /DeepSeek Harness executable is missing/);
+});
+
+test("dsh readiness checks the key of each selected model's provider", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hurdle-dsh-readiness-"));
+  const file = join(dir, "providers.json");
+  writeFileSync(file, JSON.stringify({ providers: {
+    "one-nexus": { api: "openai-completions", baseURL: "https://gw.example.test/v1", apiKeyEnv: "ONE_NEXUS_API_KEY", models: [{ id: "dsv41f" }] },
+  } }));
+  const run = (env, models, settings = {}) => checkAgentReadiness({
+    ...input(env, "dsh"),
+    agentSelections: models.map(requestedModel => ({ adapterId: "dsh", requestedModel, settings })),
+  }, { probeCli: async () => true, fetch: async () => assert.fail("no provider call") });
+  try {
+    const both = await run({ HURDLE_DSH_PROVIDERS: file, ONE_NEXUS_API_KEY: "k1" }, ["dsv41f", "deepseek-flash"]);
+    assert.equal(both.ok, false);
+    assert.ok(both.checks.some(check => check.code === "auth.key-unverified" && /ONE_NEXUS_API_KEY/.test(check.message)));
+    assert.ok(both.checks.some(check => check.code === "auth.missing" && /DEEPSEEK_API_KEY/.test(check.message)));
+    const one = await run({ HURDLE_DSH_PROVIDERS: file, ONE_NEXUS_API_KEY: "k1" }, ["one-nexus/dsv41f"]);
+    assert.equal(one.ok, true);
+    // The model lists no reasoning efforts, so launch would refuse this effort.
+    const effort = await run({ HURDLE_DSH_PROVIDERS: file, ONE_NEXUS_API_KEY: "k1" }, ["dsv41f"], { effort: "high" });
+    assert.equal(effort.ok, false);
+    assert.ok(effort.checks.some(check => check.code === "agent.dsh-provider" && /does not offer effort 'high'/.test(check.message)));
+    const bad = await run({ HURDLE_DSH_PROVIDERS: join(dir, "missing.json") }, ["dsv41f"]);
+    assert.equal(bad.ok, false);
+    assert.ok(bad.checks.some(check => check.code === "agent.dsh-provider" && /HURDLE_DSH_PROVIDERS/.test(check.message)));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("dsh readiness refuses the Together sandbox", async () => {
+  const checked = await checkAgentReadiness({
+    runtimeProfile: { environment: { kind: "together", apiKeyEnv: "REMOTE_KEY" }, resultStore: { kind: "local" } },
+    agentSelections: [{ adapterId: "dsh" }],
+    runtimeEnv: { DEEPSEEK_API_KEY: "k", REMOTE_KEY: "r" },
+  }, { probeCli() { assert.fail("no local probe"); }, findHostGuardian: () => ({}), fetch: async () => assert.fail("no call") });
+  assert.equal(checked.ok, false);
+  assert.ok(checked.checks.some(check => check.code === "agent.environment-unsupported"));
+});

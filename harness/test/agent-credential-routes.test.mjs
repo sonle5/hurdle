@@ -9,6 +9,7 @@ import {
 } from "../lib/agent-credential-routes.mjs";
 import { createClaudeCodeAdapter } from "../lib/agent-adapters/claude-code.mjs";
 import { createCodexAdapter } from "../lib/agent-adapters/codex.mjs";
+import { createDshAdapter } from "../lib/agent-adapters/dsh.mjs";
 
 const anthropicRoute = (environmentName) => ({
   environmentName,
@@ -248,4 +249,15 @@ test("the workload never receives a value that carries a real Agent credential",
     withAgentCredentialStandIns(plan, credentials).ANTHROPIC_API_KEY,
     "sk-ant-api03-stand-in",
   );
+});
+
+test("a DeepSeek key gets a DeepSeek-only stand-in, declared or not", () => {
+  const route = { environmentName: "DEEPSEEK_API_KEY", hosts: ["api.deepseek.com"], headerNames: ["x-api-key", "authorization"] };
+  const declared = createDshAdapter({ runtimeEnv: { DEEPSEEK_API_KEY: "sk-deepseekreal" } })
+    .createLaunchPlan({ prompt: "", requestedModel: null, settings: {} });
+  assert.deepEqual(declared.credentialRoutes, [route]);
+  const undeclared = prepareAgentCredentials({ env: { DEEPSEEK_API_KEY: "sk-deepseekreal" } }, () => "fallback");
+  assert.deepEqual(undeclared.map(({ environmentName, hosts, headerNames, surrogate }) => ({
+    environmentName, hosts, headerNames, surrogate,
+  })), [{ ...route, surrogate: "sk-fallback" }]);
 });

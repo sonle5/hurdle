@@ -6,7 +6,7 @@ export function selectSuiteAgents(agents, { agent, model } = {}) {
   if (model === undefined) return selected;
   if (typeof model !== "string" || !model.trim()) throw new RunSelectionInputError("--model requires a nonblank model ID.");
   if (new Set(selected.map(value => value.adapterId)).size > 1) {
-    throw new RunSelectionInputError("Use --agent claude-code or --agent codex with --model when the Suite defines both runners.");
+    throw new RunSelectionInputError("Use --agent claude-code, codex, or dsh with --model when the Suite defines several runners.");
   }
   // Preserve effort variants. Collapsing models may produce identical selections;
   // avoid running those cells twice while retaining the Run Engine's duplicate guard.

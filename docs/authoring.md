@@ -66,6 +66,7 @@ configuration; an interactive CLI login alone is not inherited.
   OpenAI API key only. A ChatGPT access token (`CODEX_ACCESS_TOKEN`) is ignored:
   it can act for you across all of ChatGPT, not just Codex. An API key can be
   limited with an OpenAI project budget.
+- DeepSeek Harness: see [DeepSeek Harness](#deepseek-harness).
 
 Keep `.env.local` out of version control, then check readiness:
 
@@ -377,3 +378,43 @@ In a sandbox, the Guardian swaps the Suite's credential only in the request's
 `Authorization` header, sent as `Bearer <key>` or as the bare key. A target API
 that reads its key from another header, a query parameter or the request body
 receives only the stand-in and rejects the request.
+
+## DeepSeek Harness
+
+`runner: "dsh"` runs DeepSeek Harness (`dsh`, on your `PATH`) with its headless
+profile, which allows workspace writes, shell commands, and web search and
+fetch. It runs only with the local runtime; Together setup refuses it. Hurdle
+writes the model choice to `.hurdle/dsh-patch.json` in the workspace and does
+not read your `~/.dsh` profile or credentials.
+
+By default the model runs on dsh's built-in `deepseek-official` provider
+(`deepseek-flash` when no model is given) with `DEEPSEEK_API_KEY`. To use other
+providers, point `HURDLE_DSH_PROVIDERS` at a JSON file holding the `providers`
+block of dsh's `llm-pi-ai` config, the same shape as a Superharness custom
+provider:
+
+```json
+{
+  "providers": {
+    "one-nexus": {
+      "api": "openai-completions",
+      "baseURL": "https://gateway.example.com/v1",
+      "apiKeyEnv": "ONE_NEXUS_API_KEY",
+      "models": [{ "id": "dsv41f", "reasoningEfforts": { "low": "low", "high": "high", "max": "max" } }]
+    }
+  }
+}
+```
+
+A Suite `model` that exactly one provider lists runs on that provider;
+`provider/model` picks one explicitly; any other id without a slash runs on
+`deepseek-official`, and an id with an unknown provider prefix is refused. Only the selected provider's definition and key reach dsh.
+A provider may set only `api`, `baseURL`, `apiKeyEnv`, `models`, `compat`,
+`retryPolicy`, and `displayName` (no literal `headers`), may not be named
+`deepseek-official` or `deepseek-account`, and its `baseURL` must be `https`,
+or `http` on `127.0.0.1`, with no credentials or query. An `effort` must be one the model
+lists in `reasoningEfforts`. Token counts are a lower bound: a step whose usage
+dsh omits is not counted. dsh also loads a `.env` file in the workspace
+without overriding the variables Hurdle passes, so a Task fixture should not
+ship one.
+

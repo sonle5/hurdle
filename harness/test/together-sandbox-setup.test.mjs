@@ -135,6 +135,19 @@ test("Together setup gives a later API Suite ten minutes but keeps a configured 
   assert.equal(await lifetime(), 420000);
 });
 
+test("Together setup refuses a dsh Suite before writing anything", async (t) => {
+  const f = await fixture(t);
+  const suite = join(f.root, "evals/example.suite.mjs");
+  const text = await readFile(suite, "utf8");
+  await writeFile(suite, text.replace(/agents: \[[^\]]*\]/, 'agents: [{ runner: "dsh", model: "deepseek-flash" }]'));
+  const cli = createFrameworkCli(f.dependencies);
+  assert.equal(await cli.main(["setup", "--sandbox", "together", "--yes", "--json"], f.io), 1, f.output());
+  const report = JSON.parse(f.output());
+  assert.equal(report.error.code, "setup.agent");
+  assert.match(report.error.message, /not in the Together sandbox image yet/);
+  assert.equal(existsSync(f.runtimePath), false);
+});
+
 test("Together Dockerfile includes pinned agents and Linux controller dependencies", () => {
   const text = togetherSandboxDockerfile([
     "claude-code",

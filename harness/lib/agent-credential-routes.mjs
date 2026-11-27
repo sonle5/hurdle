@@ -75,6 +75,7 @@ export const DEFAULT_AGENT_CREDENTIAL_ROUTES = Object.freeze({
   ANTHROPIC_API_KEY: Object.freeze({ hosts: ["api.anthropic.com"], headerNames: ["x-api-key", "authorization"] }),
   CLAUDE_CODE_OAUTH_TOKEN: Object.freeze({ hosts: ["api.anthropic.com"], headerNames: ["authorization"] }),
   CODEX_API_KEY: Object.freeze({ hosts: ["api.openai.com"], headerNames: ["authorization"] }),
+  DEEPSEEK_API_KEY: Object.freeze({ hosts: ["api.deepseek.com"], headerNames: ["x-api-key", "authorization"] }),
 });
 
 // A Codex ChatGPT access token acts for the user across all of chatgpt.com, not
