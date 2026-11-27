@@ -12,22 +12,33 @@ export function createSandboxTask({
   caPath,
   nodeRuntimeRoot = null,
   workload = createLocalWorkload(),
-  operations = createLinuxSandboxOperations(),
+  operations: togetherOperations = createLinuxSandboxOperations(),
+  kubernetesOperations = createLinuxSandboxOperations({ stagedInPlace: true }),
 } = {}) {
+  let operations = togetherOperations;
   const steps = {
     // Trust the controller's Guardian CA (from X-Sandbox-CA) and seal egress.
-    async setup({ hosts }) {
+    // The controller names a Kubernetes sandbox: its pod runs in its own user
+    // namespace under the runtime's default AppArmor profile, which refuses
+    // bind mounts, and its kernel has only the nftables iptables backend.
+    async setup({ hosts, sandbox }) {
       if (!Array.isArray(hosts) || hosts.some((host) => typeof host !== "string"))
         throw new TypeError("Sandbox setup requires capture hosts");
+      if (sandbox !== undefined && sandbox !== "kubernetes")
+        throw new TypeError("Unknown sandbox kind");
+      const kubernetes = sandbox === "kubernetes";
+      const firewallSuffix = kubernetes ? "" : "-legacy";
       const certificate = await readFile(caPath, "utf8");
       // Together starts the sandbox without internet access, DNS included, so no
-      // route bypasses the Guardian and there is none to refuse.
+      // route bypasses the Guardian and there is none to refuse; a Kubernetes
+      // pod's NetworkPolicy denies all of its egress.
       await installWorkloadTrust(
-        workload, certificate, hosts, undefined, "-legacy", "DROP",
+        workload, certificate, hosts, undefined, firewallSuffix, "DROP",
         { systemTrust: true, nodeRuntimeRoot, captureRouteFirewall: false },
       );
       await verifyGuardianPath(workload, hosts[0]);
-      await blockSandboxAgentPort(workload);
+      await blockSandboxAgentPort(workload, undefined, firewallSuffix);
+      operations = kubernetes ? kubernetesOperations : togetherOperations;
       return {};
     },
     async stage({ fixtures, workspaceFiles }) {

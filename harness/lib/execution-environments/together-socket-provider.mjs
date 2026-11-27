@@ -106,8 +106,9 @@ function textSink(callback) {
   };
 }
 
-// `label` names the sandbox provider in operator-facing errors.
-export function createSocketResource(socket, { label = "Together" } = {}) {
+// `label` names the sandbox provider in operator-facing errors; `sandbox`, when
+// set, tells the server which kind of sandbox it runs in.
+export function createSocketResource(socket, { label = "Together", sandbox } = {}) {
   const pending = new Map();
   const flows = new Set();
   let nextId = 1;
@@ -205,7 +206,7 @@ export function createSocketResource(socket, { label = "Together" } = {}) {
     },
     async attachEgress({ hosts, openUpstream: upstream, signal }) {
       openUpstream = upstream;
-      await resource.step({ kind: "setup", hosts }, { signal });
+      await resource.step({ kind: "setup", hosts, ...(sandbox ? { sandbox } : {}) }, { signal });
     },
     assertEgressHealthy() {
       if (closed) throw failure;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes, X509Certificate } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { createRequire } from "node:module";
 import net from "node:net";
@@ -15,6 +15,7 @@ import {
   normalizeKubernetesSettings,
 } from "../lib/execution-environments/kubernetes.mjs";
 import { createSandboxServer } from "../lib/execution-environments/sandbox-server.mjs";
+import { createSandboxTask } from "../lib/execution-environments/sandbox-task.mjs";
 
 const WebSocket = createRequire(import.meta.url)("ws");
 const CA = new X509Certificate(rootCertificates[0]).toString();
@@ -224,7 +225,9 @@ test("a cell gets its own CPU-node pod and talks to it through the port-forward"
 
   assert.equal(await readFile(join(cluster.taskRoot, "guardian-ca.pem"), "utf8"), CA);
   assert.deepEqual(await resource.step({ kind: "noop" }), { ok: true });
-  assert.deepEqual(cluster.jobs, [{ kind: "noop" }]);
+  // The server learns it runs in a Kubernetes pod from the controller's setup.
+  await resource.attachEgress({ hosts: ["api.anthropic.com"], openUpstream: () => null });
+  assert.deepEqual(cluster.jobs, [{ kind: "noop" }, { kind: "setup", hosts: ["api.anthropic.com"], sandbox: "kubernetes" }]);
 
   await pods.dispose(resource);
   assert.equal(resource.closed, true);
@@ -403,4 +406,38 @@ test("Kubernetes settings pin the API server, namespace, image and nodes", () =>
 
 test("the Kubernetes environment refuses an incomplete provider", () => {
   assert.throws(() => createKubernetesExecutionEnvironment({ provider: { acquire() {} } }), /requires a provider/);
+});
+
+// A Kubernetes pod's kernel has no legacy iptables, and its runtime's default
+// AppArmor profile refuses the bind mount, so the controller names the sandbox
+// kind and the server seals with nftables and stages the workspace in place.
+test("Kubernetes sandbox setup seals with nftables and stages in place", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "hurdle-sandbox-setup-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const caPath = join(root, "guardian-ca.pem");
+  await writeFile(caPath, CA);
+  const setup = async (sandbox) => {
+    const commands = [];
+    const staged = [];
+    const workload = {
+      commands: { run: async (command) => { commands.push(command); return { exitCode: 0, stdout: "GUARDIAN_BRIDGE_READY", stderr: "" }; } },
+      files: { write: async () => {} },
+    };
+    const operations = (name) => ({ stage: async () => { staged.push(name); } });
+    const task = createSandboxTask({
+      caPath, nodeRuntimeRoot: "/opt/hurdle", workload,
+      operations: operations("together"), kubernetesOperations: operations("kubernetes"),
+    });
+    await task.run({ kind: "setup", hosts: ["api.together.ai"], ...(sandbox ? { sandbox } : {}) });
+    await task.run({ kind: "stage", fixtures: [], workspaceFiles: [] });
+    const firewall = commands.find((command) => command.includes("--dport 57468 -j DROP"));
+    return { firewall, staged, task };
+  };
+  const kubernetes = await setup("kubernetes");
+  assert.match(kubernetes.firewall, /\/usr\/sbin\/iptables \/usr\/sbin\/ip6tables;/);
+  assert.deepEqual(kubernetes.staged, ["kubernetes"]);
+  const together = await setup(undefined);
+  assert.match(together.firewall, /\/usr\/sbin\/iptables-legacy \/usr\/sbin\/ip6tables-legacy;/);
+  assert.deepEqual(together.staged, ["together"]);
+  await assert.rejects(together.task.run({ kind: "setup", hosts: [], sandbox: "e2b" }), /Unknown sandbox kind/);
 });

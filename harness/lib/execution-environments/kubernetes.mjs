@@ -457,7 +457,7 @@ export function createKubernetesProvider({
           await delay(pollMs, signal);
         }
         const socket = await connect(api, namespace, podName, controlToken, caCertificate, signal, deadline);
-        return Object.assign(createSocketResource(socket, { label: "Kubernetes" }), owned, { sandboxId: podName });
+        return Object.assign(createSocketResource(socket, { label: "Kubernetes", sandbox: "kubernetes" }), owned, { sandboxId: podName });
       } catch (error) {
         // The environment disposes only what acquire returns.
         await removePod(owned).catch(() => {});

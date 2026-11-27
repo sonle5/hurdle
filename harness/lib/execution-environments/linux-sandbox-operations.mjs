@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import { sha256 } from "../run-model.mjs";
 
 const WORKSPACE_ROOT = "/tmp/tae-e2b";
-const WORKSPACE = `${WORKSPACE_ROOT}/workspace`;
 const CONTROL_ROOT = "/home/user/.tae-controller";
 const AGENT_USER = "tae-agent";
 const LAUNCH_PATH = `${CONTROL_ROOT}/launch.json`;
@@ -84,7 +83,7 @@ child.on("exit", async (code, signal) => {
 });
 `;
 
-const REMOTE_ARTIFACT_HELPER = `
+const remoteArtifactHelper = (WORKSPACE) => `
 import errno
 import hashlib
 import json
@@ -228,7 +227,7 @@ with open(MANIFEST, "x", encoding="utf-8") as handle:
     os.fsync(handle.fileno())
 `;
 
-const REMOTE_WORKSPACE_METADATA_HELPER = `
+const remoteWorkspaceMetadataHelper = (WORKSPACE) => `
 import json
 import os
 import re
@@ -270,7 +269,7 @@ async function pinnedBytes(source) {
   return readFile(source.pinnedPath);
 }
 
-function selectedWorkspaceLayout(layout) {
+function selectedWorkspaceLayout(WORKSPACE, layout) {
   if (layout === undefined) {
     return {
       workingDirectory: WORKSPACE,
@@ -288,12 +287,9 @@ function selectedWorkspaceLayout(layout) {
   };
 }
 
-async function prepareWorkspaceLayout(workload, layout, signal) {
-  const selected = selectedWorkspaceLayout(layout);
-  if (layout === undefined) return selected;
-  await workload.commands.run(`set -eu
-python3 - <<'PY'
-import os, pwd, stat
+// The Agent must not be able to replace the fixed workspace: its parent may not
+// be writable by the Agent, and the workspace may not be a symlink.
+const FIXED_WORKSPACE_PARENT_CHECK = `import os, pwd, stat
 parent = ${JSON.stringify(FIXED_WORKSPACE_LAYOUT.homeDirectory)}
 target = ${JSON.stringify(FIXED_WORKSPACE_LAYOUT.workingDirectory)}
 identity = pwd.getpwnam(${JSON.stringify(AGENT_USER)})
@@ -309,7 +305,25 @@ else:
 if writable:
     raise SystemExit("fixed workspace parent directory is writable by the Agent")
 if os.path.lexists(target) and os.path.islink(target):
-    raise SystemExit("fixed workspace target cannot be a symlink")
+    raise SystemExit("fixed workspace target cannot be a symlink")`;
+
+async function prepareWorkspaceLayout(workload, WORKSPACE, layout, signal) {
+  const selected = selectedWorkspaceLayout(WORKSPACE, layout);
+  if (layout === undefined) return selected;
+  if (WORKSPACE === FIXED_WORKSPACE_LAYOUT.workingDirectory) {
+    // Staged in place (no bind mount): check again that it is still the
+    // Agent's own directory under a parent the Agent cannot change.
+    await workload.commands.run(`python3 - <<'PY'
+${FIXED_WORKSPACE_PARENT_CHECK}
+info = os.lstat(target)
+if not stat.S_ISDIR(info.st_mode) or (info.st_uid, info.st_gid) != (identity.pw_uid, identity.pw_gid) or stat.S_IMODE(info.st_mode) != 0o700:
+    raise SystemExit("fixed workspace is not the Agent's private directory")
+PY`, { timeoutMs: 30_000, signal, user: "root" });
+    return selected;
+  }
+  await workload.commands.run(`set -eu
+python3 - <<'PY'
+${FIXED_WORKSPACE_PARENT_CHECK}
 if not os.path.exists(target):
     os.mkdir(target, 0o700)
 if not os.path.ismount(target):
@@ -354,7 +368,7 @@ export function validateArtifactDeclarations(declarations) {
   }
 }
 
-async function stageInputs(sandbox, { fixtures, workspaceFiles, signal }) {
+async function stageInputs(sandbox, WORKSPACE, { fixtures, workspaceFiles, signal }) {
   const writes = [];
   const expected = [];
   for (const fixture of fixtures) {
@@ -381,7 +395,13 @@ if ! id -u ${AGENT_USER} >/dev/null 2>&1; then
 fi
 agent_group="$(id -gn ${AGENT_USER})"
 install -d -o root -g root -m 0700 ${CONTROL_ROOT}
-install -d -o root -g root -m 0711 ${WORKSPACE_ROOT}
+${WORKSPACE === FIXED_WORKSPACE_LAYOUT.workingDirectory
+    ? `python3 - <<'PY'
+${FIXED_WORKSPACE_PARENT_CHECK}
+if os.path.lexists(target):
+    raise SystemExit("fixed workspace already exists")
+PY`
+    : `install -d -o root -g root -m 0711 ${WORKSPACE_ROOT}`}
 install -d -o ${AGENT_USER} -g "$agent_group" -m 0700 ${WORKSPACE} ${WORKSPACE}/.home ${WORKSPACE}/.tmp`, {
     timeoutMs: 30_000,
     signal,
@@ -602,14 +622,21 @@ PY`, { timeoutMs: 10_000, user: "root" });
 
 // Shared controller-owned staging, process census, and artifact sealing.
 // These paths retain the original sandbox layout for image compatibility.
-export function createLinuxSandboxOperations() {
+// `stagedInPlace` stages the workspace at the fixed layout's working directory
+// itself, for sandboxes that may not bind-mount it there (a Kubernetes pod in
+// its own user namespace under the runtime's default AppArmor profile).
+export function createLinuxSandboxOperations({ stagedInPlace = false } = {}) {
+  const WORKSPACE = stagedInPlace ? FIXED_WORKSPACE_LAYOUT.workingDirectory : `${WORKSPACE_ROOT}/workspace`;
+  const artifactHelper = remoteArtifactHelper(WORKSPACE);
+  const workspaceMetadataHelper = remoteWorkspaceMetadataHelper(WORKSPACE);
   return Object.freeze({
     async stage(workload, input) {
-      await stageInputs(workload, input);
+      await stageInputs(workload, WORKSPACE, input);
     },
     async run(workload, { launchPlan, environment, onStdout, onStderr, signal }) {
       const workspaceLayout = await prepareWorkspaceLayout(
         workload,
+        WORKSPACE,
         launchPlan.workspaceLayout,
         signal,
       );
@@ -717,10 +744,10 @@ export function createLinuxSandboxOperations() {
         JSON.stringify(declarations),
         { user: "root" },
       );
-      await workload.files.write(ARTIFACT_HELPER, REMOTE_ARTIFACT_HELPER, {
+      await workload.files.write(ARTIFACT_HELPER, artifactHelper, {
         user: "root",
       });
-      const helperDigest = sha256(Buffer.from(REMOTE_ARTIFACT_HELPER));
+      const helperDigest = sha256(Buffer.from(artifactHelper));
       await workload.commands.run(`/usr/bin/python3 - <<'PY'
 import hashlib, os
 path = ${JSON.stringify(ARTIFACT_HELPER)}
@@ -843,10 +870,10 @@ PY`, {
     async collectWorkspaceArtifactMetadata(workload) {
       await workload.files.write(
         WORKSPACE_METADATA_HELPER,
-        REMOTE_WORKSPACE_METADATA_HELPER,
+        workspaceMetadataHelper,
         { user: "root" },
       );
-      const helperDigest = sha256(Buffer.from(REMOTE_WORKSPACE_METADATA_HELPER));
+      const helperDigest = sha256(Buffer.from(workspaceMetadataHelper));
       await workload.commands.run(`/usr/bin/python3 - <<'PY'
 import hashlib, os
 path = ${JSON.stringify(WORKSPACE_METADATA_HELPER)}
