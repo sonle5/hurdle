@@ -37,22 +37,25 @@ const DELETE_CONFIRM_MS = 60_000;
 const API_TIMEOUT_MS = 30_000;
 const MAX_API_BODY_BYTES = 1024 * 1024;
 // Kubelet reasons that no amount of waiting will fix.
-const FATAL_WAITING = new Set(["ErrImagePull", "ImagePullBackOff", "ErrImageNeverPull", "InvalidImageName", "CreateContainerConfigError", "CreateContainerError"]);
+const FATAL_WAITING = new Set(["ErrImagePull", "ImagePullBackOff", "ErrImageNeverPull", "InvalidImageName", "CreateContainerConfigError", "CreateContainerError", "RunContainerError"]);
 
 const DNS_LABEL = /^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$/;
 const LABEL_KEY = /^(?:[a-z0-9](?:[-a-z0-9.]{0,251}[a-z0-9])?\/)?[A-Za-z0-9](?:[-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$/;
 const LABEL_VALUE = /^(?:[A-Za-z0-9](?:[-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?)?$/;
 const PINNED_IMAGE = /^[^\s@]{1,400}@sha256:[0-9a-f]{64}$/;
-// Kubernetes quantities: whole or millicores for CPU, binary units for memory.
-// The bounds are what the cluster's admission policy admits.
+// Kubernetes quantities: whole or millicores for CPU, binary units for memory
+// and disk. The upper bounds are what the cluster's admission policy admits;
+// the lower ones what the sandbox server and an Agent need to start.
 const CPU_QUANTITY = /^(?:[12]|[1-9][0-9]{0,3}m)$/;
-const MEMORY_QUANTITY = /^[1-9][0-9]{0,4}(?:Mi|Gi)$/;
-const MAX_MILLICPU = 2000;
-const MAX_MEMORY_MI = 4096;
+const BINARY_QUANTITY = /^[1-9][0-9]{0,4}(?:Mi|Gi)$/;
+const MILLICPU = Object.freeze({ min: 250, max: 2000 });
+const MEMORY_MI = Object.freeze({ min: 512, max: 4096 });
+const EPHEMERAL_STORAGE_MI = Object.freeze({ min: 1024, max: 10240 });
 const millicpu = (value) => (value.endsWith("m") ? Number(value.slice(0, -1)) : Number(value) * 1000);
-const memoryMi = (value) => Number(value.slice(0, -2)) * (value.endsWith("Gi") ? 1024 : 1);
-const BASE_SETTINGS = Object.freeze({ maxLifetimeMs: KUBERNETES_MAX_LIFETIME_MS, cpu: "1", memory: "2Gi" });
-const SETTING_KEYS = new Set(["apiServer", "namespace", "image", "caFile", "nodeSelector", "maxLifetimeMs", "cpu", "memory"]);
+const mebibytes = (value) => Number(value.slice(0, -2)) * (value.endsWith("Gi") ? 1024 : 1);
+const within = (value, { min, max }) => value >= min && value <= max;
+const BASE_SETTINGS = Object.freeze({ maxLifetimeMs: KUBERNETES_MAX_LIFETIME_MS, cpu: "1", memory: "2Gi", ephemeralStorage: "4Gi" });
+const SETTING_KEYS = new Set(["apiServer", "namespace", "image", "caFile", "nodeSelector", "maxLifetimeMs", "cpu", "memory", "ephemeralStorage"]);
 
 const settingError = (message) => new RunSelectionInputError(`Kubernetes ${message}`);
 
@@ -88,10 +91,15 @@ export function normalizeKubernetesSettings(settings = {}, defaults = {}) {
   if (!Number.isSafeInteger(selected.maxLifetimeMs) || selected.maxLifetimeMs < 1000 || selected.maxLifetimeMs > KUBERNETES_MAX_LIFETIME_MS)
     throw settingError(`maxLifetimeMs must be an integer from 1000 to ${KUBERNETES_MAX_LIFETIME_MS}`);
   // The sandbox nodes may be shared, so every pod is bounded.
-  if (typeof selected.cpu !== "string" || !CPU_QUANTITY.test(selected.cpu) || millicpu(selected.cpu) > MAX_MILLICPU)
-    throw settingError("cpu must be a CPU quantity up to 2, such as 1 or 500m");
-  if (typeof selected.memory !== "string" || !MEMORY_QUANTITY.test(selected.memory) || memoryMi(selected.memory) > MAX_MEMORY_MI)
-    throw settingError("memory must be a memory quantity in Mi or Gi, up to 4Gi");
+  if (typeof selected.cpu !== "string" || !CPU_QUANTITY.test(selected.cpu) || !within(millicpu(selected.cpu), MILLICPU))
+    throw settingError("cpu must be a CPU quantity from 250m to 2, such as 1 or 500m");
+  if (typeof selected.memory !== "string" || !BINARY_QUANTITY.test(selected.memory) || !within(mebibytes(selected.memory), MEMORY_MI))
+    throw settingError("memory must be a quantity in Mi or Gi from 512Mi to 4Gi");
+  if (
+    typeof selected.ephemeralStorage !== "string" || !BINARY_QUANTITY.test(selected.ephemeralStorage)
+    || !within(mebibytes(selected.ephemeralStorage), EPHEMERAL_STORAGE_MI)
+  )
+    throw settingError("ephemeralStorage must be a quantity in Mi or Gi from 1Gi to 10Gi");
   return deepFreeze({ ...selected, apiServer: url.origin });
 }
 
@@ -108,7 +116,7 @@ const delay = (ms, signal) => new Promise((resolve, reject) => {
 
 // One API call. The status is what callers act on; bodies are read only as
 // JSON objects the API server wrote, and never shown.
-function apiRequest({ apiServer, token, ca }, method, path, body, signal) {
+function apiRequest({ apiServer, token, ca }, method, path, body, signal, timeoutMs = API_TIMEOUT_MS) {
   const url = new URL(path, apiServer);
   const transport = url.protocol === "https:" ? https : http;
   const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
@@ -121,7 +129,7 @@ function apiRequest({ apiServer, token, ca }, method, path, body, signal) {
         ...(payload ? { "Content-Type": "application/json", "Content-Length": payload.length } : {}),
       },
       ...(ca ? { ca } : {}),
-      timeout: API_TIMEOUT_MS,
+      timeout: timeoutMs,
       signal,
     }, (response) => {
       const parts = [];
@@ -144,7 +152,7 @@ function apiRequest({ apiServer, token, ca }, method, path, body, signal) {
   });
 }
 
-function podManifest({ name, image, nodeSelector, maxLifetimeMs, cpu, memory, controlToken }) {
+function podManifest({ name, image, nodeSelector, maxLifetimeMs, cpu, memory, ephemeralStorage, controlToken }) {
   return {
     apiVersion: "v1",
     kind: "Pod",
@@ -173,8 +181,12 @@ function podManifest({ name, image, nodeSelector, maxLifetimeMs, cpu, memory, co
         env: [{ name: "HURDLE_SANDBOX_CONTROL_TOKEN", value: controlToken }],
         ports: [{ containerPort: SANDBOX_PORT }],
         // Requests equal limits: the pod is never the first evicted, and an
-        // Agent cannot take more of a shared node than this.
-        resources: { requests: { cpu, memory }, limits: { cpu, memory } },
+        // Agent cannot take more of a shared node, its disk included, than
+        // this. Past its disk limit the kubelet evicts the pod.
+        resources: {
+          requests: { cpu, memory, "ephemeral-storage": ephemeralStorage },
+          limits: { cpu, memory, "ephemeral-storage": ephemeralStorage },
+        },
         // The sandbox bind-mounts the fixed workspace and installs its egress
         // firewall itself, as root, as it does in Together's VM.
         securityContext: {
@@ -394,30 +406,48 @@ export function createKubernetesProvider({
     // Agent and Suite credentials reach the pod only as surrogates the
     // Guardian swaps on egress, never as environment values.
     sealedOnly: true,
-    async acquire({ apiServer, namespace, image, caFile, nodeSelector, maxLifetimeMs, cpu, memory, caCertificate, signal }) {
+    async acquire({ apiServer, namespace, image, caFile, nodeSelector, maxLifetimeMs, cpu, memory, ephemeralStorage, caCertificate, signal }) {
       const api = await apiFor({ apiServer, caFile });
       const podName = `hurdle-sandbox-${randomBytes(6).toString("hex")}`;
       const controlToken = randomBytes(32).toString("base64url");
       const owned = { api, namespace, podName };
       const deadline = Date.now() + connectTimeoutMs;
-      let created;
-      try {
-        created = await apiRequest(api, "POST", podPath(namespace),
-          podManifest({ name: podName, image, nodeSelector, maxLifetimeMs, cpu, memory, controlToken }), signal);
-      } catch (error) {
-        // Cancelled or cut off after the API server may have stored the pod:
-        // the name is ours, so remove whatever is there.
-        await removePod(owned).catch(() => {});
-        throw error;
-      }
-      if (created.status !== 201) {
+      // No API call outlives the deadline.
+      const remaining = () => Math.max(1, Math.min(API_TIMEOUT_MS, deadline - Date.now()));
+      const manifest = podManifest({ name: podName, image, nodeSelector, maxLifetimeMs, cpu, memory, ephemeralStorage, controlToken });
+      for (;;) {
+        let created;
+        try {
+          created = await apiRequest(api, "POST", podPath(namespace), manifest, signal, remaining());
+        } catch (error) {
+          // Cancelled or cut off after the API server may have stored the pod:
+          // the name is ours, so remove whatever is there.
+          await removePod(owned).catch(() => {});
+          if (error.message === "Kubernetes API request timed out" && !signal?.aborted) throw timeoutError(connectTimeoutMs);
+          throw error;
+        }
+        if (created.status === 201) break;
+        // The namespace's quota is full while other cells hold their pods:
+        // wait for one to end, as a cell waits for its pod to start.
+        if (created.status === 403 && typeof created.body?.message === "string" && created.body.message.includes("exceeded quota")) {
+          if (Date.now() + pollMs > deadline) throw timeoutError(connectTimeoutMs);
+          await delay(pollMs, signal);
+          continue;
+        }
         // A server error may still have stored the pod; a refusal did not.
         if (created.status >= 500) await removePod(owned).catch(() => {});
         throw Object.assign(new Error(`Kubernetes refused the sandbox pod (${created.status})`), { status: created.status });
       }
       try {
         for (;;) {
-          const { status, body } = await apiRequest(api, "GET", podPath(namespace, podName), undefined, signal);
+          let reply;
+          try {
+            reply = await apiRequest(api, "GET", podPath(namespace, podName), undefined, signal, remaining());
+          } catch (error) {
+            if (error.message === "Kubernetes API request timed out" && !signal?.aborted) throw timeoutError(connectTimeoutMs);
+            throw error;
+          }
+          const { status, body } = reply;
           if (status !== 200) throw new Error(`Kubernetes could not read the sandbox pod (${status})`);
           const problem = podProblem(body);
           if (problem) throw new Error(`Kubernetes ${problem}`);

@@ -31,6 +31,8 @@ async function fakeCluster(t, {
   hangSandbox = false,
   failDeletes = 0,
   lingerPolls = 0,
+  quotaFullCreates = 0,
+  hangGets = false,
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), "hurdle-k8s-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -42,6 +44,7 @@ async function fakeCluster(t, {
   const jobs = [];
   let portForwards = 0;
   let deletes = 0;
+  let creates = 0;
   const hung = [];
   const authorized = (request) => request.headers.authorization === `Bearer ${API_TOKEN}`;
   const podPath = /^\/api\/v1\/namespaces\/hurdle\/pods(?:\/([a-z0-9-]+))?(?:\/(portforward))?$/;
@@ -61,6 +64,11 @@ async function fakeCluster(t, {
       const parts = [];
       for await (const chunk of request) parts.push(chunk);
       const pod = JSON.parse(Buffer.concat(parts).toString("utf8"));
+      creates += 1;
+      if (creates <= quotaFullCreates) {
+        // As the API server words a ResourceQuota refusal.
+        return reply(403, { kind: "Status", reason: "Forbidden", message: `pods "${pod.metadata.name}" is forbidden: exceeded quota: hurdle-sandboxes, requested: pods=1, used: pods=4, limited: pods=4` });
+      }
       if (hangCreate) {
         // Stored, but the reply never comes.
         pods.set(pod.metadata.name, { pod, server: { close: async () => {} }, port: 0, polls: 0 });
@@ -84,6 +92,7 @@ async function fakeCluster(t, {
     const entry = pods.get(name);
     if (!entry) return reply(404, { kind: "Status", reason: "NotFound" });
     if (request.method === "GET") {
+      if (hangGets && entry.deleting === undefined) { hung.push(response); return; }  // until deleted
       entry.polls += 1;
       if (entry.deleting > 0) entry.deleting -= 1;
       return reply(200, { ...entry.pod, status: podStatus(entry.polls) });
@@ -150,6 +159,7 @@ async function fakeCluster(t, {
     jobs,
     portForwards: () => portForwards,
     deletes: () => deletes,
+    creates: () => creates,
   };
 }
 
@@ -171,6 +181,7 @@ const acquireOptions = (cluster) => ({
   maxLifetimeMs: 600_000,
   cpu: "1",
   memory: "2Gi",
+  ephemeralStorage: "4Gi",
   caCertificate: CA,
 });
 
@@ -194,13 +205,19 @@ test("a cell gets its own CPU-node pod and talks to it through the port-forward"
   const [container] = pod.spec.containers;
   assert.equal(container.image, IMAGE);
   assert.equal(container.imagePullPolicy, "Never");
-  // What platform/hurdle.yaml's admission policy requires of every pod.
-  assert.deepEqual(container.resources, { requests: { cpu: "1", memory: "2Gi" }, limits: { cpu: "1", memory: "2Gi" } });
+  // The fields the cluster's admission policy (nexus-compiler
+  // platform/hurdle.yaml) checks; the policy itself is tested there.
+  const bounds = { cpu: "1", memory: "2Gi", "ephemeral-storage": "4Gi" };
+  assert.deepEqual(container.resources, { requests: bounds, limits: bounds });
+  assert.equal(container.lifecycle, undefined);
+  assert.equal(container.workingDir, undefined);
+  assert.equal(container.args, undefined);
   assert.deepEqual(container.securityContext.capabilities, { add: ["SYS_ADMIN", "NET_ADMIN"] });
   assert.deepEqual(container.securityContext.seccompProfile, { type: "RuntimeDefault" });
   assert.equal(container.securityContext.privileged, undefined);
   assert.equal(pod.spec.volumes, undefined);
   assert.deepEqual(container.command, ["node", "/opt/hurdle/harness/bin/hurdle-sandbox-server.mjs"]);
+  assert.deepEqual(container.env.map(Object.keys), [["name", "value"]]);
   assert.deepEqual(container.env.map((entry) => entry.name), ["HURDLE_SANDBOX_CONTROL_TOKEN"]);
   // The cluster's own API token never reaches the pod.
   assert.doesNotMatch(JSON.stringify(pod), new RegExp(API_TOKEN));
@@ -231,6 +248,41 @@ test("a pod that cannot start fails the cell and is deleted", async (t) => {
   });
   await assert.rejects(provider(cluster).acquire(acquireOptions(cluster)), /could not start its container \(ImagePullBackOff\)/);
   assert.equal(cluster.pods.size, 0);
+});
+
+test("a container that cannot run fails the cell at once", async (t) => {
+  const cluster = await fakeCluster(t, {
+    podStatus: () => ({ phase: "Pending", containerStatuses: [{ state: { waiting: { reason: "RunContainerError" } } }] }),
+  });
+  await assert.rejects(provider(cluster).acquire(acquireOptions(cluster)), /could not start its container \(RunContainerError\)/);
+  assert.equal(cluster.pods.size, 0);
+});
+
+test("a full namespace quota is waited out, not failed", async (t) => {
+  const cluster = await fakeCluster(t, { quotaFullCreates: 2 });
+  const resource = await provider(cluster).acquire(acquireOptions(cluster));
+  t.after(() => resource.close());
+  assert.equal(cluster.creates(), 3);
+  assert.equal(cluster.pods.size, 1);
+});
+
+test("a quota that stays full times out", async (t) => {
+  const cluster = await fakeCluster(t, { quotaFullCreates: Infinity });
+  await assert.rejects(
+    provider(cluster, { connectTimeoutMs: 100 }).acquire(acquireOptions(cluster)),
+    (error) => error.code === "sandbox_connection_timeout",
+  );
+  assert.equal(cluster.pods.size, 0);
+});
+
+test("a status read that never answers ends at the deadline", async (t) => {
+  const cluster = await fakeCluster(t, { hangGets: true });
+  const started = Date.now();
+  await assert.rejects(
+    provider(cluster, { connectTimeoutMs: 200, deleteConfirmMs: 0 }).acquire(acquireOptions(cluster)),
+    (error) => error.code === "sandbox_connection_timeout",
+  );
+  assert.ok(Date.now() - started < 5_000);
 });
 
 test("a pod that never runs times out and is deleted", async (t) => {
@@ -300,10 +352,22 @@ test("an API refusal surfaces its status without the token", async (t) => {
   assert.throws(() => createKubernetesProvider({ token: " " }), /requires an API token/);
 });
 
+test("the API server's CA is read from caFile for every call", async (t) => {
+  const cluster = await fakeCluster(t);
+  const read = [];
+  const pods = provider(cluster, { readCa: async (path) => { read.push(path); return CA; } });
+  const resource = await pods.acquire({ ...acquireOptions(cluster), caFile: "/etc/hurdle/cluster-ca.pem" });
+  assert.deepEqual(read, ["/etc/hurdle/cluster-ca.pem"]);
+  assert.equal(resource.api.ca, CA);
+  await pods.dispose(resource);
+});
+
 test("Kubernetes settings pin the API server, namespace, image and nodes", () => {
   const base = { apiServer: "https://10.0.0.1:6443/", namespace: "hurdle", image: IMAGE, nodeSelector: { workload: "app" } };
   const settings = normalizeKubernetesSettings({}, base);
-  assert.deepEqual(settings, { ...base, apiServer: "https://10.0.0.1:6443", maxLifetimeMs: 3_600_000, cpu: "1", memory: "2Gi" });
+  assert.deepEqual(settings, {
+    ...base, apiServer: "https://10.0.0.1:6443", maxLifetimeMs: 3_600_000, cpu: "1", memory: "2Gi", ephemeralStorage: "4Gi",
+  });
   assert.ok(Object.isFrozen(settings));
   const refused = (value, pattern) => assert.throws(() => normalizeKubernetesSettings(value, base), pattern);
   refused({ token: "x" }, /'token' is unknown/);
@@ -323,6 +387,12 @@ test("Kubernetes settings pin the API server, namespace, image and nodes", () =>
   refused({ cpu: "2001m" }, /cpu/);
   refused({ memory: "4097Mi" }, /memory/);
   refused({ memory: "5Gi" }, /memory/);
+  refused({ cpu: "100m" }, /cpu/);
+  refused({ memory: "256Mi" }, /memory/);
+  refused({ ephemeralStorage: "512Mi" }, /ephemeralStorage/);
+  refused({ ephemeralStorage: "11Gi" }, /ephemeralStorage/);
+  refused({ ephemeralStorage: "4G" }, /ephemeralStorage/);
+  assert.equal(normalizeKubernetesSettings({ ephemeralStorage: "10Gi" }, base).ephemeralStorage, "10Gi");
   assert.equal(normalizeKubernetesSettings({ cpu: "2", memory: "4Gi" }, base).memory, "4Gi");
   assert.equal(normalizeKubernetesSettings({ cpu: "1500m", memory: "512Mi" }, base).cpu, "1500m");
   assert.deepEqual(
