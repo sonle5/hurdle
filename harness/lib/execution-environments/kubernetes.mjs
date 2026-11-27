@@ -163,7 +163,7 @@ function podManifest({ name, image, nodeSelector, maxLifetimeMs, cpu, memory, ep
       activeDeadlineSeconds: Math.ceil(maxLifetimeMs / 1000),
       terminationGracePeriodSeconds: 1,
       automountServiceAccountToken: false,
-      // Its own user namespace: root and SYS_ADMIN in the pod are not root on
+      // Its own user namespace: root and NET_ADMIN in the pod are not root on
       // the node.
       hostUsers: false,
       enableServiceLinks: false,
@@ -187,12 +187,13 @@ function podManifest({ name, image, nodeSelector, maxLifetimeMs, cpu, memory, ep
           requests: { cpu, memory, "ephemeral-storage": ephemeralStorage },
           limits: { cpu, memory, "ephemeral-storage": ephemeralStorage },
         },
-        // The sandbox bind-mounts the fixed workspace and installs its egress
-        // firewall itself, as root, as it does in Together's VM.
+        // The sandbox installs its egress firewall itself, as root, as it does
+        // in Together's VM. It stages the workspace in place rather than
+        // bind-mounting it, so it needs no SYS_ADMIN.
         securityContext: {
           runAsUser: 0,
           allowPrivilegeEscalation: true,
-          capabilities: { add: ["SYS_ADMIN", "NET_ADMIN"] },
+          capabilities: { add: ["NET_ADMIN"] },
           seccompProfile: { type: "RuntimeDefault" },
         },
       }],

@@ -213,7 +213,7 @@ test("a cell gets its own CPU-node pod and talks to it through the port-forward"
   assert.equal(container.lifecycle, undefined);
   assert.equal(container.workingDir, undefined);
   assert.equal(container.args, undefined);
-  assert.deepEqual(container.securityContext.capabilities, { add: ["SYS_ADMIN", "NET_ADMIN"] });
+  assert.deepEqual(container.securityContext.capabilities, { add: ["NET_ADMIN"] });
   assert.deepEqual(container.securityContext.seccompProfile, { type: "RuntimeDefault" });
   assert.equal(container.securityContext.privileged, undefined);
   assert.equal(pod.spec.volumes, undefined);
