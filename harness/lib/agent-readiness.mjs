@@ -6,12 +6,14 @@ import { checkPostgresCredential } from "./credential-preflight.mjs";
 import { findHostGuardianRuntime } from "./host-guardian-runtime.mjs";
 import { CLAUDE_CODE_JUDGE_MIN_VERSION, isClaudeCodeOauthToken } from "./judges/anthropic-json.mjs";
 import { listLocalCodexModels } from "./model-discovery.mjs";
+import { readDshProviders, resolveDshLaunch } from "./agent-adapters/dsh.mjs";
 import { cliExecutable, suiteCommand } from "./terminal-output.mjs";
 
 const nonblank = value => typeof value === "string" && value.trim().length > 0;
 const result = (status, code, message) => ({ status, code, message });
 const CLAUDE_RECOVERY = "Set a valid ANTHROPIC_API_KEY in .env.local, or unset it and set CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`. Hurdle uses isolated credentials rather than your interactive login.";
 const CODEX_RECOVERY = "Set CODEX_API_KEY or OPENAI_API_KEY in .env.local. Hurdle uses OpenAI API keys only, not ChatGPT access tokens or your interactive Codex login.";
+const DSH_RECOVERY = "Set it in .env.local. Hurdle passes DeepSeek Harness only the selected provider's key, not your ~/.dsh credentials.";
 
 // Probe only the executable, without credentials, project settings, or an Agent
 // prompt. Bound both process lifetime and captured output; never display it.
@@ -125,13 +127,15 @@ export async function checkAgentReadiness({
   };
   for (const adapterId of new Set(agentSelections.map(value => value.adapterId))) {
     const claude = adapterId === "claude-code";
-    const label = claude ? "Claude Code" : "Codex";
+    const dsh = adapterId === "dsh";
+    const codex = !claude && !dsh;
+    const label = claude ? "Claude Code" : dsh ? "DeepSeek Harness" : "Codex";
     if (runtimeProfile.environment.kind === "local") {
-      const installed = await probeCli(claude ? "claude" : "codex", runtimeEnv);
+      const installed = await probeCli(claude ? "claude" : dsh ? "dsh" : "codex", runtimeEnv);
       checks.push(result(installed ? "pass" : "fail", "agent.installed", installed
         ? `${label} executable is available.`
         : `${label} executable is missing or could not start. Install ${label} and ensure it is on PATH.`));
-      if (!claude && installed) {
+      if (codex && installed) {
         // Codex runs a model missing from its catalog with generic metadata
         // and without tools such as apply_patch. Older CLIs cannot list.
         const models = new Set(agentSelections.filter(value => value.adapterId === adapterId).map(value => value.requestedModel).filter(nonblank));
@@ -141,14 +145,37 @@ export async function checkAgentReadiness({
           checks.push(result("warning", "agent.model-unlisted", `The installed Codex does not list ${unlisted.join(", ")}, so it runs without that model's metadata and may lack tools such as apply_patch. Update Codex, or pick a model from \`${cliExecutable(cwd)} models --agent codex\`.`));
         }
       }
+    } else if (dsh) {
+      checks.push(result("fail", "agent.environment-unsupported", `${label} is not in the Together sandbox image yet. Run dsh Suites with the local runtime.`));
+      continue;
     } else {
       // A host CLI probe is inapplicable; run observes startup inside the VM.
       checks.push(result("skip", "agent.remote-unverified", claude && oauthJudge
         ? `${label} runs inside the Together sandbox.`
         : `${label} runs inside the Together sandbox; no local CLI installation needed.`));
     }
-    if (!claude && nonblank(runtimeEnv.CODEX_ACCESS_TOKEN)) {
+    if (codex && nonblank(runtimeEnv.CODEX_ACCESS_TOKEN)) {
       checks.push(result("warning", "auth.access-token-unsupported", "Codex · CODEX_ACCESS_TOKEN is ignored: Hurdle runs Codex with an OpenAI API key only."));
+    }
+    if (dsh) {
+      // Each selected model runs on one provider, which reads one key.
+      let keyNames;
+      try {
+        const providers = readDshProviders(runtimeEnv);
+        keyNames = [...new Set(agentSelections
+          .filter(value => value.adapterId === adapterId)
+          .map(value => resolveDshLaunch(providers, value.requestedModel ?? null, value.settings?.effort).apiKeyEnv))];
+      } catch (error) {
+        checks.push(result("fail", "agent.dsh-provider", `${label}: ${error.message}`));
+        continue;
+      }
+      for (const keyName of keyNames) {
+        // No provider check yet: presence is not proof of validity or balance.
+        checks.push(nonblank(runtimeEnv[keyName])
+          ? result("warning", "auth.key-unverified", `${label} · ${keyName} configured; live validity unverified.`)
+          : result("fail", "auth.missing", `${label} has no ${keyName} for its selected provider. ${DSH_RECOVERY}`));
+      }
+      continue;
     }
     const name = (claude
       ? ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]

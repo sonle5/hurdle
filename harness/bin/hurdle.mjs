@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { createClaudeCodeAdapter } from "../lib/agent-adapters/claude-code.mjs";
 import { createCodexAdapter } from "../lib/agent-adapters/codex.mjs";
+import { createDshAdapter } from "../lib/agent-adapters/dsh.mjs";
 import { createTogetherExecutionEnvironment, normalizeTogetherSettings } from "../lib/execution-environments/together.mjs";
 import { createLocalExecutionEnvironment } from "../lib/execution-environments/local.mjs";
 import { ANTHROPIC_JSON_JUDGE_ID, createAnthropicJsonJudge } from "../lib/judges/anthropic-json.mjs";
@@ -54,11 +55,13 @@ import {
 const FIRST_PARTY_AGENT_ADAPTERS = Object.freeze({
   "claude-code": createClaudeCodeAdapter,
   codex: createCodexAdapter,
+  dsh: createDshAdapter,
 });
 
 const AGENT_LABELS = Object.freeze({
   "claude-code": "Claude Code",
   codex: "Codex",
+  dsh: "DeepSeek Harness",
 });
 
 function plural(count, singular, pluralForm = `${singular}s`) {
@@ -276,7 +279,7 @@ const HELP_TEXT = Object.freeze({
     "Selection:",
     "  --task ID                   Select a Task; repeat to select more",
     "  --condition ID              Select a Condition; repeat to select more",
-    "  --agent claude-code|codex   Filter Suite Agents",
+    "  --agent claude-code|codex|dsh   Filter Suite Agents",
     "  --model MODEL               Override the selected runner's model",
     "                              Use --model -h for model guidance",
     "",
@@ -408,14 +411,16 @@ function writeModelHelp(command, options, agents, io) {
   const sample = agents.find(agent => agent.requestedModel !== null) ?? agents[0];
   const runner = options.agent ?? (runners.length > 1 ? sample?.adapterId : null);
   const example = `${executable} ${command} ${quoteCommandArgument(options.suite ?? "SUITE")}${runner ? ` --agent ${runner}` : ""} --model ${quoteCommandArgument(sample?.requestedModel ?? "MODEL")}`;
-  const choices = options.agent ? [options.agent] : runners.length ? runners : Object.keys(FIRST_PARTY_AGENT_ADAPTERS);
+  const choices = (options.agent ? [options.agent] : runners.length ? runners : Object.keys(FIRST_PARTY_AGENT_ADAPTERS))
+    .filter(agent => agent !== "dsh");
   io.stdout.write(terminalHeader(io.stdout)
     + `Usage:\n  hurdle ${command} [suite] --model MODEL\n\n`
     + "Use any model ID or alias supported by the selected runner.\n\n"
     + (agents.length ? `Suite defaults (${options.suite}):\n${suiteModelRows(agents).join("\n")}\n\n` : "")
     + `Example:\n  ${example}\n\n`
-    + `Discover model IDs:\n${choices.map(agent => `  ${executable} models --agent ${agent}`).join("\n")}\n\n`
-    + "With both runners in the Suite, select one with --agent claude-code or --agent codex.\n");
+    + (choices.length ? `Discover model IDs:\n${choices.map(agent => `  ${executable} models --agent ${agent}`).join("\n")}\n\n` : "")
+    + (runners.includes("dsh") || options.agent === "dsh" ? "dsh models are the ids its HURDLE_DSH_PROVIDERS providers list, or a DeepSeek model such as deepseek-flash.\n\n" : "")
+    + "With several runners in the Suite, select one with --agent claude-code, codex, or dsh.\n");
   return 0;
 }
 
@@ -565,6 +570,7 @@ function parseModelsArguments(args, io) {
     seen.add(option);
     if (option === "--agent") agent = args[++index];
   }
+  if (agent === "dsh") return invalid("DeepSeek Harness has no model catalog in Hurdle; supply --model MODEL directly (for example deepseek-flash).");
   if (!Object.hasOwn(FIRST_PARTY_AGENT_ADAPTERS, agent)) return invalid("Select an Agent: models --agent claude-code|codex [--all] [--json].");
   return { ok: true, agent, json, all: seen.has("--all") };
 }
@@ -816,7 +822,7 @@ function parseRunArguments(args, io, { validation = false } = {}) {
     return argumentError("--environment-settings must be a JSON object.", io);
   }
   if (values.agent !== undefined && !Object.hasOwn(FIRST_PARTY_AGENT_ADAPTERS, values.agent)) {
-    return argumentError("Agent filter must use 'claude-code' or 'codex'.", io);
+    return argumentError("Agent filter must use 'claude-code', 'codex', or 'dsh'.", io);
   }
   if (values.model !== undefined) {
     if (!values.model.trim()) return argumentError("--model requires a nonblank model ID.", io);
@@ -1476,7 +1482,7 @@ async function runCliMain(argv, io, dependencies) {
     const progressColor = terminalUsesColor(progressStream);
     const dim = (text) => paintRunOutput(text, "dim", progressColor);
     const cellLabel = (cell) => {
-      const agent = { "claude-code": "Claude Code", codex: "Codex" }[cell.adapterId] ?? cell.adapterId;
+      const agent = AGENT_LABELS[cell.adapterId] ?? cell.adapterId;
       const repeat = cell.repeatTotal > 1 ? ` · repeat ${cell.repeatOrdinal}/${cell.repeatTotal}` : "";
       return `[${cell.ordinal}/${cell.total}] ${cell.taskId} · ${cell.conditionId} · ${agent}${repeat}`;
     };

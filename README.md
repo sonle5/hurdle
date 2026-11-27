@@ -75,6 +75,7 @@ for Postgres.
 | --- | --- | --- |
 | Claude Code | `npx hurdle init` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` |
 | Codex | `npx hurdle init --agent codex` | `OPENAI_API_KEY` |
+| DeepSeek Harness | Set `runner: "dsh"` in a Suite ([authoring](docs/authoring.md#deepseek-harness)) | `DEEPSEEK_API_KEY`, or a provider's key |
 
 Local runs use the `claude` or `codex` command on your `PATH`. Install the one you
 need, and update Codex if `validate` says it does not list the starter model:
