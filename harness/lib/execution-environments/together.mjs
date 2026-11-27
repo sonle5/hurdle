@@ -91,13 +91,13 @@ export function agentCredentialSurrogate(value) {
   return agentCredentialStandIn(value, defaultEntropy);
 }
 
-function noEgress(reason = "unsupported-platform") {
+function noEgress(reason, environmentId) {
   return {
     status: "unavailable",
     reason,
     requests: [],
     provenance: {
-      producer: "together-execution-environment",
+      producer: `${environmentId}-execution-environment`,
       authority: "environment",
       lifecyclePhase: "execution",
       capturedAt: new Date().toISOString(),
@@ -209,28 +209,52 @@ function validProvider(provider) {
 export function createTogetherExecutionEnvironment({
   apiKey,
   provider: fixedProvider = null,
-  guardian = createTogetherGuardianController(),
   defaults = DEFAULT_SETTINGS,
-  captureMaxBytes = DEFAULT_CONTROLLER_CAPTURE_MAX_BYTES,
-  progressObserver = null,
-  entropy = defaultEntropy,
+  ...options
 } = {}) {
   if (typeof apiKey !== "string" || !apiKey.trim())
     throw new TypeError("Together Execution Environment requires an API key");
-  if (typeof entropy !== "function")
-    throw new TypeError("Together Execution Environment entropy must be a function");
-  if (["prepare", "attach", "seal"].some((method) => typeof guardian?.[method] !== "function"))
-    throw new TypeError("Together Execution Environment requires a Guardian controller");
   if (fixedProvider !== null && !validProvider(fixedProvider))
     throw new TypeError("Together Execution Environment requires a provider");
-  const provider = fixedProvider ?? createTogetherSocketProvider();
-  const normalizedDefaults = normalizeTogetherSettings(defaults);
-  const progress = normalizeExecutionProgressObserver(progressObserver);
-  // The socket provider reports workspace metadata.
-  const metadataSupported =
-    !fixedProvider || typeof fixedProvider.collectWorkspaceArtifactMetadata === "function";
-  return Object.freeze({
+  return createGuardedSandboxEnvironment({
+    ...options,
     id: "together",
+    label: "Together",
+    provider: fixedProvider ?? createTogetherSocketProvider(),
+    // The socket provider reports workspace metadata.
+    metadataSupported: !fixedProvider || typeof fixedProvider.collectWorkspaceArtifactMetadata === "function",
+    normalize: normalizeTogetherSettings,
+    defaults,
+    acquireOptions: { apiKey },
+  });
+}
+
+// A sandbox whose every egress flow crosses the controller-host Guardian.
+// `id` and `label` name it in results and messages; `normalize` checks its
+// settings; `acquireOptions` are passed to the provider with them.
+export function createGuardedSandboxEnvironment({
+  id,
+  label,
+  provider,
+  metadataSupported,
+  normalize,
+  defaults,
+  acquireOptions = {},
+  guardian = createTogetherGuardianController(),
+  captureMaxBytes = DEFAULT_CONTROLLER_CAPTURE_MAX_BYTES,
+  progressObserver = null,
+  entropy = defaultEntropy,
+}) {
+  if (typeof entropy !== "function")
+    throw new TypeError(`${label} Execution Environment entropy must be a function`);
+  if (["prepare", "attach", "seal"].some((method) => typeof guardian?.[method] !== "function"))
+    throw new TypeError(`${label} Execution Environment requires a Guardian controller`);
+  if (!validProvider(provider))
+    throw new TypeError(`${label} Execution Environment requires a provider`);
+  const normalizedDefaults = normalize(defaults);
+  const progress = normalizeExecutionProgressObserver(progressObserver);
+  return Object.freeze({
+    id,
     capabilities: Object.freeze([
       "environment.isolated-workspace",
       "environment.trusted-egress-capture",
@@ -245,24 +269,24 @@ export function createTogetherExecutionEnvironment({
       exchangeFacts: true,
     }),
     normalizeSettings: (settings) =>
-      normalizeTogetherSettings(settings, normalizedDefaults),
+      normalize(settings, normalizedDefaults),
     describeCapacity: (settings) =>
       deepFreeze({
-        maximumContinuousLifetimeMs: normalizeTogetherSettings(
+        maximumContinuousLifetimeMs: normalize(
           settings,
           normalizedDefaults,
         ).maxLifetimeMs,
       }),
     async execute(envelope) {
-      validateSandboxEnvelope(envelope, "Together");
+      validateSandboxEnvelope(envelope, label);
       if (envelope.workspaceArtifactMetadata && !metadataSupported)
         throw new TypeError(
-          "Together workspace artifact metadata is unsupported by this provider",
+          `${label} workspace artifact metadata is unsupported by this provider`,
         );
-      const settings = normalizeTogetherSettings(envelope.settings, normalizedDefaults);
+      const settings = normalize(envelope.settings, normalizedDefaults);
       // The socket carries no credential into the sandbox; the Guardian
       // delivers every one on the Task's API hosts.
-      const credentialBindings = sealCredentialBindings(envelope, { sandboxName: "Together" });
+      const credentialBindings = sealCredentialBindings(envelope, { sandboxName: label });
       return withExecutionCredentialValues(
         envelope,
         async (credentialValues) => {
@@ -270,7 +294,7 @@ export function createTogetherExecutionEnvironment({
           const stderr = createBoundedControllerCapture(captureMaxBytes);
           const integrityIssues = [];
           const captureRequired = envelope.capture.mode !== "none";
-          const egressCollections = [noEgress(captureRequired ? "capture-failed" : "unsupported-platform")];
+          const egressCollections = [noEgress(captureRequired ? "capture-failed" : "unsupported-platform", id)];
           const resources = [];
           let guardianSession;
           const workloadCredentials = Object.fromEntries(credentialBindings.map(({ environmentName, delivery }) => [
@@ -287,7 +311,7 @@ export function createTogetherExecutionEnvironment({
           let phase = "acquire";
           const reportStatus = (status) => reportExecutionProgress(progress, {
             kind: "environment-status", executionId: envelope.executionId,
-            environmentId: "together", status,
+            environmentId: id, status,
           });
           let artifacts = envelope.outputArtifacts.map((declaration) => ({
             ...declaration,
@@ -303,7 +327,7 @@ export function createTogetherExecutionEnvironment({
                   ? "environment.cancelled"
                   : `environment.${phase === "setup" ? "setup" : phase === "artifacts" ? "artifact-collection" : phase}-failed`,
                 phase,
-                `Together execution could not complete during ${phase}.`,
+                `${label} execution could not complete during ${phase}.`,
               ),
             );
           try {
@@ -327,8 +351,8 @@ export function createTogetherExecutionEnvironment({
             const allocatedAt = Date.now();
             resource = await provider.acquire({
               ...settings,
-              apiKey,
-              // Together's Hurdle API hands the Guardian CA to the sandbox.
+              ...acquireOptions,
+              // The provider hands the Guardian CA to the sandbox.
               caCertificate: guardianSession.caCertificate,
               signal: envelope.signal,
             });
@@ -336,9 +360,9 @@ export function createTogetherExecutionEnvironment({
             reportExecutionProgress(progress, {
               kind: "environment-resource-allocated",
               executionId: envelope.executionId,
-              environmentId: "together",
+              environmentId: id,
               resource: {
-                provider: "together",
+                provider: id,
                 role: "agent",
                 id: resource.sandboxId,
               },
@@ -365,7 +389,7 @@ export function createTogetherExecutionEnvironment({
                     program.maxElapsedMs < 1
                   )
                     throw new TypeError(
-                      "Together execution program is invalid",
+                      `${label} execution program is invalid`,
                     );
                   phase = "stage";
                   active(envelope.signal);
@@ -383,7 +407,7 @@ export function createTogetherExecutionEnvironment({
                     30_000;
                   if (remainingMs < 1000)
                     throw new Error(
-                      "Together lifetime is insufficient for execution and sealing",
+                      `${label} lifetime is insufficient for execution and sealing`,
                     );
                   reportStatus("agent-running");
                   const facts = await provider.run(resource, {
@@ -426,7 +450,7 @@ export function createTogetherExecutionEnvironment({
                     // Without capture hosts the journal is diagnostic only.
                     if (captureRequired)
                       integrityIssues.push(issue("environment.egress-seal-failed", "seal",
-                        "Together egress evidence could not be sealed."));
+                        `${label} egress evidence could not be sealed.`));
                   }
                   if (!process.quiescent)
                     integrityIssues.push(
@@ -471,7 +495,7 @@ export function createTogetherExecutionEnvironment({
             try { await guardian.close?.(guardianSession); }
             catch {
               integrityIssues.push(issue("environment.egress-relay-close-failed", "dispose",
-                "Together capture transport could not be closed."));
+                `${label} capture transport could not be closed.`));
             }
             for (const allocated of resources.reverse()) {
               try {
@@ -492,7 +516,7 @@ export function createTogetherExecutionEnvironment({
                   issue(
                     "environment.dispose-failed",
                     "dispose",
-                    "A Together sandbox could not be confirmed terminated.",
+                    `A ${label} sandbox could not be confirmed terminated.`,
                   ),
                 );
               }

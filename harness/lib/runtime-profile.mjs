@@ -12,6 +12,7 @@ import {
 } from "./judges/anthropic-json.mjs";
 
 import { normalizeTogetherSettings } from "./execution-environments/together.mjs";
+import { normalizeKubernetesSettings } from "./execution-environments/kubernetes.mjs";
 
 const MAX_PROFILE_BYTES = 256 * 1024;
 const MAX_JSON_DEPTH = 32;
@@ -263,7 +264,10 @@ function recoveryHint(sourcePath, cwd, removed) {
 }
 
 function normalizedEnvironment(value, sourcePath) {
-  exactObject(value, { allowed: ["kind", "apiKeyEnv", "settings"], required: ["kind"] }, sourcePath, "/environment");
+  exactObject(value, { allowed: ["kind", "apiKeyEnv", "tokenEnv", "settings"], required: ["kind"] }, sourcePath, "/environment");
+  if (value.kind !== "kubernetes" && Object.hasOwn(value, "tokenEnv")) {
+    schemaError("Only the Kubernetes Environment allows 'tokenEnv'.", sourcePath, "/environment/tokenEnv");
+  }
   if (value.kind === "local") {
     if (Object.hasOwn(value, "apiKeyEnv")) schemaError("Local Environment does not allow 'apiKeyEnv'.", sourcePath, "/environment/apiKeyEnv");
     const normalizedSettings = settings(value.settings ?? {}, sourcePath, "/environment/settings");
@@ -279,7 +283,15 @@ function normalizedEnvironment(value, sourcePath) {
     catch (error) { schemaError(error.message, sourcePath, "/environment/settings"); }
     return { kind: "together", apiKeyEnv: environmentName(value.apiKeyEnv, "Together apiKeyEnv", sourcePath, "/environment/apiKeyEnv"), settings: input };
   }
-  schemaError("Runtime Profile Environment kind must be 'local' or 'together'.", sourcePath, "/environment/kind");
+  if (value.kind === "kubernetes") {
+    if (Object.hasOwn(value, "apiKeyEnv")) schemaError("Kubernetes Environment does not allow 'apiKeyEnv'; name its API token with 'tokenEnv'.", sourcePath, "/environment/apiKeyEnv");
+    if (!Object.hasOwn(value, "tokenEnv")) schemaError("Kubernetes Environment requires 'tokenEnv'.", sourcePath, "/environment/tokenEnv");
+    const input = settings(value.settings ?? {}, sourcePath, "/environment/settings");
+    try { normalizeKubernetesSettings(input); }
+    catch (error) { schemaError(error.message, sourcePath, "/environment/settings"); }
+    return { kind: "kubernetes", tokenEnv: environmentName(value.tokenEnv, "Kubernetes tokenEnv", sourcePath, "/environment/tokenEnv"), settings: input };
+  }
+  schemaError("Runtime Profile Environment kind must be 'local', 'together' or 'kubernetes'.", sourcePath, "/environment/kind");
 }
 
 function normalizedResultStore(value, sourcePath) {
@@ -410,6 +422,9 @@ export function resolveRuntimeSecrets(profile, env = process.env, needs = {}) {
   const resolved = {};
   if (profile?.environment?.kind === "together" && needs.environment !== false) {
     resolved.togetherApiKey = resolveNamedSecret(profile.environment.apiKeyEnv, env);
+  }
+  if (profile?.environment?.kind === "kubernetes" && needs.environment !== false) {
+    resolved.kubernetesToken = resolveNamedSecret(profile.environment.tokenEnv, env);
   }
   if (profile?.resultStore?.kind === "postgres" && needs.resultStore !== false) {
     resolved.postgresDatabaseUrl = resolveNamedSecret(profile.resultStore.databaseUrlEnv, env);

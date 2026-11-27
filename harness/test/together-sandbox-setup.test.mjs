@@ -103,6 +103,30 @@ test("Together setup preserves an existing store, Judge and limits", async (t) =
   assert.equal(saved.viewer.port, 3022);
   assert.match(f.output(), /✓ Setup complete · Together sandbox configured\./);
 });
+test("Together setup leaves a Kubernetes Runtime unchanged", async (t) => {
+  const f = await fixture(t);
+  const config = {
+    schemaVersion: 1,
+    environment: {
+      kind: "kubernetes",
+      tokenEnv: "HURDLE_KUBERNETES_TOKEN",
+      settings: {
+        apiServer: "https://127.0.0.1:16443",
+        namespace: "hurdle",
+        image: `registry.test/hurdle-sandbox@sha256:${"a".repeat(64)}`,
+        nodeSelector: { workload: "app" },
+      },
+    },
+    resultStore: { kind: "local", root: "../../saved" },
+  };
+  await mkdir(join(f.root, ".hurdle/runtime"), { recursive: true });
+  const text = JSON.stringify(config);
+  await writeFile(f.runtimePath, text);
+  const cli = createFrameworkCli(f.dependencies);
+  assert.equal(await cli.main(["setup", "--sandbox", "together"], f.io), 1, f.output());
+  assert.match(f.output(), /already selects the Kubernetes sandbox/);
+  assert.equal(await readFile(f.runtimePath, "utf8"), text);
+});
 test("Together API setup configures a longer Guardian lifetime", async (t) => {
   const f = await fixture(t, "together-api");
   const cli = createFrameworkCli(f.dependencies);

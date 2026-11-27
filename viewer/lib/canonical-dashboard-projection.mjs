@@ -60,7 +60,7 @@ function projectRuntime(environment) {
   // Historical configuration comes only from this Run's immutable snapshot.
   const provider = environment?.environmentId;
   if (typeof provider !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(provider)) return null;
-  const labels = new Map([["together", "Together sandbox"], ["e2b", "E2B sandbox"], ["local", "Local"]]);
+  const labels = new Map([["together", "Together sandbox"], ["e2b", "E2B sandbox"], ["kubernetes", "Kubernetes sandbox"], ["local", "Local"]]);
   const selectedTemplate = provider === "together" ? environment.settings?.snapshotAlias
     : provider === "e2b" ? environment.settings?.workloadTemplate : null;
   const template = typeof selectedTemplate === "string"

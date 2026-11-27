@@ -174,6 +174,13 @@ export async function setupTogetherSandbox(
             resultStore: { kind: "local", root: "../together-results-v1" },
           }
         : JSON.parse(previous);
+    // Setup only writes Together; a Runtime that names another sandbox is
+    // the operator's own and stays as it is.
+    if (!removed && config.environment?.kind === "kubernetes")
+      throw setupError(
+        "setup.runtime-kubernetes",
+        `${runtimePath} already selects the Kubernetes sandbox; setup leaves it unchanged. Edit it, or pass --runtime with another file.`,
+      );
     const savedTogether = !removed && config.environment?.kind === "together";
     // Runs use Together's own Hurdle image over its socket; nothing is built.
     const settings = normalizeTogetherSettings({
