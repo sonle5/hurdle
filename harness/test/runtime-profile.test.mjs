@@ -169,6 +169,27 @@ test("Runtime Profile exposes a fixed Judge capability without reading its crede
   );
 });
 
+test("Runtime Profile names a Kubernetes Environment's API token and pins its cluster", () => {
+  const image = `registry.test/hurdle-sandbox@sha256:${"b".repeat(64)}`;
+  const read = (environment) => resolveRuntimeProfile(
+    { runtimePath: "runtime.json", cwd: "/workspace" },
+    { readFile: () => JSON.stringify({ schemaVersion: 1, environment, resultStore: { kind: "local", root: "results" } }) },
+  );
+  const settings = { apiServer: "https://10.0.0.1:6443", namespace: "hurdle", image, nodeSelector: { workload: "app" } };
+  const profile = read({ kind: "kubernetes", tokenEnv: "HURDLE_K8S_TOKEN", settings });
+  assert.equal(profile.environment.kind, "kubernetes");
+  assert.equal(profile.environment.tokenEnv, "HURDLE_K8S_TOKEN");
+  assert.deepEqual(resolveRuntimeSecrets(profile, { HURDLE_K8S_TOKEN: "cluster-secret" }), { kubernetesToken: "cluster-secret" });
+
+  const refused = (environment, pattern) => assert.throws(() => read(environment), (error) => (
+    error instanceof RuntimeProfileError && error.code === "runtime.profile-schema" && pattern.test(error.message)
+  ));
+  refused({ kind: "kubernetes", settings }, /requires 'tokenEnv'/);
+  refused({ kind: "kubernetes", apiKeyEnv: "HURDLE_K8S_TOKEN", tokenEnv: "HURDLE_K8S_TOKEN", settings }, /does not allow 'apiKeyEnv'/);
+  refused({ kind: "together", apiKeyEnv: "TOGETHER_KEY", tokenEnv: "HURDLE_K8S_TOKEN" }, /Only the Kubernetes Environment allows 'tokenEnv'/);
+  refused({ kind: "kubernetes", tokenEnv: "HURDLE_K8S_TOKEN", settings: { ...settings, image: "registry.test/hurdle-sandbox:latest" } }, /pinned by digest/);
+});
+
 test("Runtime Profile derives Viewer environment from only the selected Result Store", () => {
   const local = resolveRuntimeProfile({ command: "view", cwd: "/workspace" });
   assert.deepEqual(viewerStoreEnvironment(local), {

@@ -125,6 +125,7 @@ export async function checkAgentReadiness({
     verified.set(id, displayed);
     checks.push(displayed);
   };
+  const sandboxLabel = runtimeProfile.environment.kind === "kubernetes" ? "Kubernetes sandbox" : "Together sandbox";
   for (const adapterId of new Set(agentSelections.map(value => value.adapterId))) {
     const claude = adapterId === "claude-code";
     const dsh = adapterId === "dsh";
@@ -146,13 +147,13 @@ export async function checkAgentReadiness({
         }
       }
     } else if (dsh) {
-      checks.push(result("fail", "agent.environment-unsupported", `${label} is not in the Together sandbox image yet. Run dsh Suites with the local runtime.`));
+      checks.push(result("fail", "agent.environment-unsupported", `${label} is not in the ${sandboxLabel} image yet. Run dsh Suites with the local runtime.`));
       continue;
     } else {
       // A host CLI probe is inapplicable; run observes startup inside the VM.
       checks.push(result("skip", "agent.remote-unverified", claude && oauthJudge
-        ? `${label} runs inside the Together sandbox.`
-        : `${label} runs inside the Together sandbox; no local CLI installation needed.`));
+        ? `${label} runs inside the ${sandboxLabel}.`
+        : `${label} runs inside the ${sandboxLabel}; no local CLI installation needed.`));
     }
     if (codex && nonblank(runtimeEnv.CODEX_ACCESS_TOKEN)) {
       checks.push(result("warning", "auth.access-token-unsupported", "Codex · CODEX_ACCESS_TOKEN is ignored: Hurdle runs Codex with an OpenAI API key only."));
@@ -222,6 +223,15 @@ export async function checkAgentReadiness({
     checks.push(nonblank(runtimeEnv[runtimeProfile.environment.apiKeyEnv])
       ? result("skip", "runtime.together", "Together sandbox: key is checked when the run connects.")
       : result("fail", "runtime.together", "Together sandbox: sandbox API key is missing."));
+  } else if (runtimeProfile.environment.kind === "kubernetes") {
+    // Never create a pod here: the API server refuses a bad token when the
+    // run creates the first one.
+    const tokenEnv = runtimeProfile.environment.tokenEnv;
+    checks.push(nonblank(runtimeEnv[tokenEnv])
+      ? result("skip", "runtime.kubernetes", "Kubernetes sandbox: API token is checked when the run creates its first pod.")
+      : result("fail", "runtime.kubernetes", `Kubernetes sandbox: ${tokenEnv} is missing.`));
+  }
+  if (runtimeProfile.environment.kind !== "local") {
     // Setup installs the Guardian after readiness passes.
     if (!allowHostGuardianSetup) {
       checks.push(findHostGuardian()

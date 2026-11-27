@@ -53,7 +53,7 @@ export function createViewerOnboarding({ cwd, suite, runtimeProfile, storeOverri
   const name = match && !match.ambiguous && !match.name.startsWith("-") ? match.name : selected;
   const suiteArg = createdDefault || selected === defaultSuite ? "" : ` ${quoteCommandArgument(name)}`;
   const setupCommand = `npx hurdle setup${suiteArg}`;
-  const runtimeLabel = runtimeProfile.environment.kind === "together" ? "Together sandbox" : "Local";
+  const runtimeLabel = { together: "Together sandbox", kubernetes: "Kubernetes sandbox" }[runtimeProfile.environment.kind] ?? "Local";
   const context = { projectDirectory: cwd, commands: null, setupCommand, runtimeLabel };
   // Preserve the selected store: an override of a saved remote Runtime cannot
   // be replayed safely without its execution configuration.

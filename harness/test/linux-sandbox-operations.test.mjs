@@ -367,3 +367,116 @@ test("the Agent runner passes the plan's principal and command to setpriv", asyn
   ]);
   assert.equal(readFileSync(join(root, "stdin.txt"), "utf8"), "prompt bytes");
 });
+
+// A sandbox that may not bind-mount (a Kubernetes pod in its own user namespace
+// under the runtime's default AppArmor profile) stages the workspace at the
+// fixed path itself, and every run checks it is still the Agent's own.
+function recordingWorkload() {
+  const workload = censusWorkload();
+  const commands = [];
+  const run = workload.commands.run;
+  workload.commands.run = async (command, options = {}) => {
+    commands.push({ command, cwd: options.cwd });
+    return run(command, options);
+  };
+  return { workload, commands };
+}
+
+const FIXED_LAYOUT = { schemaVersion: 1, workingDirectory: "/home/user/workspace", homeDirectory: "/home/user", temporaryDirectory: "/tmp" };
+
+test("staged in place, the fixed workspace is the staged directory and is never bind-mounted", async () => {
+  const { workload, commands } = recordingWorkload();
+  const operations = createLinuxSandboxOperations({ stagedInPlace: true });
+  await operations.stage(workload, { fixtures: [], workspaceFiles: [] });
+  await operations.run(workload, agentLaunch({ workspaceLayout: FIXED_LAYOUT }));
+
+  const all = commands.map(({ command }) => command).join("\n");
+  assert.doesNotMatch(all, /mount --bind|\/tmp\/tae-e2b/);
+  assert.match(all, /raise SystemExit\("fixed workspace already exists"\)/);
+  assert.match(all, /install -d -o tae-agent -g "\$agent_group" -m 0700 \/home\/user\/workspace /);
+  assert.match(all, /raise SystemExit\("fixed workspace is not the Agent's private directory"\)/);
+  assert.equal(commands.find(({ command }) => command.includes("/run.mjs")).cwd, "/home/user/workspace");
+  const launch = JSON.parse(writtenEnding(workload, "/launch.json"));
+  assert.equal(launch.cwd, "/home/user/workspace");
+  assert.equal(launch.env.HOME, "/home/user");
+});
+
+test("the default operations still stage under /tmp/tae-e2b and bind-mount the fixed workspace", async () => {
+  const { workload, commands } = recordingWorkload();
+  const operations = createLinuxSandboxOperations();
+  await operations.stage(workload, { fixtures: [], workspaceFiles: [] });
+  await operations.run(workload, agentLaunch({ workspaceLayout: FIXED_LAYOUT }));
+  const all = commands.map(({ command }) => command).join("\n");
+  assert.match(all, /mount --bind \/tmp\/tae-e2b\/workspace \/home\/user\/workspace/);
+  assert.equal(commands.find(({ command }) => command.includes("/run.mjs")).cwd, "/tmp/tae-e2b/workspace");
+});
+
+// Runs the in-place checks' Python against a temporary tree, with the fixed
+// paths and the Agent's name swapped for the tree and this user.
+test("the in-place workspace checks refuse what the Agent could replace", { skip: !python3 && "python3 is unavailable" }, async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "hurdle-in-place-"));
+  t.after(() => { chmodSync(root, 0o700); rmSync(root, { recursive: true, force: true }); });
+  const { workload, commands } = recordingWorkload();
+  const operations = createLinuxSandboxOperations({ stagedInPlace: true });
+  await operations.stage(workload, { fixtures: [], workspaceFiles: [] });
+  await operations.run(workload, agentLaunch({ workspaceLayout: FIXED_LAYOUT }));
+  const python = (marker) => {
+    const command = commands.map(({ command: c }) => c).find((c) => c.includes(marker));
+    const source = command.slice(command.indexOf("<<'PY'\n") + 7, command.indexOf("\nPY", command.indexOf("<<'PY'\n")));
+    const user = spawnSync("id", ["-un"], { encoding: "utf8" }).stdout.trim();
+    return source.replaceAll('"/home/user', JSON.stringify(root).slice(0, -1)).replace('getpwnam("tae-agent")', `getpwnam(${JSON.stringify(user)})`);
+  };
+  const before = python("fixed workspace already exists");
+  const each = python("not the Agent's private directory");
+  const check = (source) => spawnSync("python3", ["-I", "-c", source], { encoding: "utf8" });
+  const target = join(root, "workspace");
+
+  chmodSync(root, 0o755);
+  assert.match(check(before).stderr, /parent directory is writable by the Agent/);
+  chmodSync(root, 0o555);
+  assert.equal(check(before).status, 0, check(before).stderr);
+  chmodSync(root, 0o755);
+  spawnSync("mkdir", ["-m", "0700", target]);
+  chmodSync(root, 0o555);
+  assert.match(check(before).stderr, /fixed workspace already exists/);
+  assert.equal(check(each).status, 0, check(each).stderr);
+  chmodSync(target, 0o755);
+  assert.match(check(each).stderr, /not the Agent's private directory/);
+  chmodSync(target, 0o700);
+  // Owned by someone other than the Agent.
+  assert.match(check(each.replace(/getpwnam\("[^"]+"\)/, 'getpwnam("root")')).stderr, /not the Agent's private directory|writable by the Agent/);
+  chmodSync(root, 0o755);
+  rmSync(target, { recursive: true });
+  spawnSync("ln", ["-s", tmpdir(), target]);
+  chmodSync(root, 0o555);
+  assert.match(check(each).stderr, /target cannot be a symlink/);
+});
+
+test("staged in place, a run without the fixed layout still checks the workspace", async () => {
+  const { workload, commands } = recordingWorkload();
+  await createLinuxSandboxOperations({ stagedInPlace: true }).run(workload, agentLaunch());
+  assert.ok(commands.some(({ command }) => command.includes("not the Agent's private directory")));
+  const launch = JSON.parse(writtenEnding(workload, "/launch.json"));
+  assert.equal(launch.cwd, "/home/user/workspace");
+  assert.equal(launch.env.HOME, "/home/user/workspace/.home");
+  assert.equal(launch.env.TMPDIR, "/home/user/workspace/.tmp");
+});
+
+test("staged in place, artifact and metadata collection read the fixed workspace", async () => {
+  const helpers = {};
+  const workload = {
+    commands: { run: async () => ({ exitCode: 0 }) },
+    files: {
+      async write(path, data) { helpers[path] = data; },
+      async read() { return "[]"; },
+    },
+  };
+  const operations = createLinuxSandboxOperations({ stagedInPlace: true });
+  await operations.collectArtifacts(workload, []).catch(() => {});
+  await operations.collectWorkspaceArtifactMetadata(workload).catch(() => {});
+  for (const suffix of ["collect-artifacts.py", "collect-workspace-metadata.py"]) {
+    const [, source] = Object.entries(helpers).find(([path]) => path.endsWith(suffix));
+    assert.match(source, /\/home\/user\/workspace/);
+    assert.doesNotMatch(source, /\/tmp\/tae-e2b\/workspace/);
+  }
+});

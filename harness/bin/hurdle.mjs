@@ -8,6 +8,7 @@ import { createClaudeCodeAdapter } from "../lib/agent-adapters/claude-code.mjs";
 import { createCodexAdapter } from "../lib/agent-adapters/codex.mjs";
 import { createDshAdapter } from "../lib/agent-adapters/dsh.mjs";
 import { createTogetherExecutionEnvironment, normalizeTogetherSettings } from "../lib/execution-environments/together.mjs";
+import { createKubernetesExecutionEnvironment, normalizeKubernetesSettings } from "../lib/execution-environments/kubernetes.mjs";
 import { createLocalExecutionEnvironment } from "../lib/execution-environments/local.mjs";
 import { ANTHROPIC_JSON_JUDGE_ID, createAnthropicJsonJudge } from "../lib/judges/anthropic-json.mjs";
 import { resolveAuthoritySelections } from "../lib/authority-profile.mjs";
@@ -132,6 +133,7 @@ const PRODUCTION_DEPENDENCIES = Object.freeze({
   createRunEngine,
   createLocalExecutionEnvironment,
   createTogetherExecutionEnvironment,
+  createKubernetesExecutionEnvironment,
   createAnthropicJsonJudge,
   resolveV1Suite,
   launchViewer: launchFirstPartyViewer,
@@ -635,7 +637,9 @@ function readRuntimeInfo(runtimePath, cwd) {
   const runtime = resolveRuntimeProfile({ runtimePath: runtimePath ?? projectRuntimePath(cwd) ?? undefined, cwd });
   const { environment } = runtime;
   try {
-    const settings = environment.kind === "together" ? normalizeTogetherSettings(environment.settings) : environment.settings;
+    const settings = environment.kind === "together" ? normalizeTogetherSettings(environment.settings)
+      : environment.kind === "kubernetes" ? normalizeKubernetesSettings(environment.settings)
+        : environment.settings;
     return { ...runtime, environment: { ...environment, settings } };
   } catch (error) {
     if (!(error instanceof RunSelectionInputError)) throw error;
@@ -697,6 +701,13 @@ function runtimeInfoRows(runtime, cwd) {
     const lifetime = settings.maxLifetimeMs % 60_000 === 0 ? `${settings.maxLifetimeMs / 60_000}m` : `${settings.maxLifetimeMs / 1000}s`;
     // Together sizes its own image.
     rows.push(["Limits", `${lifetime} max`]);
+  }
+  if (environment.kind === "kubernetes") {
+    rows.push(
+      ["Cluster", `${settings.apiServer} · ${settings.namespace}`],
+      ["Image", settings.image],
+      ["Limits", `${settings.maxLifetimeMs % 60_000 === 0 ? `${settings.maxLifetimeMs / 60_000}m` : `${settings.maxLifetimeMs / 1000}s`} max`],
+    );
   }
   if (resultStore.kind === "postgres") {
     rows.push(["Database", `${resultStore.databaseUrlEnv} (environment variable)`], ["Artifacts", displayPath(resultStore.artifactRoot)]);
@@ -1313,7 +1324,7 @@ async function runCliMain(argv, io, dependencies) {
         "environment.trusted-egress-capture", "environment.trusted-request-blocking",
       ].includes(requirement))
     ))) {
-      writeError(io, `hurdle [runtime.capture-required] Selected Tasks require trusted API capture or request blocking. Run \`${suiteCommand("setup", options.suite, { cwd: io.cwd })}\` to configure the Together sandbox, or select a Together Runtime with --runtime. No evaluation started.\n`);
+      writeError(io, `hurdle [runtime.capture-required] Selected Tasks require trusted API capture or request blocking. Run \`${suiteCommand("setup", options.suite, { cwd: io.cwd })}\` to configure the Together sandbox, or select a Together or Kubernetes Runtime with --runtime. No evaluation started.\n`);
       disposeAuthoredSuite();
       return 1;
     }
@@ -1418,6 +1429,7 @@ async function runCliMain(argv, io, dependencies) {
         "Agent",
         ...(authorityNeedsJudge ? ["Judge"] : []),
         ...(runtimeProfile.environment.kind === "together" ? ["Together sandbox"] : []),
+        ...(runtimeProfile.environment.kind === "kubernetes" ? ["Kubernetes sandbox"] : []),
         ...(selectedCredentialNames.size > 0 ? ["external API"] : []),
       ];
       const serviceText = services.length === 1
@@ -1607,7 +1619,13 @@ async function runCliMain(argv, io, dependencies) {
         )),
         executionEnvironment: runtimeProfile.environment.kind === "together"
           ? dependencies.createTogetherExecutionEnvironment({ apiKey: runtimeSecrets.togetherApiKey, progressObserver })
-          : dependencies.createLocalExecutionEnvironment(),
+          : runtimeProfile.environment.kind === "kubernetes"
+            ? dependencies.createKubernetesExecutionEnvironment({
+              token: runtimeSecrets.kubernetesToken,
+              settings: runtimeProfile.environment.settings,
+              progressObserver,
+            })
+            : dependencies.createLocalExecutionEnvironment(),
         ...(judge === null ? {} : { judge }),
         progressObserver,
       });

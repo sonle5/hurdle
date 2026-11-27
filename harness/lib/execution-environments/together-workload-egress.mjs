@@ -35,9 +35,10 @@ JS`, { user: "root", timeoutMs: 15000, signal,
 }
 
 // The SDK root-exec endpoint must never be accessible to the Agent.
-export async function blockSandboxAgentPort(workload, signal) {
+// `firewallSuffix` picks the iptables backend ("-legacy" or "" for nftables).
+export async function blockSandboxAgentPort(workload, signal, firewallSuffix = "-legacy") {
   await workload.commands.run(`set -eu
-for binary in /usr/sbin/iptables-legacy /usr/sbin/ip6tables-legacy; do
+for binary in /usr/sbin/iptables${firewallSuffix} /usr/sbin/ip6tables${firewallSuffix}; do
   "$binary" --wait 5 -I OUTPUT 1 -p tcp --dport 57468 -j DROP
   "$binary" --wait 5 -C OUTPUT -p tcp --dport 57468 -j DROP
 done`, { user: "root", timeoutMs: 10000, signal });

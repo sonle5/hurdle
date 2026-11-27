@@ -80,7 +80,16 @@ The server answers each with `{"op":"done","id",value}` or
 named streams and ends them when the step ends; for `write` Hurdle ends the stream
 after the file's bytes; for `read` the server does. A step's `job.kind` is one of
 `setup`, `stage`, `agent`, `collect`, `metadata`. Writes are confined to the task
-root and reads to the sealed artifact root; anything else is refused.
+root and reads to the sealed artifact root; anything else is refused. Setup runs
+once per sandbox; a second `setup` is refused.
+
+The same server runs in a Kubernetes pod (`kind: "kubernetes"`), reached through
+the API server's port-forward. There the controller's setup job carries
+`"sandbox":"kubernetes"`: the pod adds only `NET_ADMIN`, so the sandbox stages the
+workspace in place at `/home/user/workspace` instead of bind-mounting it, and
+seals its firewall with `iptables-nft` and `ip6tables-nft`. Before the Agent
+starts, the workspace is checked again: it must be the Agent's own `0700`
+directory under a root-owned parent the Agent cannot write to. Any other `sandbox` value is refused.
 
 **Egress.** Every stream the server opens is one TCP connection the Agent made to
 the sandbox's loopback proxy port, carried verbatim: its first bytes are the

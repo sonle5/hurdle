@@ -157,6 +157,26 @@ test("remote readiness diagnoses account failures and blocks unconfigured stores
   }
 });
 
+test("Kubernetes readiness needs the named API token and the host Guardian, and creates no pod", async () => {
+  const runtimeProfile = { environment: { kind: "kubernetes", tokenEnv: "K8S_TOKEN" }, resultStore: { kind: "local" } };
+  const check = (env, guardian) => checkAgentReadiness({ ...input({ CLAUDE_CODE_OAUTH_TOKEN: "token", ...env }), runtimeProfile }, {
+    probeCli() { assert.fail("Local executable does not establish sandbox readiness"); },
+    fetch() { assert.fail("Readiness does not call the cluster"); },
+    findHostGuardian: () => guardian,
+  });
+  const ready = await check({ K8S_TOKEN: "cluster-secret" }, {});
+  assert.equal(ready.ok, true);
+  assert.equal(ready.checks.find(value => value.code === "runtime.kubernetes").status, "skip");
+  assert.equal(ready.checks.find(value => value.code === "runtime.host-guardian").status, "pass");
+  assert.equal(ready.checks.find(value => value.code === "agent.remote-unverified").message,
+    "Claude Code runs inside the Kubernetes sandbox; no local CLI installation needed.");
+  assert.doesNotMatch(JSON.stringify(ready), /cluster-secret/);
+  const missing = await check({}, null);
+  assert.equal(missing.ok, false);
+  assert.match(missing.checks.find(value => value.code === "runtime.kubernetes").message, /K8S_TOKEN is missing/);
+  assert.equal(missing.checks.find(value => value.code === "runtime.host-guardian").status, "fail");
+});
+
 test("Local Codex readiness warns when the installed CLI does not list the selected model", async () => {
   const listings = [];
   const check = (models, { installed = true, listed = ["gpt-5.5", "gpt-5.4"] } = {}) => checkAgentReadiness({

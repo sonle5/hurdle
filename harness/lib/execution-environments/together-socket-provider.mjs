@@ -106,7 +106,9 @@ function textSink(callback) {
   };
 }
 
-function createSocketResource(socket) {
+// `label` names the sandbox provider in operator-facing errors; `sandbox`, when
+// set, tells the server which kind of sandbox it runs in.
+export function createSocketResource(socket, { label = "Together", sandbox } = {}) {
   const pending = new Map();
   const flows = new Set();
   let nextId = 1;
@@ -137,12 +139,12 @@ function createSocketResource(socket) {
     if (!request) return;
     pending.delete(message.id);
     if (message.op === "done") request.resolve(message.value);
-    else request.reject(new Error(message.message ?? "Together sandbox operation failed"));
+    else request.reject(new Error(message.message ?? `${label} sandbox operation failed`));
   }, () => socket.terminate());
 
   socket.once("close", () => {
     closed = true;
-    failure ||= new Error("Together sandbox connection closed");
+    failure ||= new Error(`${label} sandbox connection closed`);
     for (const request of pending.values()) request.reject(failure);
     pending.clear();
     for (const tcp of [...flows]) tcp.destroy();
@@ -168,7 +170,7 @@ function createSocketResource(socket) {
       pending.set(id, { resolve: done(resolve), reject: done(reject) });
       timer = setTimeout(() => {
         resource.close();
-        reject(Object.assign(new Error("Together sandbox operation timed out"), { name: "TimeoutError" }));
+        reject(Object.assign(new Error(`${label} sandbox operation timed out`), { name: "TimeoutError" }));
       }, timeoutMs);
       signal?.addEventListener("abort", onAbort, { once: true });
       const named = Object.fromEntries(Object.entries(streams).map(([name, stream]) => [name, stream.id]));
@@ -204,7 +206,7 @@ function createSocketResource(socket) {
     },
     async attachEgress({ hosts, openUpstream: upstream, signal }) {
       openUpstream = upstream;
-      await resource.step({ kind: "setup", hosts }, { signal });
+      await resource.step({ kind: "setup", hosts, ...(sandbox ? { sandbox } : {}) }, { signal });
     },
     assertEgressHealthy() {
       if (closed) throw failure;
@@ -225,17 +227,10 @@ async function upload(resource, root, bytes, name, signal) {
   return path;
 }
 
-export function createTogetherSocketProvider({
-  runUrl = togetherRunUrl, taskRoot = TASK_ROOT, artifactRoot = ARTIFACT_ROOT,
-  connectTimeoutMs = CONNECT_TIMEOUT_MS,
-} = {}) {
-  return Object.freeze({
-    // Agent and Suite credentials reach the sandbox only as surrogates the
-    // Guardian swaps on egress, never as environment values.
-    sealedOnly: true,
-    async acquire({ apiKey, caCertificate, signal }) {
-      return createSocketResource(await connect(runUrl(), apiKey, caCertificate, signal, connectTimeoutMs));
-    },
+// Staging, the Agent run and result collection over a socket resource, shared
+// by every provider whose sandbox runs hurdle-sandbox-server.mjs.
+export function socketSandboxOperations({ taskRoot = TASK_ROOT, artifactRoot = ARTIFACT_ROOT, label = "Together" } = {}) {
+  return {
     async stage(resource, { fixtures, workspaceFiles, signal }) {
       // Inputs are pinned on this host; the sandbox re-verifies each digest.
       const staged = [];
@@ -274,17 +269,17 @@ export function createTogetherSocketProvider({
       validateArtifactDeclarations(declarations);
       const { artifacts } = await resource.step({ kind: "collect", declarations });
       if (!Array.isArray(artifacts) || artifacts.length !== declarations.length)
-        throw new Error("Together artifact manifest does not match its declarations");
+        throw new Error(`${label} artifact manifest does not match its declarations`);
       const collected = [];
       for (const [index, artifact] of artifacts.entries()) {
         const declaration = declarations[index];
         if (artifact?.path !== declaration.path)
-          throw new Error("Together artifact manifest contains an undeclared result");
+          throw new Error(`${label} artifact manifest contains an undeclared result`);
         if (artifact.status !== "captured") {
           collected.push(artifact);
           continue;
         }
-        if (artifact.index !== index) throw new Error("Together artifact manifest escaped its sealed path");
+        if (artifact.index !== index) throw new Error(`${label} artifact manifest escaped its sealed path`);
         const { index: _index, ...result } = artifact;
         const bytes = await resource.read(`${artifactRoot}/${index}`);
         if (
@@ -310,6 +305,21 @@ export function createTogetherSocketProvider({
     async collectWorkspaceArtifactMetadata(resource) {
       return (await resource.step({ kind: "metadata" })).metadata;
     },
+  };
+}
+
+export function createTogetherSocketProvider({
+  runUrl = togetherRunUrl, taskRoot = TASK_ROOT, artifactRoot = ARTIFACT_ROOT,
+  connectTimeoutMs = CONNECT_TIMEOUT_MS,
+} = {}) {
+  return Object.freeze({
+    // Agent and Suite credentials reach the sandbox only as surrogates the
+    // Guardian swaps on egress, never as environment values.
+    sealedOnly: true,
+    async acquire({ apiKey, caCertificate, signal }) {
+      return createSocketResource(await connect(runUrl(), apiKey, caCertificate, signal, connectTimeoutMs));
+    },
+    ...socketSandboxOperations({ taskRoot, artifactRoot }),
     // Together's Hurdle API terminates the sandbox when its connection ends.
     async dispose(resource) {
       resource.close();

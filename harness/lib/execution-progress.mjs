@@ -2,6 +2,7 @@ import { stripVTControlCharacters } from "node:util";
 
 const VERDICTS = new Set(["pass", "fail", "incomplete", "unknown"]);
 const RESOURCE_ROLES = new Set(["guardian", "agent"]);
+const SANDBOX_ENVIRONMENTS = new Set(["together", "kubernetes"]);
 const CHECK_OUTCOMES = new Set(["pass", "fail", "skip"]);
 const CHECK_AUTHORITIES = new Set(["required", "advisory", "disabled"]);
 // Same bound as the Judge projection; the terminal reports any remainder as a count.
@@ -122,7 +123,7 @@ function projectEvent(value) {
       ? Object.freeze({ kind: value.kind, cell, executionId: value.executionId }) : null;
   }
   if (value.kind === "environment-status") {
-    if (value.environmentId !== "together"
+    if (!SANDBOX_ENVIRONMENTS.has(value.environmentId)
       || !boundedText(value.executionId)
       || typeof value.status !== "string"
       || !Object.hasOwn(ENVIRONMENT_STATUS_LABELS, value.status)) return null;
@@ -132,7 +133,7 @@ function projectEvent(value) {
   if (value.kind === "environment-resource-allocated") {
     const resource = value.resource;
     if (
-      value.environmentId !== "together"
+      !SANDBOX_ENVIRONMENTS.has(value.environmentId)
       || !boundedText(value.executionId)
       || !resource
       || typeof resource !== "object"
