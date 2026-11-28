@@ -34,6 +34,7 @@ async function fakeCluster(t, {
   lingerPolls = 0,
   quotaFullCreates = 0,
   hangGets = false,
+  runTask = async () => ({ ok: true }),
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), "hurdle-k8s-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -46,6 +47,8 @@ async function fakeCluster(t, {
   let portForwards = 0;
   let deletes = 0;
   let creates = 0;
+  let refuseForwards = false;
+  const forwards = new Set();
   const hung = [];
   const authorized = (request) => request.headers.authorization === `Bearer ${API_TOKEN}`;
   const podPath = /^\/api\/v1\/namespaces\/hurdle\/pods(?:\/([a-z0-9-]+))?(?:\/(portforward))?$/;
@@ -79,12 +82,14 @@ async function fakeCluster(t, {
       const controlToken = pod.spec.containers[0].env.find((entry) => entry.name === "HURDLE_SANDBOX_CONTROL_TOKEN").value;
       const server = createSandboxServer({
         controlToken,
-        runTask: async (job) => { jobs.push(job); return { ok: true }; },
+        runTask: async (job, callbacks) => { jobs.push(job); return runTask(job, callbacks); },
         port: 0,
         flowPort: 0,
         caPath: join(taskRoot, "guardian-ca.pem"),
         writeRoots: [taskRoot],
         readRoots: [artifactRoot],
+        // As the pod's bin starts it: a dropped controller may come back.
+        reconnectWindowMs: 60_000,
       });
       const { port } = await server.listen({ host: "127.0.0.1" });
       pods.set(pod.metadata.name, { pod, server, port, polls: 0 });
@@ -128,7 +133,7 @@ async function fakeCluster(t, {
       const portFrame = (channel) => Buffer.from([channel, 18083 & 0xff, 18083 >> 8]);
       ws.send(portFrame(0));
       ws.send(portFrame(1));
-      if (portForwards <= refusePortForward) {
+      if (portForwards <= refusePortForward || refuseForwards) {
         // As kubelet reports a port nothing listens on yet.
         ws.send(Buffer.concat([Buffer.from([1]), Buffer.from("connection refused")]));
         ws.close();
@@ -136,6 +141,8 @@ async function fakeCluster(t, {
       }
       // A sandbox that accepts the stream but never answers the upgrade.
       if (hangSandbox) return;
+      forwards.add(ws);
+      ws.once("close", () => forwards.delete(ws));
       const tcp = net.connect(entry.port, "127.0.0.1");
       tcp.on("data", (data) => ws.send(Buffer.concat([Buffer.from([0]), data])));
       tcp.on("close", () => ws.close());
@@ -161,6 +168,9 @@ async function fakeCluster(t, {
     portForwards: () => portForwards,
     deletes: () => deletes,
     creates: () => creates,
+    // As a port-forward drops when the API server restarts or the network blips.
+    dropPortForwards: () => { for (const ws of forwards) ws.terminate(); },
+    refuseForwards: (value) => { refuseForwards = value; },
   };
 }
 
@@ -172,6 +182,12 @@ function provider(cluster, options = {}) {
     artifactRoot: cluster.artifactRoot,
     ...options,
   });
+}
+
+async function until(predicate) {
+  for (let attempt = 0; attempt < 200 && !predicate(); attempt += 1)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  return predicate();
 }
 
 const acquireOptions = (cluster) => ({
@@ -236,6 +252,16 @@ test("a cell gets its own CPU-node pod and talks to it through the port-forward"
   assert.equal(await pods.isDisposed(resource), true);
 });
 
+test("the pod's deadline follows a lifetime up to 26 hours", async (t) => {
+  const cluster = await fakeCluster(t);
+  const pods = provider(cluster);
+  const resource = await pods.acquire({ ...acquireOptions(cluster), maxLifetimeMs: 93_600_000 });
+  t.after(() => resource.close());
+  const [{ pod }] = cluster.pods.values();
+  assert.equal(pod.spec.activeDeadlineSeconds, 93_600);
+  await pods.dispose(resource);
+});
+
 test("the port-forward is retried until the sandbox server listens", async (t) => {
   const cluster = await fakeCluster(t, { refusePortForward: 2 });
   const pods = provider(cluster);
@@ -243,6 +269,82 @@ test("the port-forward is retried until the sandbox server listens", async (t) =
   t.after(() => resource.close());
   assert.equal(cluster.portForwards(), 3);
   assert.deepEqual(await resource.step({ kind: "noop" }), { ok: true });
+});
+
+test("a dropped port-forward is re-established and the run resumes", async (t) => {
+  let release;
+  const cluster = await fakeCluster(t, {
+    runTask: async (job, { onStdout }) => {
+      if (job.kind !== "wait") return { ok: true };
+      await new Promise((resolve) => { release = resolve; });
+      onStdout("after\n");
+      return { waited: true };
+    },
+  });
+  const pods = provider(cluster);
+  const resource = await pods.acquire(acquireOptions(cluster));
+  t.after(() => resource.close());
+  assert.deepEqual(await resource.step({ kind: "noop" }), { ok: true });
+
+  // Dropped while idle: nothing failed, so the drop alone does not taint the run.
+  cluster.dropPortForwards();
+  assert.equal(await until(() => resource.connectionIssues.length === 2), true);
+  assert.deepEqual(await resource.step({ kind: "noop" }), { ok: true });
+  assert.equal(cluster.portForwards(), 2);
+  assert.deepEqual(resource.connectionIssues.map(({ code, effect }) => [code, effect]), [
+    ["environment.connection-dropped", "unknown"],
+    ["environment.connection-resumed", "unknown"],
+  ]);
+
+  // Dropped while a step runs: the step's reply arrives on the new connection,
+  // but what it wrote meanwhile is gone, so the drop makes the run incomplete.
+  const output = [];
+  const step = resource.step({ kind: "wait" }, { onStdout: (text) => output.push(text) });
+  assert.equal(await until(() => typeof release === "function"), true);
+  cluster.dropPortForwards();
+  assert.equal(await until(() => resource.connectionIssues.length === 4), true);
+  release();
+  assert.deepEqual(await step, { waited: true });
+  assert.deepEqual(output, []);
+  assert.deepEqual(resource.connectionIssues.slice(2).map(({ code, effect }) => [code, effect]), [
+    ["environment.connection-dropped", "incomplete"],
+    ["environment.connection-resumed", "unknown"],
+  ]);
+  assert.match(resource.connectionIssues[2].message, /output the running step wrote/);
+  await pods.dispose(resource);
+});
+
+test("a pod that cannot be reached again within the window stops the run as the platform's failure", async (t) => {
+  const cluster = await fakeCluster(t);
+  const pods = provider(cluster, { reconnectWindowMs: 200 });
+  const resource = await pods.acquire(acquireOptions(cluster));
+  t.after(() => resource.close());
+  cluster.refuseForwards(true);
+  cluster.dropPortForwards();
+  await assert.rejects(resource.step({ kind: "noop" }), (error) => (
+    error.code === "environment.platform-stopped" && /stopped by the platform, not by the Agent/.test(error.message)
+  ));
+  assert.equal(resource.closed, true);
+  assert.throws(() => resource.assertEgressHealthy(), (error) => error.code === "environment.platform-stopped");
+  assert.deepEqual(resource.connectionIssues.map(({ code }) => code), ["environment.connection-dropped"]);
+  assert.ok(cluster.portForwards() > 2);
+  await pods.dispose(resource);
+  assert.equal(cluster.pods.size, 0);
+});
+
+test("the reconnect secret never reaches the Agent's environment", async (t) => {
+  const cluster = await fakeCluster(t);
+  const pods = provider(cluster);
+  const resource = await pods.acquire(acquireOptions(cluster));
+  t.after(() => resource.close());
+  const [{ pod }] = cluster.pods.values();
+  const controlToken = pod.spec.containers[0].env.find((entry) => entry.name === "HURDLE_SANDBOX_CONTROL_TOKEN").value;
+  await pods.run(resource, { launchPlan: { command: "agent", args: [], env: { KEPT: "host" }, timeoutMs: 1000 }, environment: { AGENT: "1" } });
+  const agent = cluster.jobs.find((job) => job.kind === "agent");
+  assert.deepEqual(agent.environment, { AGENT: "1" });
+  assert.doesNotMatch(JSON.stringify(cluster.jobs), new RegExp(controlToken));
+  assert.equal(JSON.stringify(resource).includes(controlToken), false);
+  await pods.dispose(resource);
 });
 
 test("a pod that cannot start fails the cell and is deleted", async (t) => {
@@ -382,7 +484,10 @@ test("Kubernetes settings pin the API server, namespace, image and nodes", () =>
   refused({ caFile: "ca.pem" }, /absolute path/);
   refused({ nodeSelector: {} }, /nodeSelector/);
   refused({ nodeSelector: { workload: 1 } }, /nodeSelector/);
-  refused({ maxLifetimeMs: 3_600_001 }, /maxLifetimeMs/);
+  refused({ maxLifetimeMs: 999 }, /maxLifetimeMs/);
+  refused({ maxLifetimeMs: 93_600_001 }, /maxLifetimeMs must be an integer from 1000 to 93600000/);
+  refused({ maxLifetimeMs: "3600000" }, /maxLifetimeMs/);
+  assert.equal(normalizeKubernetesSettings({ maxLifetimeMs: 93_600_000 }, base).maxLifetimeMs, 93_600_000);
   refused({ cpu: "0" }, /cpu/);
   refused({ cpu: 2 }, /cpu/);
   refused({ memory: "2G" }, /memory/);

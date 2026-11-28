@@ -24,6 +24,9 @@ import {
 export const TASK_ROOT = "/tmp/hurdle-task";
 const MAX_WRITE_BYTES = 256 * 1024 * 1024;
 const PING_INTERVAL_MS = 20_000;
+// How long a controller whose connection dropped keeps trying to reconnect.
+// The sandbox server waits a minute longer, so the controller gives up first.
+export const RECONNECT_WINDOW_MS = 5 * 60_000;
 
 // X-Sandbox-CA carries the Guardian CA as the base64 body of its PEM, since a
 // header value cannot hold the PEM's line breaks.
@@ -53,6 +56,9 @@ export function createSandboxServer({
   writeRoots = [TASK_ROOT],
   readRoots = [],
   onClosed = () => {},
+  // How long after its connection drops the controller may reconnect. With 0,
+  // the server ends with its first connection.
+  reconnectWindowMs = 0,
 }) {
   const token = Buffer.from(controlToken ?? "", "base64url");
   if (token.length !== 32 || token.toString("base64url") !== controlToken) {
@@ -71,11 +77,22 @@ export function createSandboxServer({
   let client = null;
   let session = null;
   let control = null;
-  let used = false;
-  let running = false;
+  let certificate = null;
+  let attaching = false;
+  let ended = false;
+  let expiry = null;
+  let attached = 0;
+  // The id of the task step running, if any.
+  let running = null;
   let heartbeat = null;
+  // Replies to ops that outlived a dropped connection, sent when the
+  // controller reconnects. The bytes those ops streamed are lost with it.
+  const held = [];
 
-  const send = (message) => { if (control) writeLine(control, message); };
+  const send = (message) => {
+    if (control) writeLine(control, message);
+    else if (reconnectWindowMs > 0 && !ended) held.push(message);
+  };
   const fail = (id, error) => send({ op: "error", id, message: String(error?.message ?? error) });
 
   // Egress the Agent sends to the loopback relay port leaves only through the
@@ -97,9 +114,9 @@ export function createSandboxServer({
   });
 
   async function handleRun(id, job, claims, message) {
-    if (running) return fail(id, "a task step is already running");
+    if (running !== null) return fail(id, "a task step is already running");
     if (!isId(message.stdout) || !isId(message.stderr)) return fail(id, "run names no output streams");
-    running = true;
+    running = id;
     const [stdout, stderr] = await Promise.all([claims.claim(message.stdout), claims.claim(message.stderr)]);
     for (const stream of [stdout, stderr]) stream.on("error", () => {});
     try {
@@ -111,7 +128,7 @@ export function createSandboxServer({
     } catch (error) {
       fail(id, error);
     } finally {
-      running = false;
+      running = null;
       stdout.end();
       stderr.end();
     }
@@ -158,7 +175,17 @@ export function createSandboxServer({
     fail(id, "unknown operation");
   }
 
+  function end() {
+    ended = true;
+    held.length = 0;
+    onClosed();
+  }
+
   function attach(websocket) {
+    clearTimeout(expiry);
+    attaching = false;
+    attached += 1;
+    const resumed = attached > 1;
     client = websocket;
     const claims = createStreamClaims();
     session = muxOver(websocket, {
@@ -170,6 +197,11 @@ export function createSandboxServer({
           control = stream;
           control.on("error", () => {});
           readLines(control, (message) => onControl(message, claims), () => websocket.terminate());
+          // A reconnect learns which of its ops still run; the rest are lost.
+          if (resumed) {
+            for (const message of held.splice(0)) writeLine(control, message);
+            writeLine(control, { op: "resumed", running });
+          }
           return;
         }
         claims.offer(stream);
@@ -184,7 +216,8 @@ export function createSandboxServer({
       client = null;
       session = null;
       control = null;
-      onClosed();
+      if (reconnectWindowMs > 0) expiry = setTimeout(end, reconnectWindowMs);
+      else end();
     });
   }
 
@@ -196,15 +229,23 @@ export function createSandboxServer({
     if (authorization.length !== expectedAuthorization.length || !timingSafeEqual(authorization, expectedAuthorization)) {
       return reject(401);
     }
-    // One controller per sandbox, for the sandbox's whole life.
-    if (used) return reject(409);
-    const certificate = certificateFromHeader(request.headers["x-sandbox-ca"]);
-    if (!certificate) return reject(400);
-    used = true;
-    mkdir(dirname(caPath), { recursive: true, mode: 0o700 })
-      .then(() => writeFile(caPath, certificate, { mode: 0o644 }))
+    // One controller per sandbox, one connection at a time. Only the token
+    // admits a reconnect, so only the controller that holds it can resume.
+    if (client || attaching || ended) return reject(409);
+    const offered = certificateFromHeader(request.headers["x-sandbox-ca"]);
+    // A reconnect keeps the CA the sandbox already trusts.
+    if (!offered || (certificate && offered !== certificate)) return reject(400);
+    attaching = true;
+    // An upgrade ws refuses never reaches attach.
+    socket.once("close", () => { if (!client) attaching = false; });
+    const installed = certificate
+      ? Promise.resolve()
+      : mkdir(dirname(caPath), { recursive: true, mode: 0o700 })
+        .then(() => writeFile(caPath, offered, { mode: 0o644 }))
+        .then(() => { certificate = offered; });
+    installed
       .then(() => wss.handleUpgrade(request, socket, head, attach))
-      .catch(() => reject(500));
+      .catch(() => { attaching = false; reject(500); });
   });
   server.on("clientError", (_error, socket) => socket.destroy());
 
@@ -221,6 +262,7 @@ export function createSandboxServer({
       return { port: server.address().port, flowPort: relay.address().port };
     },
     async close() {
+      clearTimeout(expiry);
       client?.terminate();
       for (const socket of [...flows]) socket.destroy();
       await Promise.all([

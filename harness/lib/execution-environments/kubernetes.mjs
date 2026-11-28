@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { Duplex } from "node:stream";
 
 import { deepFreeze, RunSelectionInputError } from "../run-model.mjs";
+import { RECONNECT_WINDOW_MS } from "./sandbox-server.mjs";
 import { MAX_FRAME_BYTES } from "./sandbox-socket-protocol.mjs";
 import { createGuardedSandboxEnvironment } from "./together.mjs";
 import {
@@ -23,7 +24,13 @@ import {
 // with Together. The cluster's namespace, policy and RBAC live with the
 // cluster's own records, not here.
 
-export const KUBERNETES_MAX_LIFETIME_MS = 3_600_000;
+// A run may ask for up to 26 hours; one that does not gets 1 hour. The pod's
+// activeDeadlineSeconds follows the lifetime, so the namespace's admission
+// policy must admit it: mem1's caps activeDeadlineSeconds at 3600 today, and
+// raising that is the cluster's change (a nexus-compiler platform PR), not
+// this file's.
+export const KUBERNETES_DEFAULT_LIFETIME_MS = 3_600_000;
+export const KUBERNETES_MAX_LIFETIME_MS = 93_600_000;
 const SANDBOX_PORT = 18083;
 // The image lays out the harness as together-sandbox-setup.mjs writes it.
 const SERVER_COMMAND = Object.freeze(["node", "/opt/hurdle/harness/bin/hurdle-sandbox-server.mjs"]);
@@ -32,6 +39,8 @@ const POD_LABELS = Object.freeze({
   "app.kubernetes.io/managed-by": "hurdle",
 });
 const POLL_MS = 1000;
+// The longest pause between reconnect attempts after a dropped connection.
+const MAX_RECONNECT_BACKOFF_MS = 15_000;
 // How long dispose waits for the kubelet to confirm the container stopped.
 const DELETE_CONFIRM_MS = 60_000;
 const API_TIMEOUT_MS = 30_000;
@@ -54,7 +63,7 @@ const EPHEMERAL_STORAGE_MI = Object.freeze({ min: 1024, max: 10240 });
 const millicpu = (value) => (value.endsWith("m") ? Number(value.slice(0, -1)) : Number(value) * 1000);
 const mebibytes = (value) => Number(value.slice(0, -2)) * (value.endsWith("Gi") ? 1024 : 1);
 const within = (value, { min, max }) => value >= min && value <= max;
-const BASE_SETTINGS = Object.freeze({ maxLifetimeMs: KUBERNETES_MAX_LIFETIME_MS, cpu: "1", memory: "2Gi", ephemeralStorage: "4Gi" });
+const BASE_SETTINGS = Object.freeze({ maxLifetimeMs: KUBERNETES_DEFAULT_LIFETIME_MS, cpu: "1", memory: "2Gi", ephemeralStorage: "4Gi" });
 const SETTING_KEYS = new Set(["apiServer", "namespace", "image", "caFile", "nodeSelector", "maxLifetimeMs", "cpu", "memory", "ephemeralStorage"]);
 
 const settingError = (message) => new RunSelectionInputError(`Kubernetes ${message}`);
@@ -174,10 +183,11 @@ function podManifest({ name, image, nodeSelector, maxLifetimeMs, cpu, memory, ep
         // Images are imported onto the nodes by digest; nothing is pulled.
         imagePullPolicy: "Never",
         command: [...SERVER_COMMAND],
-        // The server reads and deletes this before it listens. Anyone who can
-        // read pods in the namespace can read it while the pod lives; it
-        // opens only this pod's one-connection socket, which the controller
-        // already holds.
+        // The server reads and deletes this before it listens; the Agent's
+        // environment is built without it. It is the secret a reconnect
+        // presents, so only this controller can resume the pod's socket.
+        // Anyone who can read pods in the namespace can read it while the pod
+        // lives; it opens only this pod's one-at-a-time socket.
         env: [{ name: "HURDLE_SANDBOX_CONTROL_TOKEN", value: controlToken }],
         ports: [{ containerPort: SANDBOX_PORT }],
         // Requests equal limits: the pod is never the first evicted, and an
@@ -318,8 +328,8 @@ function openSandboxSocket(stream, controlToken, caCertificate, signal) {
     signal?.addEventListener("abort", onAbort, { once: true });
     const settle = (callback) => (value) => { signal?.removeEventListener("abort", onAbort); callback(value); };
     socket.once("open", settle(() => resolve(socket)));
-    // The server answered: a retry would meet the same refusal, or its
-    // one-connection rule.
+    // The server answered: a retry would meet the same refusal, or a
+    // connection it still holds.
     socket.once("unexpected-response", settle((_request, response) => {
       response.resume();
       reject(Object.assign(new Error(`Kubernetes sandbox refused the connection (${response.statusCode})`), { status: response.statusCode, fatal: true }));
@@ -333,6 +343,9 @@ export function createKubernetesProvider({
   connectTimeoutMs = CONNECT_TIMEOUT_MS,
   pollMs = POLL_MS,
   deleteConfirmMs = DELETE_CONFIRM_MS,
+  // How long a dropped port-forward or socket is retried before the run ends
+  // as stopped by the platform.
+  reconnectWindowMs = RECONNECT_WINDOW_MS,
   readCa = (path) => readFile(path, "utf8"),
   taskRoot,
   artifactRoot,
@@ -403,6 +416,22 @@ export function createKubernetesProvider({
     }
   }
 
+  // After a drop, the same pod's socket again, with backoff. A refusal is
+  // retried too: the server may not yet have seen the old connection end.
+  async function reconnect(api, namespace, name, controlToken, caCertificate, signal) {
+    const deadline = Date.now() + reconnectWindowMs;
+    let backoff = pollMs;
+    for (;;) {
+      try {
+        return await connect(api, namespace, name, controlToken, caCertificate, signal, deadline);
+      } catch (error) {
+        if (signal.aborted || Date.now() + backoff > deadline) throw error;
+      }
+      await delay(backoff, signal);
+      backoff = Math.min(backoff * 2, MAX_RECONNECT_BACKOFF_MS);
+    }
+  }
+
   return Object.freeze({
     // Agent and Suite credentials reach the pod only as surrogates the
     // Guardian swaps on egress, never as environment values.
@@ -458,7 +487,11 @@ export function createKubernetesProvider({
           await delay(pollMs, signal);
         }
         const socket = await connect(api, namespace, podName, controlToken, caCertificate, signal, deadline);
-        return Object.assign(createSocketResource(socket, { label: "Kubernetes", sandbox: "kubernetes" }), owned, { sandboxId: podName });
+        return Object.assign(createSocketResource(socket, {
+          label: "Kubernetes",
+          sandbox: "kubernetes",
+          reconnect: (reconnectSignal) => reconnect(api, namespace, podName, controlToken, caCertificate, reconnectSignal),
+        }), owned, { sandboxId: podName });
       } catch (error) {
         // The environment disposes only what acquire returns.
         await removePod(owned).catch(() => {});
