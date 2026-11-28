@@ -217,6 +217,73 @@ def _valid_path(path: object) -> bool:
 
 BLOCKED_REQUESTS = frozenset(_load_blocked_requests())
 
+_UPSTREAM_PREFIX = re.compile(r"(/[A-Za-z0-9._~-]+)*")
+
+
+def _load_upstreams() -> dict[str, tuple[str, str, int, str]]:
+    """The operator's model routes: credential host -> (scheme, loopback IP,
+    port, path prefix). Read once from the controller's environment; the
+    sandbox never sees or sets it. Anything unexpected refuses start."""
+    raw = os.environ.get("TAE_EGRESS_UPSTREAMS")
+    if raw is None or raw == "":
+        return {}
+    try:
+        upstreams = json.loads(raw)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("invalid upstream map") from error
+    if not isinstance(upstreams, dict) or len(upstreams) > 16:
+        raise RuntimeError("invalid upstream map")
+    # Capture hosts are evaluation evidence and keep their public route.
+    mappable = (PASSTHROUGH_HOSTS | CREDENTIAL_HOSTS) - CAPTURE_HOSTS
+    routes: dict[str, tuple[str, str, int, str]] = {}
+    for host, url in upstreams.items():
+        if host not in mappable or not isinstance(url, str) or "?" in url or "#" in url:
+            raise RuntimeError("invalid upstream map")
+        try:
+            parts = urlsplit(url)
+            port = parts.port
+            address = ipaddress.ip_address(parts.hostname or "")
+        except ValueError as error:
+            raise RuntimeError("invalid upstream map") from error
+        prefix = parts.path.rstrip("/")
+        if (
+            parts.scheme not in ("http", "https")
+            or parts.username is not None
+            or parts.password is not None
+            or parts.query
+            or parts.fragment
+            or port is None
+            or not address.is_loopback
+            or _UPSTREAM_PREFIX.fullmatch(prefix) is None
+            or len(prefix) > 256
+        ):
+            raise RuntimeError("invalid upstream map")
+        routes[host] = (parts.scheme, str(address), port, prefix)
+    return routes
+
+
+def _load_token_ceiling() -> int | None:
+    raw = os.environ.get("TAE_EGRESS_TOKEN_CEILING")
+    if raw is None or raw == "":
+        return None
+    if re.fullmatch(r"[1-9][0-9]{0,15}", raw) is None or int(raw) > MAX_SAFE_COUNTER:
+        raise RuntimeError("invalid token ceiling")
+    if not UPSTREAMS:
+        # The ceiling counts model routes only; without one it would count nothing.
+        raise RuntimeError("token ceiling needs a model route")
+    return int(raw)
+
+
+UPSTREAMS = _load_upstreams()
+TOKEN_CEILING = _load_token_ceiling()
+USAGE_LOG_PATH = os.environ.get("TAE_EGRESS_USAGE_LOG") or os.path.join(
+    os.path.dirname(LOG_PATH), "model-usage.jsonl"
+)
+MAX_USAGE_LOG_BYTES = 4 * 1024 * 1024
+# A usage object sits in a small final SSE event or a JSON body; larger bodies
+# or event lines are not parsed for it.
+MAX_USAGE_BODY_BYTES = 8 * 1024 * 1024
+
 
 def _template_segments(template: object) -> list[str] | None:
     if not _valid_path(template):
@@ -471,6 +538,108 @@ class _ResponseScrubber:
         return data[: len(data) - keep]
 
 
+def _token_count(value: object) -> int:
+    return value if type(value) is int and 0 <= value <= MAX_SAFE_COUNTER else 0
+
+
+class _ModelUsage:
+    """Reads token usage from one model response, buffered or streamed.
+
+    OpenAI Responses and Chat Completions bodies carry `usage`, as does the
+    `response` of a Responses stream event; Anthropic Messages bodies carry
+    `usage`, and its streams carry it in `message_start` and `message_delta`.
+    Later usage overrides earlier, so a stream counts its final usage event.
+    """
+
+    def __init__(self, event_stream: bool) -> None:
+        self.event_stream = event_stream
+        self.buffer = b""
+        self.oversized = False
+        self.usage: dict[str, int] = {}
+
+    def feed(self, chunk: bytes) -> None:
+        if self.oversized:
+            return
+        self.buffer += chunk
+        if self.event_stream:
+            *lines, self.buffer = self.buffer.split(b"\n")
+            for line in lines:
+                self._event_line(line)
+        if len(self.buffer) > MAX_USAGE_BODY_BYTES:
+            self.oversized, self.buffer = True, b""
+
+    def finish(self) -> None:
+        rest, self.buffer = self.buffer, b""
+        if self.oversized:
+            return
+        if self.event_stream:
+            self._event_line(rest)
+        else:
+            self._document(rest)
+
+    def _event_line(self, line: bytes) -> None:
+        line = line.rstrip(b"\r")
+        if line.startswith(b"data:"):
+            self._document(line[5:].strip())
+
+    def _document(self, raw: bytes) -> None:
+        try:
+            document = json.loads(raw)
+        except (TypeError, ValueError):
+            return
+        if not isinstance(document, dict):
+            return
+        for holder in (document, document.get("response"), document.get("message")):
+            usage = holder.get("usage") if isinstance(holder, dict) else None
+            if isinstance(usage, dict):
+                self._overlay(usage)
+
+    def _overlay(self, usage: dict) -> None:
+        details = usage.get("input_tokens_details") or usage.get("prompt_tokens_details") or {}
+        fields = {
+            "input_tokens": usage.get("input_tokens", usage.get("prompt_tokens")),
+            "output_tokens": usage.get("output_tokens", usage.get("completion_tokens")),
+            # OpenAI counts cached tokens inside input_tokens; Anthropic
+            # reports cache reads and writes apart from input_tokens.
+            "cached_input_tokens": details.get("cached_tokens") if isinstance(details, dict) else None,
+            "cache_read_input_tokens": usage.get("cache_read_input_tokens"),
+            "cache_creation_input_tokens": usage.get("cache_creation_input_tokens"),
+        }
+        for name, value in fields.items():
+            if type(value) is int:
+                self.usage[name] = _token_count(value)
+
+    def record(self) -> dict[str, int]:
+        usage = self.usage
+        separate_reads = usage.get("cache_read_input_tokens", 0)
+        creation = usage.get("cache_creation_input_tokens", 0)
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_read_tokens": separate_reads or usage.get("cached_input_tokens", 0),
+            "cache_creation_tokens": creation,
+            # Every token the provider processed, each counted once.
+            "counted": input_tokens + output_tokens + separate_reads + creation,
+        }
+
+
+class _UsageTap:
+    """A stream callable that shows each chunk to a usage reader on its way out."""
+
+    def __init__(self, reader: _ModelUsage, inner) -> None:
+        self.reader = reader
+        self.inner = inner
+
+    def __call__(self, chunk: bytes) -> bytes:
+        if chunk:
+            self.reader.feed(chunk)
+        else:
+            self.reader.finish()
+        return self.inner(chunk) if callable(self.inner) else chunk
+
+
 class GenericGuardian:
     def __init__(self) -> None:
         self.active = 0
@@ -497,6 +666,15 @@ class GenericGuardian:
         # the client connection, not the server connection.
         self._pinned: dict[str, tuple[str, object]] = {}
         self._client_pins: dict[object, set[str]] = {}
+        # Flow id -> (the model host and path the Agent named) for requests
+        # forwarded to an operator upstream, and the usage reader of each.
+        self._models: dict[str, tuple[str, str]] = {}
+        self._usage: dict[str, _ModelUsage] = {}
+        # Client connection id -> the model host whose upstream it was sent to.
+        self._model_clients: dict[object, str] = {}
+        self.run_tokens_total = 0
+        self.ceiling_reached = False
+        self.usage_bytes = 0
         os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
         with open(LOG_PATH, "xb"):
             pass
@@ -650,6 +828,8 @@ class GenericGuardian:
         self._passthrough.discard(flow.id)
         self._observed.pop(flow.id, None)
         self._scrub.pop(flow.id, None)
+        self._models.pop(flow.id, None)
+        self._usage.pop(flow.id, None)
         if self._started.pop(flow.id, None) is not None:
             self.active = max(0, self.active - 1)
         flow.request.stream = False
@@ -684,6 +864,39 @@ class GenericGuardian:
         except Exception:
             self._refuse_on_failure(flow)
 
+    def _route_model(self, flow: http.HTTPFlow, host: str) -> bool:
+        """Swaps the credential of a request to an operator-mapped model host
+        and sends it to that host's loopback upstream. False when refused.
+
+        The request was checked against the public name the Agent sent; only
+        the operator's map, never the request, picks the loopback address.
+        """
+        if not self._may_substitute(flow, host):
+            flow.response = http.Response.make(403, b"model route rejected")
+            return False
+        if self.ceiling_reached:
+            flow.response = http.Response.make(
+                429, b"run token ceiling reached", {"content-type": "text/plain; charset=utf-8"},
+            )
+            return False
+        self._substitute(flow, host)
+        scheme, address, port, prefix = UPSTREAMS[host]
+        request = flow.request
+        self._models[flow.id] = (host, request.path)
+        request.scheme = scheme
+        request.host = address
+        request.port = port
+        request.path = prefix + request.path
+        request.headers["host"] = f"{address}:{port}"
+        if getattr(request, "authority", ""):
+            request.authority = f"{address}:{port}"
+        # Usage is read from plain bodies.
+        request.headers["accept-encoding"] = "identity"
+        # server_connect lets this client reach this upstream only, and maps
+        # the loopback address back to the host later requests name.
+        self._model_clients[getattr(getattr(flow, "client_conn", None), "id", None)] = host
+        return True
+
     def _check_request(self, flow: http.HTTPFlow) -> None:
         if self._control(flow):
             return
@@ -703,7 +916,11 @@ class GenericGuardian:
             if self.sealed:
                 flow.response = http.Response.make(503, b"capture sealed")
                 return
-            self._substitute(flow, host)
+            if host in UPSTREAMS:
+                if not self._route_model(flow, host):
+                    return
+            else:
+                self._substitute(flow, host)
             self._passthrough.add(flow.id)
             flow.request.stream = True
             return
@@ -719,8 +936,12 @@ class GenericGuardian:
             if host in CREDENTIAL_HOSTS and not self._routes_to_host(flow, host):
                 flow.response = http.Response.make(403, b"credential route rejected")
                 return
-            # Agent credentials are substituted here too, under the same guard.
-            self._substitute(flow, host)
+            if host in UPSTREAMS:
+                if not self._route_model(flow, host):
+                    return
+            else:
+                # Agent credentials are substituted here too, under the same guard.
+                self._substitute(flow, host)
             # Never buffer agent model streams or package downloads.
             flow.request.stream = True
             self._observed[flow.id] = time.monotonic()
@@ -781,6 +1002,15 @@ class GenericGuardian:
         if not address:
             return
         name, port = str(address[0]), address[1]
+        client = getattr(getattr(data, "client", None), "id", None)
+        model_host = self._model_clients.get(client)
+        if model_host is not None and (name, port) == UPSTREAMS[model_host][1:3]:
+            # The operator's loopback upstream, reached only by a request the
+            # Guardian itself rewrote; every name the Agent sends was refused
+            # above if it is not public.
+            self._pinned[server.id] = (model_host, client)
+            self._client_pins.setdefault(client, set()).add(server.id)
+            return
         try:
             addresses = _addresses(name)
         except (OSError, UnicodeError):
@@ -797,7 +1027,6 @@ class GenericGuardian:
             # Upstream TLS sends and verifies the checked name, never the
             # client's own SNI.
             server.sni = checked
-            client = getattr(getattr(data, "client", None), "id", None)
             self._pinned[server.id] = (checked, client)
             self._client_pins.setdefault(client, set()).add(server.id)
         # The resolver's first answer, as an unpinned connection would dial.
@@ -818,6 +1047,7 @@ class GenericGuardian:
         self._unpin(data.server)
 
     def client_disconnected(self, client) -> None:
+        self._model_clients.pop(getattr(client, "id", None), None)
         for server_id in self._client_pins.pop(getattr(client, "id", None), ()):
             self._pinned.pop(server_id, None)
 
@@ -829,16 +1059,77 @@ class GenericGuardian:
             return
         streamed = flow.id in self._passthrough or flow.id in self._observed
         replacements = self._scrub.get(flow.id)
+        if flow.id in self._models and flow.response.status_code != 101:
+            content_type = (flow.response.headers.get("content-type") or "").lower()
+            self._usage[flow.id] = _ModelUsage("text/event-stream" in content_type)
         if replacements:
             self._scrub_headers(flow.response.headers, replacements)
             encoding = (flow.response.headers.get("content-encoding") or "identity").strip().lower()
             if streamed and encoding == "identity":
-                flow.response.stream = _ResponseScrubber(replacements)
+                flow.response.stream = self._tap(flow, _ResponseScrubber(replacements))
             # A compressed body cannot be scrubbed chunk by chunk, so it is
             # buffered and scrubbed whole in response().
             return
         if streamed:
-            flow.response.stream = True
+            flow.response.stream = self._tap(flow, True)
+
+    def _tap(self, flow: http.HTTPFlow, stream):
+        reader = self._usage.get(flow.id)
+        return stream if reader is None else _UsageTap(reader, stream)
+
+    def _write_usage(self, row: dict[str, object]) -> None:
+        # The model-usage log sits beside the sealed journal, whose rows are a
+        # closed evidence schema; it has its own byte bound.
+        line = (json.dumps(row, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
+        if self.usage_bytes + len(line) > MAX_USAGE_LOG_BYTES:
+            return
+        with open(USAGE_LOG_PATH, "ab") as handle:
+            handle.write(line)
+            handle.flush()
+            os.fsync(handle.fileno())
+        self.usage_bytes += len(line)
+
+    def _finish_model(self, flow: http.HTTPFlow, status_code: int | None) -> None:
+        host, _ = self._models[flow.id]
+        reader = self._usage.pop(flow.id, None)
+        if reader is None:
+            return
+        if not isinstance(getattr(flow.response, "stream", None), _UsageTap):
+            # Buffered: a compressed body, or the stream never started.
+            try:
+                reader.feed(flow.response.content or b"")
+            except ValueError:
+                pass
+        # Idempotent: a stream's empty final chunk may already have finished it.
+        reader.finish()
+        usage = reader.record()
+        counted = usage.pop("counted")
+        self.run_tokens_total = min(MAX_SAFE_COUNTER, self.run_tokens_total + counted)
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+        scheme, address, port, _ = UPSTREAMS[host]
+        request_id = flow.response.headers.get("x-request-id") or flow.response.headers.get("request-id")
+        self._write_usage({
+            "kind": "model-usage",
+            "v": 1,
+            "at": now,
+            "host": host,
+            "status": status_code,
+            **usage,
+            "run_tokens_total": self.run_tokens_total,
+            "ceiling": TOKEN_CEILING,
+            "request_id": request_id if isinstance(request_id, str) and len(request_id) <= 256 else None,
+            "upstream": f"{scheme}://{address}:{port}",
+        })
+        if TOKEN_CEILING is not None and not self.ceiling_reached and self.run_tokens_total >= TOKEN_CEILING:
+            self.ceiling_reached = True
+            self._write_usage({
+                "kind": "model-ceiling",
+                "v": 1,
+                "at": now,
+                "host": host,
+                "run_tokens_total": self.run_tokens_total,
+                "ceiling": TOKEN_CEILING,
+            })
 
     def _append(self, observed: dict[str, object]) -> None:
         if self.sequence >= MAX_ROWS:
@@ -886,6 +1177,11 @@ class GenericGuardian:
         scheme = request.scheme.lower() if request.scheme else None
         path = urlsplit(request.path).path or "/"
         host = (request.pretty_host or "").lower().rstrip(".")
+        model = self._models.pop(flow.id, None)
+        if model is not None:
+            # The journal keeps the route the Agent named; the model-usage
+            # log records the upstream that served it.
+            scheme, host, path = "https", model[0], urlsplit(model[1]).path or "/"
         if (
             not method
             or len(method) > 16
@@ -920,6 +1216,9 @@ class GenericGuardian:
         path = urlsplit(request.path).path or "/"
         scheme = {"http": "ws", "https": "wss"}.get(request.scheme.lower() if request.scheme else None)
         host = (request.pretty_host or "").lower().rstrip(".")
+        model = self._models.pop(flow.id, None)
+        if model is not None:
+            scheme, host, path = "wss", model[0], urlsplit(model[1]).path or "/"
         if scheme is None or not path.startswith("/") or len(path.encode("utf-8")) > MAX_PATH_BYTES or not host:
             self.observed_dropped += 1
             return
@@ -1209,9 +1508,12 @@ class GenericGuardian:
         replacements = self._scrub.get(flow.id) if status_code == 101 else self._scrub.pop(flow.id, None)
         if replacements and flow.response is not None and not callable(getattr(flow.response, "stream", False)):
             self._scrub_body(flow.response, replacements)
+        if flow.id in self._models and status_code != 101:
+            self._finish_model(flow, status_code)
         if flow.id in self._passthrough:
             if status_code != 101:
                 self._passthrough.discard(flow.id)
+                self._models.pop(flow.id, None)
             return
         if flow.id in self._observed:
             if status_code == 101:
@@ -1293,6 +1595,7 @@ class GenericGuardian:
         self._scrub.pop(flow.id, None)
         if flow.id in self._passthrough:
             self._passthrough.discard(flow.id)
+            self._models.pop(flow.id, None)
             return
         if flow.id in self._observed:
             self._finish_observed_websocket(flow)
@@ -1301,6 +1604,9 @@ class GenericGuardian:
 
     def error(self, flow: http.HTTPFlow) -> None:
         self._scrub.pop(flow.id, None)
+        self._usage.pop(flow.id, None)
+        if flow.id in self._passthrough:
+            self._models.pop(flow.id, None)
         if flow.id in self._passthrough:
             self._passthrough.discard(flow.id)
             return

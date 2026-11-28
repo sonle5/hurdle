@@ -95,6 +95,11 @@ async function waitForLocalPort(port, child, signal) {
 const LIFETIME_GRACE_MS = 10 * 60_000;
 const DEFAULT_LIFETIME_MS = 60 * 60_000;
 const GUARDIAN_DIRECTORY_PREFIX = "hurdle-guardian-";
+const OPERATOR_MODEL_POLICY = ["TAE_EGRESS_UPSTREAMS", "TAE_EGRESS_TOKEN_CEILING", "TAE_EGRESS_USAGE_LOG"];
+
+export function operatorModelPolicy(env = process.env) {
+  return Object.fromEntries(OPERATOR_MODEL_POLICY.filter((name) => env[name]).map((name) => [name, env[name]]));
+}
 
 // A Guardian directory holds the per-run CA key. Ones this old belong to no
 // live Guardian, since each stops by its lifetime limit; remove them, for
@@ -242,6 +247,9 @@ export function createTogetherGuardianController({
             TAE_EGRESS_EXIT_WITH_CONTROLLER: "1",
             TAE_EGRESS_CLEANUP_DIR: directory,
             TAE_EGRESS_MAX_LIFETIME_S: String(Math.ceil((maxLifetimeMs + LIFETIME_GRACE_MS) / 1000)),
+            // Operator model routes, token ceiling and usage log, from this
+            // controller's own environment only; the Guardian validates them.
+            ...operatorModelPolicy(),
           },
         });
         session.proxy.once("error", () => {});
