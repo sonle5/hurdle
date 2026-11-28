@@ -236,6 +236,16 @@ test("a cell gets its own CPU-node pod and talks to it through the port-forward"
   assert.equal(await pods.isDisposed(resource), true);
 });
 
+test("the pod's deadline follows a lifetime up to 26 hours", async (t) => {
+  const cluster = await fakeCluster(t);
+  const pods = provider(cluster);
+  const resource = await pods.acquire({ ...acquireOptions(cluster), maxLifetimeMs: 93_600_000 });
+  t.after(() => resource.close());
+  const [{ pod }] = cluster.pods.values();
+  assert.equal(pod.spec.activeDeadlineSeconds, 93_600);
+  await pods.dispose(resource);
+});
+
 test("the port-forward is retried until the sandbox server listens", async (t) => {
   const cluster = await fakeCluster(t, { refusePortForward: 2 });
   const pods = provider(cluster);
@@ -382,7 +392,10 @@ test("Kubernetes settings pin the API server, namespace, image and nodes", () =>
   refused({ caFile: "ca.pem" }, /absolute path/);
   refused({ nodeSelector: {} }, /nodeSelector/);
   refused({ nodeSelector: { workload: 1 } }, /nodeSelector/);
-  refused({ maxLifetimeMs: 3_600_001 }, /maxLifetimeMs/);
+  refused({ maxLifetimeMs: 999 }, /maxLifetimeMs/);
+  refused({ maxLifetimeMs: 93_600_001 }, /maxLifetimeMs must be an integer from 1000 to 93600000/);
+  refused({ maxLifetimeMs: "3600000" }, /maxLifetimeMs/);
+  assert.equal(normalizeKubernetesSettings({ maxLifetimeMs: 93_600_000 }, base).maxLifetimeMs, 93_600_000);
   refused({ cpu: "0" }, /cpu/);
   refused({ cpu: 2 }, /cpu/);
   refused({ memory: "2G" }, /memory/);

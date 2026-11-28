@@ -91,6 +91,13 @@ seals its firewall with `iptables-nft` and `ip6tables-nft`. Before the Agent
 starts, the workspace is checked again: it must be the Agent's own `0700`
 directory under a root-owned parent the Agent cannot write to. Any other `sandbox` value is refused.
 
+A Kubernetes run's `maxLifetimeMs` defaults to 1 hour and may be set up to
+26 hours (93600000); larger values are refused. The pod's
+`activeDeadlineSeconds` follows it. The cluster's admission policy must admit
+that deadline: mem1's caps it at 3600 seconds today, so a longer lifetime is
+refused at pod creation until the cluster's policy is raised, which is a
+nexus-compiler platform change (R22), not a Hurdle one.
+
 **Egress.** Every stream the server opens is one TCP connection the Agent made to
 the sandbox's loopback proxy port, carried verbatim: its first bytes are the
 Agent's own `CONNECT host:443 HTTP/1.1` or absolute-form request. Hurdle pipes

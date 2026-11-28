@@ -23,7 +23,13 @@ import {
 // with Together. The cluster's namespace, policy and RBAC live with the
 // cluster's own records, not here.
 
-export const KUBERNETES_MAX_LIFETIME_MS = 3_600_000;
+// A run may ask for up to 26 hours; one that does not gets 1 hour. The pod's
+// activeDeadlineSeconds follows the lifetime, so the namespace's admission
+// policy must admit it: mem1's caps activeDeadlineSeconds at 3600 today, and
+// raising that is the cluster's change (a nexus-compiler platform PR), not
+// this file's.
+export const KUBERNETES_DEFAULT_LIFETIME_MS = 3_600_000;
+export const KUBERNETES_MAX_LIFETIME_MS = 93_600_000;
 const SANDBOX_PORT = 18083;
 // The image lays out the harness as together-sandbox-setup.mjs writes it.
 const SERVER_COMMAND = Object.freeze(["node", "/opt/hurdle/harness/bin/hurdle-sandbox-server.mjs"]);
@@ -54,7 +60,7 @@ const EPHEMERAL_STORAGE_MI = Object.freeze({ min: 1024, max: 10240 });
 const millicpu = (value) => (value.endsWith("m") ? Number(value.slice(0, -1)) : Number(value) * 1000);
 const mebibytes = (value) => Number(value.slice(0, -2)) * (value.endsWith("Gi") ? 1024 : 1);
 const within = (value, { min, max }) => value >= min && value <= max;
-const BASE_SETTINGS = Object.freeze({ maxLifetimeMs: KUBERNETES_MAX_LIFETIME_MS, cpu: "1", memory: "2Gi", ephemeralStorage: "4Gi" });
+const BASE_SETTINGS = Object.freeze({ maxLifetimeMs: KUBERNETES_DEFAULT_LIFETIME_MS, cpu: "1", memory: "2Gi", ephemeralStorage: "4Gi" });
 const SETTING_KEYS = new Set(["apiServer", "namespace", "image", "caFile", "nodeSelector", "maxLifetimeMs", "cpu", "memory", "ephemeralStorage"]);
 
 const settingError = (message) => new RunSelectionInputError(`Kubernetes ${message}`);
