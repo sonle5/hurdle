@@ -45,7 +45,9 @@ Together's relay consumes the API key. For each sandbox, it generates a fresh
 replaces `Authorization` with `Bearer <that token>` on the sandbox-bound
 upgrade. The token stays on the relay-to-sandbox hop. The server refuses to start
 without it and returns 401 on unauthenticated upgrades before processing
-`X-Sandbox-CA`. A second authenticated connection gets 409.
+`X-Sandbox-CA`. A second authenticated connection gets 409. A Kubernetes pod
+admits one connection at a time and lets the same controller reconnect (see
+below).
 The authenticated relay forwards `X-Sandbox-CA` unchanged. The sandbox accepts a
 single valid CA certificate and installs it into its trust stores during setup.
 
@@ -98,6 +100,23 @@ that deadline: mem1's caps it at 3600 seconds today, so a longer lifetime is
 refused at pod creation until the cluster's policy is raised, which is a
 nexus-compiler platform change (R22), not a Hurdle one.
 
+**Reconnecting (Kubernetes).** A port-forward can drop while the pod runs on,
+for example when the API server restarts. The pod's server then waits for its
+controller to return, for six minutes. It admits only an upgrade that carries the
+same control token and the same Guardian CA. The controller keeps the token in
+memory, and neither the sandbox's processes nor the Agent's environment ever hold
+it. A second controller without the token still gets 401, and any upgrade while
+a connection is attached gets 409. The controller retries with backoff for five
+minutes. After a drop, reads, writes and egress flows that were in flight fail.
+A running step continues: the server holds its reply and sends it on the next
+connection, followed by `{"op":"resumed","running":<id or null>}`, and the
+output the step wrote in the meantime is lost. Each drop and each reconnect is
+recorded in the run's integrity issues (`environment.connection-dropped`,
+`environment.connection-resumed`). A drop that lost work makes the run
+incomplete, and a clean one makes it unknown. If the pod cannot be reached
+within the window, the run ends as `environment.platform-stopped`: it was
+stopped by the platform, not by the Agent. Together's sandboxes do not reconnect.
+
 **Egress.** Every stream the server opens is one TCP connection the Agent made to
 the sandbox's loopback proxy port, carried verbatim: its first bytes are the
 Agent's own `CONNECT host:443 HTTP/1.1` or absolute-form request. Hurdle pipes
@@ -106,7 +125,8 @@ the TLS inside it. The server does no filtering; there is no other way out, and
 the Guardian decides. The Guardian refuses non-public destinations, so the Agent
 cannot reach your machine's loopback or network through it.
 
-**Ending.** Closing the socket from either side terminates the sandbox. Hurdle
+**Ending.** Closing the socket from either side terminates the sandbox, except
+that a Kubernetes pod waits out its reconnect window first. Hurdle
 closes it after the last step; Together terminates the sandbox when either side
 closes, and a one-hour ttl is the backstop.
 

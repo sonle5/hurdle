@@ -106,51 +106,127 @@ function textSink(callback) {
   };
 }
 
+const connectionIssue = (code, effect, message) => ({ code, phase: "transport", effect, message });
+
 // `label` names the sandbox provider in operator-facing errors; `sandbox`, when
 // set, tells the server which kind of sandbox it runs in.
-export function createSocketResource(socket, { label = "Together", sandbox } = {}) {
+//
+// `reconnect(signal)`, when given, resolves a new socket to the same sandbox
+// after this one drops, or rejects once the provider's window has passed. A
+// running step survives the drop: the server holds its reply until the
+// controller is back, though output it wrote meanwhile is lost. Reads,
+// writes and egress flows in flight fail. Each drop and reconnect is kept in
+// `connectionIssues` for the run's record; a sandbox that cannot be reached
+// again fails as stopped by the platform.
+export function createSocketResource(initialSocket, { label = "Together", sandbox, reconnect = null } = {}) {
   const pending = new Map();
   const flows = new Set();
+  const connectionIssues = [];
   let nextId = 1;
   let openUpstream = null;
   let failure = null;
   let closed = false;
+  let closing = false;
+  let socket;
+  let session;
+  let control;
+  // Set while a dropped connection is being re-established.
+  let reconnecting = null;
+  // Steps that were running when the connection dropped.
+  let survivors = new Set();
+  const reconnectAbort = new AbortController();
 
-  // Every stream the server opens is one of the Agent's egress connections.
-  const session = muxOver(socket, {
-    client: true,
-    onStream: (stream) => {
-      let tcp;
-      try { tcp = openUpstream?.(); } catch { tcp = null; }
-      if (!tcp) return stream.destroy();
-      flows.add(tcp);
-      const teardown = () => { flows.delete(tcp); tcp.destroy(); stream.destroy(); };
-      tcp.on("error", teardown);
-      stream.on("error", teardown);
-      tcp.once("close", teardown);
-      stream.pipe(tcp);
-      tcp.pipe(stream);
-    },
-  });
-  const control = session.open();
-  control.on("error", () => {});
-  readLines(control, (message) => {
-    const request = pending.get(message.id);
-    if (!request) return;
-    pending.delete(message.id);
-    if (message.op === "done") request.resolve(message.value);
-    else request.reject(new Error(message.message ?? `${label} sandbox operation failed`));
-  }, () => socket.terminate());
-
-  socket.once("close", () => {
+  function end(error) {
     closed = true;
-    failure ||= new Error(`${label} sandbox connection closed`);
+    failure ||= error ?? new Error(`${label} sandbox connection closed`);
     for (const request of pending.values()) request.reject(failure);
     pending.clear();
-    for (const tcp of [...flows]) tcp.destroy();
-    session.close();
-  });
-  socket.on("error", (error) => { failure ||= error; });
+  }
+
+  function dropped() {
+    // In-flight ops lose their streams with the connection; a running step
+    // waits for its reply on the next one.
+    let lost = 0;
+    for (const [id, request] of pending) {
+      if (request.survives) continue;
+      pending.delete(id);
+      request.reject(new Error(`${label} sandbox connection dropped`));
+      lost += 1;
+    }
+    survivors = new Set(pending.keys());
+    const outputLost = pending.size > 0;
+    connectionIssues.push(connectionIssue("environment.connection-dropped", lost || outputLost ? "incomplete" : "unknown",
+      `The ${label} sandbox connection dropped${lost ? `; ${lost} operation(s) in flight failed` : ""}${outputLost ? "; output the running step wrote until it was re-established is lost" : ""}.`));
+    reconnecting = reconnect(reconnectAbort.signal).then((next) => {
+      reconnecting = null;
+      if (closing) { next.terminate(); return end(); }
+      connectionIssues.push(connectionIssue("environment.connection-resumed", "unknown",
+        `The ${label} sandbox connection was re-established and the run resumed.`));
+      bind(next);
+    }, () => {
+      reconnecting = null;
+      if (closing) return end();
+      end(Object.assign(new Error(`${label} sandbox could not be reached again; the run was stopped by the platform, not by the Agent.`),
+        { code: "environment.platform-stopped" }));
+    });
+  }
+
+  function bind(next) {
+    socket = next;
+    // Every stream the server opens is one of the Agent's egress connections.
+    session = muxOver(socket, {
+      client: true,
+      onStream: (stream) => {
+        let tcp;
+        try { tcp = openUpstream?.(); } catch { tcp = null; }
+        if (!tcp) return stream.destroy();
+        flows.add(tcp);
+        const teardown = () => { flows.delete(tcp); tcp.destroy(); stream.destroy(); };
+        tcp.on("error", teardown);
+        stream.on("error", teardown);
+        tcp.once("close", teardown);
+        stream.pipe(tcp);
+        tcp.pipe(stream);
+      },
+    });
+    control = session.open();
+    control.on("error", () => {});
+    readLines(control, (message) => {
+      // After held replies: a step from before the drop that the server is
+      // not running never reached it.
+      if (message.op === "resumed") {
+        for (const id of survivors) {
+          const request = pending.get(id);
+          if (!request || id === message.running) continue;
+          pending.delete(id);
+          request.reject(new Error(`${label} sandbox connection dropped before the operation reached it`));
+        }
+        survivors = new Set();
+        return;
+      }
+      const request = pending.get(message.id);
+      if (!request) return;
+      pending.delete(message.id);
+      if (message.op === "done") request.resolve(message.value);
+      else request.reject(new Error(message.message ?? `${label} sandbox operation failed`));
+    }, () => socket.terminate());
+
+    const current = session;
+    socket.once("close", () => {
+      for (const tcp of [...flows]) tcp.destroy();
+      current.close();
+      if (reconnect && !closing && !closed) dropped();
+      else end();
+    });
+    socket.on("error", (error) => { if (!reconnect) failure ||= error; });
+  }
+  bind(initialSocket);
+
+  // Ops issued while a dropped connection is re-established wait for it.
+  async function connected() {
+    while (reconnecting) await reconnecting;
+    if (closed) throw failure;
+  }
 
   // Each operation either completes or ends the sandbox: a step that cannot be
   // waited for is not left running in it. `streams` names the streams the op
@@ -167,7 +243,7 @@ export function createSocketResource(socket, { label = "Together", sandbox } = {
         signal?.removeEventListener("abort", onAbort);
         callback(value);
       };
-      pending.set(id, { resolve: done(resolve), reject: done(reject) });
+      pending.set(id, { resolve: done(resolve), reject: done(reject), survives: message.op === "run" && Boolean(reconnect) });
       timer = setTimeout(() => {
         resource.close();
         reject(Object.assign(new Error(`${label} sandbox operation timed out`), { name: "TimeoutError" }));
@@ -180,13 +256,16 @@ export function createSocketResource(socket, { label = "Together", sandbox } = {
 
   const resource = {
     sandboxId: randomUUID(),
+    connectionIssues,
     async write(path, bytes, options) {
+      if (reconnecting) await connected();
       const stream = session.open();
       stream.on("error", () => {});
       stream.end(Buffer.from(bytes));
       await request({ op: "write", path }, { stream }, options);
     },
     async read(path, options) {
+      if (reconnecting) await connected();
       const stream = session.open();
       const bytes = readAll(stream, MAX_READ_BYTES);
       bytes.catch(() => {});
@@ -194,6 +273,7 @@ export function createSocketResource(socket, { label = "Together", sandbox } = {
       return bytes;
     },
     async step(job, { onStdout, onStderr, ...options } = {}) {
+      if (reconnecting) await connected();
       const stdout = session.open();
       const stderr = session.open();
       for (const [stream, callback] of [[stdout, onStdout], [stderr, onStderr]]) {
@@ -215,6 +295,9 @@ export function createSocketResource(socket, { label = "Together", sandbox } = {
       return closed;
     },
     close() {
+      closing = true;
+      reconnectAbort.abort();
+      // The socket's close, or the abandoned reconnect, ends the resource.
       if (!closed) socket.terminate();
     },
   };

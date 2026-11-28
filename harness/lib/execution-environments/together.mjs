@@ -325,9 +325,13 @@ export function createGuardedSandboxEnvironment({
               issue(
                 error?.name === "AbortError" || envelope.signal?.aborted
                   ? "environment.cancelled"
-                  : `environment.${phase === "setup" ? "setup" : phase === "artifacts" ? "artifact-collection" : phase}-failed`,
+                  : error?.code === "environment.platform-stopped"
+                    ? error.code
+                    : `environment.${phase === "setup" ? "setup" : phase === "artifacts" ? "artifact-collection" : phase}-failed`,
                 phase,
-                `${label} execution could not complete during ${phase}.`,
+                error?.code === "environment.platform-stopped" && !envelope.signal?.aborted
+                  ? `${label} sandbox could not be reached again during ${phase}; the run was stopped by the platform, not by the Agent.`
+                  : `${label} execution could not complete during ${phase}.`,
               ),
             );
           try {
@@ -491,6 +495,8 @@ export function createGuardedSandboxEnvironment({
           } catch (error) {
             failure(error);
           } finally {
+            // Each time the sandbox's connection dropped or came back.
+            for (const allocated of resources) integrityIssues.push(...(allocated.connectionIssues ?? []));
             if (resources.length) reportStatus("stopping-sandboxes");
             try { await guardian.close?.(guardianSession); }
             catch {

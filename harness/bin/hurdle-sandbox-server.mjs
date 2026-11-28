@@ -3,11 +3,13 @@
 import { join } from "node:path";
 
 import { ARTIFACT_ROOT } from "../lib/execution-environments/linux-sandbox-operations.mjs";
-import { createSandboxServer, TASK_ROOT } from "../lib/execution-environments/sandbox-server.mjs";
+import { createSandboxServer, RECONNECT_WINDOW_MS, TASK_ROOT } from "../lib/execution-environments/sandbox-server.mjs";
 import { createSandboxTask } from "../lib/execution-environments/sandbox-task.mjs";
 
 // Started by Together's Hurdle API inside every Hurdle sandbox.
-// The sandbox lives as long as the one connection it serves.
+// The sandbox lives as long as its controller's connection, and for a short
+// window after it drops in which the same controller, holding the token, may
+// reconnect.
 const controlToken = process.env.HURDLE_SANDBOX_CONTROL_TOKEN;
 delete process.env.HURDLE_SANDBOX_CONTROL_TOKEN;
 const caPath = `${TASK_ROOT}/guardian-ca.pem`;
@@ -22,6 +24,7 @@ const server = createSandboxServer({
   caPath,
   readRoots: [ARTIFACT_ROOT],
   onClosed: () => process.exit(0),
+  reconnectWindowMs: RECONNECT_WINDOW_MS + 60_000,
 });
 const { port, flowPort } = await server.listen();
 process.stdout.write(`READY sandbox ${port} ${flowPort}\n`);
