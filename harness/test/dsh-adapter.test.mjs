@@ -247,6 +247,24 @@ test("dsh refuses unsafe or malformed provider files", () => {
   assert.throws(() => readDshProviders(envWith(), fileReader({ providers: {}, extra: 1 })), /exactly/);
 });
 
+test("dsh baseURL rules: https, or http on 127.0.0.1 only; no credentials, query or fragment", () => {
+  const base = PROVIDERS.providers["one-nexus"];
+  const read = (baseURL) => readDshProviders(envWith(), fileReader({ providers: { p: { ...base, baseURL } } }));
+  for (const baseURL of ["https://gw.example.test/v1", "http://127.0.0.1:8317/v1"])
+    assert.equal(read(baseURL).p.baseURL, baseURL);
+  for (const [baseURL, pattern] of [
+    ["https://user@gw.example.test/v1", /must not contain credentials, a query, or a fragment/],
+    [Object.assign(new URL("https://gw.example.test/v1"), { username: "u", password: "p" }).href, /must not contain credentials, a query, or a fragment/],
+    ["https://gw.example.test/v1?key=abc", /must not contain credentials, a query, or a fragment/],
+    ["https://gw.example.test/v1#frag", /must not contain credentials, a query, or a fragment/],
+    ["http://gw.example.test/v1", /must use https, or http on a loopback address/],
+    ["http://localhost:8317/v1", /must use 127\.0\.0\.1 rather than localhost/],
+    ["https://localhost:8317/v1", /must use 127\.0\.0\.1 rather than localhost/],
+    ["http://[::1]:8317/v1", /must use 127\.0\.0\.1 rather than \[::1\]/],
+    ["gw.example.test/v1", /must be an absolute URL/],
+  ]) assert.throws(() => read(baseURL), pattern, baseURL);
+});
+
 test("dsh routes only the selected provider's key and writes only its definition", () => {
   const adapter = createDshAdapter({
     runtimeEnv: envWith({ ONE_NEXUS_API_KEY: "one-nexus-secret-value", CLIPROXY_API_KEY: "cliproxy-secret-value", DEEPSEEK_API_KEY: "deepseek-secret-value" }),

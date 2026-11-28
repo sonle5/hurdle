@@ -14,6 +14,7 @@ import {
   togetherSandboxDockerfile,
   writeTogetherImageContext,
 } from "../lib/together-sandbox-setup.mjs";
+import { SETUP_AGENT_INTEGRITY, SETUP_AGENT_PACKAGES } from "../lib/managed-images.mjs";
 
 async function fixture(t, example = "copy-message") {
   const root = await mkdtemp(join(tmpdir(), "hurdle-together-setup-test-"));
@@ -178,12 +179,29 @@ test("Together Dockerfile includes pinned agents and Linux controller dependenci
     "codex",
     "claude-code",
   ]);
-  assert.match(text, /FROM node:22-bookworm/);
+  assert.match(text, /FROM node:24-bookworm/);
   assert.match(text, /util-linux passwd/);
   assert.match(text, /passwd iptables/);
   assert.match(text, /@anthropic-ai\/claude-code@2\.1\.288/);
   assert.match(text, /@openai\/codex@0\.159\.3/);
   assert.throws(() => togetherSandboxDockerfile(["unknown-agent"]));
+});
+
+test("the managed image pins dsh by exact version and verifies every Agent tarball's integrity", () => {
+  assert.equal(SETUP_AGENT_PACKAGES.dsh, "@deepseek-ai/dsh@0.2.2-rc.3");
+  assert.deepEqual(Object.keys(SETUP_AGENT_INTEGRITY).sort(), Object.keys(SETUP_AGENT_PACKAGES).sort());
+  for (const [id, spec] of Object.entries(SETUP_AGENT_PACKAGES)) {
+    assert.match(spec, /^@[a-z0-9-]+\/[a-z0-9-]+@\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/, `${id} is an exact pin`);
+    assert.match(SETUP_AGENT_INTEGRITY[id], /^sha512-[A-Za-z0-9+/]{86}==$/, `${id} has a sha512 integrity`);
+  }
+  const text = togetherSandboxDockerfile(["dsh", "codex", "claude-code"]);
+  const install = text.split("\n").find(line => line.includes("npm pack"));
+  assert.match(install, /npm pack --silent @anthropic-ai\/claude-code@2\.1\.288 @openai\/codex@0\.159\.3 @deepseek-ai\/dsh@0\.2\.2-rc\.3 /);
+  assert.match(install, /'4bee2851854a5ae7[0-9a-f]{112}  deepseek-ai-dsh-0\.2\.2-rc\.3\.tgz'/);
+  assert.match(install, /\| sha512sum --check --strict - && npm install --global \.\/anthropic-ai-claude-code-2\.1\.288\.tgz \.\/openai-codex-0\.159\.3\.tgz \.\/deepseek-ai-dsh-0\.2\.2-rc\.3\.tgz /);
+  // The install verifies before it installs and never installs from the registry by name.
+  assert.ok(install.indexOf("sha512sum") < install.indexOf("npm install"));
+  assert.doesNotMatch(install.slice(install.indexOf("npm install")), /@deepseek-ai\/dsh@/);
 });
 
 test("the Together image context bakes in the sandbox server and everything it loads", async (t) => {

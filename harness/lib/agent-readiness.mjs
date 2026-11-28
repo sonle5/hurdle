@@ -146,7 +146,8 @@ export async function checkAgentReadiness({
           checks.push(result("warning", "agent.model-unlisted", `The installed Codex does not list ${unlisted.join(", ")}, so it runs without that model's metadata and may lack tools such as apply_patch. Update Codex, or pick a model from \`${cliExecutable(cwd)} models --agent codex\`.`));
         }
       }
-    } else if (dsh) {
+    } else if (dsh && runtimeProfile.environment.kind !== "kubernetes") {
+      // The managed image carries dsh; Together's own sandbox image does not.
       checks.push(result("fail", "agent.environment-unsupported", `${label} is not in the ${sandboxLabel} image yet. Run dsh Suites with the local runtime.`));
       continue;
     } else {

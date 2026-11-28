@@ -2,7 +2,7 @@ import { mkdir, copyFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseProjectEnvironment } from "./project-environment.mjs";
-import { SETUP_AGENT_PACKAGES } from "./managed-images.mjs";
+import { SETUP_AGENT_PACKAGES, SETUP_AGENT_INTEGRITY } from "./managed-images.mjs";
 import { normalizeTogetherSettings } from "./execution-environments/together.mjs";
 import { asset } from "./execution-environments/guardian.mjs";
 import { ensureHostGuardianRuntime } from "./host-guardian-runtime.mjs";
@@ -41,10 +41,20 @@ export function togetherSandboxDockerfile(agents) {
   const selected = [...new Set(agents)].sort();
   if (!selected.length || selected.some((id) => !SETUP_AGENT_PACKAGES[id]))
     throw setupError("setup.agent", "This Suite selects an unsupported Agent.");
+  const specs = selected.map((id) => SETUP_AGENT_PACKAGES[id]);
+  // npm pack names scoped @scope/name@version as scope-name-version.tgz.
+  const files = specs.map((spec) => {
+    const at = spec.lastIndexOf("@");
+    return `${spec.slice(1, at).replace("/", "-")}-${spec.slice(at + 1)}.tgz`;
+  });
+  const sums = selected.map((id, index) =>
+    `${Buffer.from(SETUP_AGENT_INTEGRITY[id].slice("sha512-".length), "base64").toString("hex")}  ${files[index]}`);
   return [
-    "FROM node:22-bookworm",
+    // dsh needs Node >=24.9.0.
+    "FROM node:24-bookworm",
     "RUN apt-get update && apt-get install -y python3 iproute2 curl jq git ca-certificates util-linux passwd iptables && rm -rf /var/lib/apt/lists/*",
-    `RUN npm install --global ${selected.map((id) => SETUP_AGENT_PACKAGES[id]).join(" ")}`,
+    // Each Agent tarball must match its pinned registry integrity before install.
+    `RUN mkdir /tmp/agent-packages && cd /tmp/agent-packages && npm pack --silent ${specs.join(" ")} && printf '%s\\n' ${sums.map((sum) => `'${sum}'`).join(" ")} | sha512sum --check --strict - && npm install --global ${files.map((file) => `./${file}`).join(" ")} && cd / && rm -rf /tmp/agent-packages`,
     "RUN install -d -o root -g root -m 0755 /home/user",
     "WORKDIR /home/user",
     "",
