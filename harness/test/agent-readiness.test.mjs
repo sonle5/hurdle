@@ -498,3 +498,25 @@ test("dsh readiness refuses the Together sandbox", async () => {
   assert.equal(checked.ok, false);
   assert.ok(checked.checks.some(check => check.code === "agent.environment-unsupported"));
 });
+
+test("dsh readiness admits the Kubernetes sandbox, which carries dsh in its image", async () => {
+  const check = (runtimeEnv) => checkAgentReadiness({
+    runtimeProfile: { environment: { kind: "kubernetes", tokenEnv: "K8S_TOKEN" }, resultStore: { kind: "local" } },
+    agentSelections: [{ adapterId: "dsh" }],
+    runtimeEnv,
+  }, {
+    probeCli() { assert.fail("Local executable does not establish sandbox readiness"); },
+    fetch() { assert.fail("Readiness does not call the cluster or the provider"); },
+    findHostGuardian: () => ({}),
+  });
+  const ready = await check({ DEEPSEEK_API_KEY: "sk-deepseek-secret", K8S_TOKEN: "cluster-secret" });
+  assert.equal(ready.ok, true, JSON.stringify(ready));
+  assert.equal(ready.checks.some(value => value.code === "agent.environment-unsupported"), false);
+  assert.equal(ready.checks.find(value => value.code === "agent.remote-unverified").message,
+    "DeepSeek Harness runs inside the Kubernetes sandbox; no local CLI installation needed.");
+  assert.equal(ready.checks.find(value => value.code === "auth.key-unverified").status, "warning");
+  assert.doesNotMatch(JSON.stringify(ready), /sk-deepseek-secret|cluster-secret/);
+  const missing = await check({ K8S_TOKEN: "cluster-secret" });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.checks.find(value => value.code === "auth.missing").status, "fail");
+});

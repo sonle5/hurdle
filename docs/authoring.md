@@ -383,7 +383,8 @@ receives only the stand-in and rejects the request.
 
 `runner: "dsh"` runs DeepSeek Harness (`dsh`, on your `PATH`) with its headless
 profile, which allows workspace writes, shell commands, and web search and
-fetch. It runs only with the local runtime; Together setup refuses it. Hurdle
+fetch. It runs with the local runtime, or in the Kubernetes sandbox, whose
+managed image carries a pinned `dsh`; Together setup refuses it. Hurdle
 writes the model choice to `.hurdle/dsh-patch.json` in the workspace and does
 not read your `~/.dsh` profile or credentials.
 
