@@ -12,6 +12,7 @@ import {
 } from "../execution-progress.mjs";
 import { deepFreeze, RunSelectionInputError } from "../run-model.mjs";
 import { createTogetherSocketProvider } from "./together-socket-provider.mjs";
+import { createEngineBridge, normalizeEngineBridgeConfig } from "./engine-bridge.mjs";
 import { randomBytes } from "node:crypto";
 import { sealCredentialBindings } from "../sealed-credential-delivery.mjs";
 import {
@@ -244,7 +245,11 @@ export function createGuardedSandboxEnvironment({
   captureMaxBytes = DEFAULT_CONTROLLER_CAPTURE_MAX_BYTES,
   progressObserver = null,
   entropy = defaultEntropy,
+  // Operator settings for the `nexus-compiler` engine bridge
+  // (engine-bridge.mjs); null serves no engine calls.
+  engineBridge = null,
 }) {
+  if (engineBridge !== null) normalizeEngineBridgeConfig(engineBridge);
   if (typeof entropy !== "function")
     throw new TypeError(`${label} Execution Environment entropy must be a function`);
   if (["prepare", "attach", "seal"].some((method) => typeof guardian?.[method] !== "function"))
@@ -319,6 +324,7 @@ export function createGuardedSandboxEnvironment({
             reason: "execution-not-started",
           }));
           let workspaceArtifacts = null;
+          let bridge = null;
           let coordinatorFailure;
           const failure = (error) =>
             integrityIssues.push(
@@ -377,6 +383,12 @@ export function createGuardedSandboxEnvironment({
             });
             await guardian.attach({ workload: resource,
               session: guardianSession, signal: envelope.signal });
+            if (engineBridge !== null) {
+              if (typeof resource.attachEngine !== "function")
+                throw new TypeError(`${label} provider cannot serve engine calls`);
+              bridge = createEngineBridge(engineBridge);
+              resource.attachEngine(bridge);
+            }
             active(envelope.signal);
             try {
               await executeAgent(envelope, async (program) => {
@@ -491,6 +503,9 @@ export function createGuardedSandboxEnvironment({
           } catch (error) {
             failure(error);
           } finally {
+            // A call still running when the run ends is stopped before the
+            // sandbox goes, so it cannot outlive the run.
+            await bridge?.close();
             if (resources.length) reportStatus("stopping-sandboxes");
             try { await guardian.close?.(guardianSession); }
             catch {
@@ -529,6 +544,7 @@ export function createGuardedSandboxEnvironment({
             workspaceArtifacts,
             integrityIssues,
             egressCollections,
+            engineCalls: bridge ? bridge.log() : null,
           });
         },
       );

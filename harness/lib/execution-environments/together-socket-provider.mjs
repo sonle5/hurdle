@@ -113,28 +113,56 @@ export function createSocketResource(socket, { label = "Together", sandbox } = {
   const flows = new Set();
   let nextId = 1;
   let openUpstream = null;
+  let engine = null;
   let failure = null;
   let closed = false;
+  // Server streams not yet known to be egress or an engine call. The server
+  // names an engine stream on the control channel after its SYN and before
+  // any of its bytes, so a stream whose first bytes arrive unnamed is egress.
+  const unsorted = new Map();
 
-  // Every stream the server opens is one of the Agent's egress connections.
+  function routeEngine(stream) {
+    if (!engine) return stream.destroy();
+    engine.handle(stream);
+  }
+
+  function routeEgress(stream) {
+    let tcp;
+    try { tcp = openUpstream?.(); } catch { tcp = null; }
+    if (!tcp) return stream.destroy();
+    flows.add(tcp);
+    const teardown = () => { flows.delete(tcp); tcp.destroy(); stream.destroy(); };
+    tcp.on("error", teardown);
+    stream.on("error", teardown);
+    tcp.once("close", teardown);
+    stream.pipe(tcp);
+    tcp.pipe(stream);
+  }
+
   const session = muxOver(socket, {
     client: true,
     onStream: (stream) => {
-      let tcp;
-      try { tcp = openUpstream?.(); } catch { tcp = null; }
-      if (!tcp) return stream.destroy();
-      flows.add(tcp);
-      const teardown = () => { flows.delete(tcp); tcp.destroy(); stream.destroy(); };
-      tcp.on("error", teardown);
-      stream.on("error", teardown);
-      tcp.once("close", teardown);
-      stream.pipe(tcp);
-      tcp.pipe(stream);
+      // Nothing reads the stream until it is sorted; its first bytes, or its
+      // end, sort it as egress unless the control channel named it first.
+      unsorted.set(stream.id, stream);
+      const sort = () => {
+        if (unsorted.get(stream.id) !== stream) return;
+        unsorted.delete(stream.id);
+        routeEgress(stream);
+      };
+      stream.once("readable", sort);
+      stream.once("close", () => { if (unsorted.get(stream.id) === stream) unsorted.delete(stream.id); });
     },
   });
   const control = session.open();
   control.on("error", () => {});
   readLines(control, (message) => {
+    if (message.op === "engine") {
+      const stream = unsorted.get(message.stream);
+      if (!stream) return;
+      unsorted.delete(message.stream);
+      return routeEngine(stream);
+    }
     const request = pending.get(message.id);
     if (!request) return;
     pending.delete(message.id);
@@ -149,6 +177,7 @@ export function createSocketResource(socket, { label = "Together", sandbox } = {
     pending.clear();
     for (const tcp of [...flows]) tcp.destroy();
     session.close();
+    engine?.close();
   });
   socket.on("error", (error) => { failure ||= error; });
 
@@ -207,6 +236,11 @@ export function createSocketResource(socket, { label = "Together", sandbox } = {
     async attachEgress({ hosts, openUpstream: upstream, signal }) {
       openUpstream = upstream;
       await resource.step({ kind: "setup", hosts, ...(sandbox ? { sandbox } : {}) }, { signal });
+    },
+    // `bridge` serves the `nexus-compiler` shim's calls (engine-bridge.mjs).
+    // Without one, engine streams are refused.
+    attachEngine(bridge) {
+      engine = bridge;
     },
     assertEgressHealthy() {
       if (closed) throw failure;

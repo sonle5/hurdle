@@ -61,10 +61,12 @@ const IMAGE_ROOT = "/opt/hurdle";
 export const TOGETHER_SERVER_COMMAND = `node ${IMAGE_ROOT}/harness/bin/hurdle-sandbox-server.mjs`;
 export const IMAGE_CONTEXT_FILES = Object.freeze([
   "bin/hurdle-sandbox-server.mjs",
+  "bin/nexus-compiler.mjs",
   "lib/authority-profile.mjs",
   "lib/controller-transcript.mjs",
   "lib/run-model.mjs",
   "lib/execution-environments/guardian.mjs",
+  "lib/execution-environments/engine-shim.mjs",
   "lib/execution-environments/linux-sandbox-operations.mjs",
   "lib/execution-environments/local-workload.mjs",
   "lib/execution-environments/sandbox-server.mjs",
@@ -89,6 +91,8 @@ export function togetherImageDockerfile(agents) {
     togetherSandboxDockerfile(agents).trimEnd(),
     `COPY hurdle/ ${IMAGE_ROOT}/`,
     `RUN cd ${IMAGE_ROOT} && npm ci --omit=dev --ignore-scripts --no-audit --no-fund`,
+    // The Agent's only way to the engine: the shim, under its own name.
+    `RUN chmod 0755 ${IMAGE_ROOT}/harness/bin/nexus-compiler.mjs && ln -s ${IMAGE_ROOT}/harness/bin/nexus-compiler.mjs /usr/local/bin/nexus-compiler`,
     "",
   ].join("\n");
 }

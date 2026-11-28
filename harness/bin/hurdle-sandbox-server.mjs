@@ -23,5 +23,5 @@ const server = createSandboxServer({
   readRoots: [ARTIFACT_ROOT],
   onClosed: () => process.exit(0),
 });
-const { port, flowPort } = await server.listen();
-process.stdout.write(`READY sandbox ${port} ${flowPort}\n`);
+const { port, flowPort, enginePort } = await server.listen();
+process.stdout.write(`READY sandbox ${port} ${flowPort} ${enginePort}\n`);
