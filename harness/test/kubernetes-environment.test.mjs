@@ -82,6 +82,7 @@ async function fakeCluster(t, {
         runTask: async (job) => { jobs.push(job); return { ok: true }; },
         port: 0,
         flowPort: 0,
+        enginePort: 0,
         caPath: join(taskRoot, "guardian-ca.pem"),
         writeRoots: [taskRoot],
         readRoots: [artifactRoot],

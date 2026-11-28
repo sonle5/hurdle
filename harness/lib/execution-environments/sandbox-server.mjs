@@ -5,10 +5,12 @@ import { createRequire } from "node:module";
 import net from "node:net";
 import { dirname, resolve } from "node:path";
 
+import { ENGINE_PORT } from "./engine-shim.mjs";
 import {
   createStreamClaims,
   isId,
   MAX_ACTIVE_FLOWS,
+  MAX_ENGINE_CALLS,
   MAX_FRAME_BYTES,
   muxOver,
   readAll,
@@ -20,6 +22,8 @@ import {
 // connects the client's one WebSocket to it, so this socket is the only way in:
 // the controller writes task inputs, runs task steps and reads sealed results
 // over it, and the Agent's egress flows ride it to the controller's Guardian.
+// The `nexus-compiler` shim's calls ride it too, to the controller's engine
+// bridge (engine-bridge.mjs).
 
 export const TASK_ROOT = "/tmp/hurdle-task";
 const MAX_WRITE_BYTES = 256 * 1024 * 1024;
@@ -49,6 +53,7 @@ export function createSandboxServer({
   runTask,
   port = 18083,
   flowPort = 18082,
+  enginePort = ENGINE_PORT,
   caPath = `${TASK_ROOT}/guardian-ca.pem`,
   writeRoots = [TASK_ROOT],
   readRoots = [],
@@ -68,6 +73,7 @@ export function createSandboxServer({
     noServer: true, perMessageDeflate: false, maxPayload: MAX_FRAME_BYTES,
   });
   const flows = new Set();
+  const engineCalls = new Set();
   let client = null;
   let session = null;
   let control = null;
@@ -92,6 +98,26 @@ export function createSandboxServer({
     socket.on("error", teardown);
     stream.on("error", teardown);
     socket.once("close", teardown);
+    socket.pipe(stream);
+    stream.pipe(socket);
+  });
+
+  // Each connection the shim makes to the loopback engine port is one engine
+  // call. The stream is named on the control channel before any of its bytes
+  // are sent, so the controller tells it from egress without reading them.
+  const engine = net.createServer({ allowHalfOpen: true }, (socket) => {
+    if (!session || session.closed || !control || engineCalls.size >= MAX_ENGINE_CALLS) {
+      socket.destroy();
+      return;
+    }
+    const stream = session.open();
+    send({ op: "engine", stream: stream.id });
+    engineCalls.add(socket);
+    const teardown = () => { engineCalls.delete(socket); socket.destroy(); stream.destroy(); };
+    socket.on("error", teardown);
+    stream.on("error", teardown);
+    socket.once("close", teardown);
+    stream.once("close", teardown);
     socket.pipe(stream);
     stream.pipe(socket);
   });
@@ -179,7 +205,7 @@ export function createSandboxServer({
     websocket.once("close", () => {
       clearInterval(heartbeat);
       claims.discard();
-      for (const socket of [...flows]) socket.destroy();
+      for (const socket of [...flows, ...engineCalls]) socket.destroy();
       session.close();
       client = null;
       session = null;
@@ -215,17 +241,22 @@ export function createSandboxServer({
         relay.listen(flowPort, "127.0.0.1", ready);
       });
       await new Promise((ready, failed) => {
+        engine.once("error", failed);
+        engine.listen(enginePort, "127.0.0.1", ready);
+      });
+      await new Promise((ready, failed) => {
         server.once("error", failed);
         server.listen(port, host, ready);
       });
-      return { port: server.address().port, flowPort: relay.address().port };
+      return { port: server.address().port, flowPort: relay.address().port, enginePort: engine.address().port };
     },
     async close() {
       client?.terminate();
-      for (const socket of [...flows]) socket.destroy();
+      for (const socket of [...flows, ...engineCalls]) socket.destroy();
       await Promise.all([
         new Promise((done) => server.close(() => done())),
         new Promise((done) => relay.close(() => done())),
+        new Promise((done) => engine.close(() => done())),
       ]);
     },
   });

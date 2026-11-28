@@ -138,6 +138,7 @@ async function codexSandbox(t, root, { controlToken, stdout, stderr = "", exitCo
     },
     port: 0,
     flowPort: 0,
+    enginePort: 0,
     caPath: join(taskRoot, "guardian-ca.pem"),
     writeRoots: [taskRoot],
     readRoots: [artifactRoot],

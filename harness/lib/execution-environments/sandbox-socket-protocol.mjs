@@ -18,13 +18,19 @@ import { Session } from "./yamux.mjs";
 //   {op:"read",  id, path, stream}         the server ends the stream after the
 //                                          file's bytes
 //   {op:"done",  id, value} | {op:"error", id, message}   the server's answer
+//   {op:"engine", stream}                  the server opened this stream for
+//                                          one `nexus-compiler` shim call
 //
-// Every stream the server opens is one egress connection from the Agent,
-// relayed verbatim to the controller's Guardian. Each stream has its own flow
-// control, so a slow consumer holds back only its own sender.
+// Every other stream the server opens is one egress connection from the
+// Agent, relayed verbatim to the controller's Guardian. An engine stream is
+// named on the control channel before any of its bytes are sent, so the
+// controller tells the two apart without reading egress bytes. Each stream has
+// its own flow control, so a slow consumer holds back only its own sender.
 
 export const MAX_FRAME_BYTES = 1024 * 1024;
 export const MAX_ACTIVE_FLOWS = 512;
+// Engine calls in flight at once; the bridge allows one per verb.
+export const MAX_ENGINE_CALLS = 8;
 export const MAX_CONTROL_LINE_BYTES = 64 * 1024;
 // How long the server waits for a stream an op names to arrive. The stream's
 // SYN precedes the op on the wire, so this covers only a misbehaving peer.
@@ -59,7 +65,7 @@ export function websocketDuplex(ws) {
 // a session failure ends the socket.
 export function muxOver(ws, { client, onStream }) {
   const transport = websocketDuplex(ws);
-  const session = new Session({ client, onStream, acceptBacklog: MAX_ACTIVE_FLOWS + 8 });
+  const session = new Session({ client, onStream, acceptBacklog: MAX_ACTIVE_FLOWS + MAX_ENGINE_CALLS + 8 });
   session.on("error", () => ws.terminate());
   session.pipe(transport);
   transport.pipe(session);

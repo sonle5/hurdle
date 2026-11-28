@@ -99,6 +99,32 @@ the TLS inside it. The server does no filtering; there is no other way out, and
 the Guardian decides. The Guardian refuses non-public destinations, so the Agent
 cannot reach your machine's loopback or network through it.
 
+**Engine calls.** The image puts a `nexus-compiler` shim on the Agent's `PATH`.
+Only that name is served: there is no `python3 -m nexus_compiler` in the
+sandbox, and the shim never runs the engine there. Each shim call connects to the
+server's loopback engine port, `127.0.0.1:18084`, and the server opens one stream
+for it, naming it on the control channel with `{"op":"engine","stream":id}`
+before any of its bytes. Hurdle tells it from egress by that notice alone, so
+egress bytes stay verbatim. On the stream the shim sends `{"argv":[...]}` and a
+newline, then its stdin (only for `--forward -`), then ends its half. Hurdle
+answers with frames of a type byte and a 4-byte big-endian length: stdout (1),
+stderr (2), and last the exit (3) `{"exit_code","refused"}`. The shim exits with
+the call's code, or 2 with a message when the bridge refused it.
+
+On your machine the engine bridge checks the argv against the profile you chose,
+`loop` (`engine submit|status|records`) or `setup` (`lock`, `check`,
+`engine status|records`), and runs your configured command prefix (such as
+`kubectl exec ... -- python3 -m nexus_compiler`) with the checked argv and no
+shell. `--root`, `--engine-id`, and for setup `--task`, `--start-root`,
+`--model-dir` and `--runtime`, are pinned from your settings: the bridge adds
+them, and refuses a call that gives one another value or repeats it. `records`
+always runs with `--hold`, and its tar stream must end with its end-of-archive
+marker. Stdin is at most 1 MiB, one call per verb runs at a time, `status` is
+rate limited, `records` output is capped (256 MiB by default), and setup's
+`lock --hours` must fit the remaining budget. Every call, refusals included, is
+a line of the run's `engine-calls` evidence (`engine-calls.jsonl`). A call still
+running when the run ends or the stream closes is sent SIGTERM.
+
 **Ending.** Closing the socket from either side terminates the sandbox. Hurdle
 closes it after the last step; Together terminates the sandbox when either side
 closes, and a one-hour ttl is the backstop.
@@ -112,7 +138,8 @@ harness modules the server loads, and the Agent's Node runtime, under
 that requires the token. Together runs
 `node /opt/hurdle/harness/bin/hurdle-sandbox-server.mjs` as root once the sandbox
 is running, with the sandbox launched as above and the egress proxy on
-`127.0.0.1:18082`. The server listens on 18083, which is the one admitted port.
+`127.0.0.1:18082` and the engine port on `127.0.0.1:18084`. The server listens
+on 18083, which is the one admitted port.
 
 Everything else about a run, including the Guardian, capture, request blocking
 and credential substitution, is as described in

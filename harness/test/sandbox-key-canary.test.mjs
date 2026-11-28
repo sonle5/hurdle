@@ -119,6 +119,7 @@ test("Together's Hurdle socket sends no real key into the sandbox", async (t) =>
     },
     port: 0,
     flowPort: 0,
+    enginePort: 0,
     caPath: join(taskRoot, "guardian-ca.pem"),
     writeRoots: [taskRoot],
     readRoots: [artifactRoot],

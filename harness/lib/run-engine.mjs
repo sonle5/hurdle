@@ -328,6 +328,25 @@ function observedEvidenceMetadata({ capturedAt, lifecyclePhase, provenance, trus
   };
 }
 
+// The engine bridge's call log (engine-calls.jsonl), stored as lifecycle
+// evidence `engine-calls`. The bridge wrote it on the controller host, and its
+// argv holds only values the bridge allowed or pinned.
+async function persistEngineCalls(writer, runId, observed) {
+  if (!observed.engineCalls) return {};
+  const reference = await writer.putEvidence(runId, {
+    kind: "canonical-evidence",
+    bytes: Buffer.from(observed.engineCalls),
+    mediaType: "application/x-ndjson",
+    ...observedEvidenceMetadata({
+      capturedAt: new Date().toISOString(),
+      lifecyclePhase: "execute",
+      provenance: "controller_engine_bridge",
+      trust: "controller_observed",
+    }),
+  });
+  return { lifecycle: { "engine-calls": reference } };
+}
+
 async function persistEgressCollections(
   writer,
   runId,
@@ -837,6 +856,7 @@ async function runOne({
         prepared.snapshot.target.egress.blockedRequests,
         prepared.snapshot.target.egress.relevantHosts,
       );
+      const engineCalls = await persistEngineCalls(writer, id, observed);
       const authorityFields = authorityRecordFields({
         snapshot: prepared.snapshot,
         checks: [],
@@ -862,6 +882,7 @@ async function runOne({
           structured: evaluatorSourceEvidence,
           artifacts: [],
           egress: egress.manifest,
+          ...engineCalls,
         },
       });
       const stored = await writer.transition(1, completed);
@@ -1021,6 +1042,7 @@ async function runOne({
       prepared.snapshot.target.egress.blockedRequests,
       prepared.snapshot.target.egress.relevantHosts,
     );
+    const engineCalls = await persistEngineCalls(writer, id, observed);
     const evaluatorArtifacts = artifacts.map((artifact) => {
       const sealed = artifactManifest.find(({ path }) => path === artifact.path);
       return {
@@ -1140,6 +1162,7 @@ async function runOne({
         ],
         artifacts: artifactManifest,
         egress: egress.manifest,
+        ...engineCalls,
       },
     });
     const stored = await writer.transition(1, completed);
